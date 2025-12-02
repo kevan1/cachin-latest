@@ -9,7 +9,7 @@ export default function BalanceScreen() {
   const router = useRouter();
 
   const [balances, setBalances] = useState<TokenBalances>({ sol: 0, usdc: 0, usdt: 0 });
-  const [prices, setPrices] = useState<TokenPrices>({ sol: 0, usdc: 1, usdt: 1 });
+  const [prices, setPrices] = useState<TokenPrices>({ sol: 0, usdc: 1, usdt: 1, mon: 0 });
   const [loading, setLoading] = useState(false);
 
   const { wallets } = useEmbeddedSolanaWallet();

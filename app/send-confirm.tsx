@@ -5,6 +5,7 @@ import { Connection, PublicKey, Transaction } from '@solana/web3.js';
 import { getAssociatedTokenAddress, createTransferInstruction, createAssociatedTokenAccountInstruction, TOKEN_PROGRAM_ID } from '@solana/spl-token';
 import { saveTransaction } from '@/utils/transactionStorage';
 import { Transaction as TransactionType } from '@/types/types';
+import { ChainType } from '@/constants/chains';
 import { useEmbeddedSolanaWallet } from '@privy-io/expo';
 
 // USDC Token Mint Address on Solana Mainnet
@@ -236,6 +237,7 @@ const router = useRouter();
         signature,
         type: 'send',
         currency: 'USDC',
+        chain: ChainType.SOLANA,
         amount: parseFloat(amount as string),
         recipient: recipient as string,
         address: recipientAddress,

@@ -19,6 +19,7 @@ import {
 } from "@expo-google-fonts/inter";
 import { useFonts } from "expo-font";
 import { usePrivy } from "@privy-io/expo";
+import { monadTestnet } from "@/constants/chains";
 
 class ErrorBoundary extends Component<
   { children: ReactNode },
@@ -96,6 +97,11 @@ export default function RootLayout() {
         <PrivyProvider
           appId={Constants.expoConfig?.extra?.privyAppId}
           clientId={Constants.expoConfig?.extra?.privyClientId}
+          supportedChains={[monadTestnet]}
+          embeddedWallets={{
+            createOnLogin: 'all-wallets',
+            noPromptOnSignature: false,
+          }}
         >
           <AppNavigator />
           <PrivyElements />

@@ -6,6 +6,7 @@ export interface TokenPrices {
   sol: number;
   usdc: number;
   usdt: number;
+  mon: number;
 }
 
 // Price cache
@@ -52,6 +53,7 @@ export async function fetchTokenPrices(forceFresh: boolean = false): Promise<Tok
       sol: data.solana?.usd || 0,
       usdc: data['usd-coin']?.usd || 1, // USDC is pegged to $1
       usdt: data.tether?.usd || 1, // USDT is pegged to $1
+      mon: 0, // MON is not yet on CoinGecko - will be added when available
     };
     
     // Update cache
@@ -75,6 +77,7 @@ export async function fetchTokenPrices(forceFresh: boolean = false): Promise<Tok
       sol: 140,
       usdc: 1,
       usdt: 1,
+      mon: 0, // MON testnet has no real value
     };
   }
 }

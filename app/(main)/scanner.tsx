@@ -3,7 +3,6 @@ import { StyleSheet, View, Text, TouchableOpacity, ScrollView } from "react-nati
 import { CameraView, Camera } from "expo-camera";
 import { useRouter, useFocusEffect } from "expo-router";
 import QRCode from 'react-native-qrcode-svg';
-// import { useTurnkey } from '@turnkey/react-native-wallet-kit';
 import * as Clipboard from 'expo-clipboard';
 import BottomSheet, { BottomSheetView, BottomSheetBackdrop } from '@gorhom/bottom-sheet';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';

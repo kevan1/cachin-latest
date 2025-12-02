@@ -1,5 +1,6 @@
 import { Connection, PublicKey, ParsedTransactionWithMeta, ConfirmedSignatureInfo } from '@solana/web3.js';
 import { Transaction } from '@/types/types';
+import { ChainType } from '@/constants/chains';
 import { saveTransaction, transactionExists, getTransactions } from './transactionStorage';
 
 const SOLANA_MAINNET_RPC = 'https://solxar.mainnet.rpcpool.com/efba4db1-e231-40f6-a16f-6e24e8f72b5c';
@@ -171,6 +172,7 @@ function parseTransaction(
       signature,
       type,
       currency: 'SOL',
+      chain: ChainType.SOLANA,
       amount: Math.abs(balanceChange) / 1000000000, // Convert lamports to SOL
       address: otherPartyAddress,
       sender: type === 'receive' ? otherPartyAddress : undefined,
@@ -294,6 +296,7 @@ function parseTokenTransfer(
         signature,
         type,
         currency: 'USDC' as const,
+        chain: ChainType.SOLANA,
         amount: Math.abs(amountChange),
         address: otherPartyAddress,
         sender: type === 'receive' ? otherPartyAddress : undefined,

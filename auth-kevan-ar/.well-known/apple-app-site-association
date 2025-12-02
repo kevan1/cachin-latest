@@ -1,5 +1,14 @@
 {
+  "applinks": {
+    "apps": [],
+    "details": [
+      {
+        "appID": "G69A563QHR.app.cachin",
+        "paths": ["*"]
+      }
+    ]
+  },
   "webcredentials": {
-    "apps": ["G69A563QHR.dev.privy.example"]
+    "apps": ["G69A563QHR.app.cachin"]
   }
 }

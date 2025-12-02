@@ -154,6 +154,7 @@ export default function Index() {
     onSuccess: () => {
       console.log('Login successful');
       setLoading(false);
+      router.replace('/(main)');
     },
   });
 

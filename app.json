@@ -1,9 +1,12 @@
 {
   "expo": {
-    "name": "@privy-io/expo-starter",
-    "slug": "expo-starter",
+    "name": "cachin",
+    "slug": "cachin-wbtrjxlnujya3x0gt6j37",
     "version": "1.0.0",
-    "platforms": ["ios", "android"],
+    "platforms": [
+      "ios",
+      "android"
+    ],
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "myapp",
@@ -16,14 +19,16 @@
     "ios": {
       "usesAppleSignIn": true,
       "supportsTablet": true,
-      "bundleIdentifier": "dev.privy.example",
+      "bundleIdentifier": "app.cachin",
       "associatedDomains": [
+        "applinks:auth.kevan.ar",
         "webcredentials:auth.kevan.ar"
       ],
       "infoPlist": {
         "NSAppTransportSecurity": {
           "NSAllowsArbitraryLoads": true
-        }
+        },
+        "ITSAppUsesNonExemptEncryption": false
       },
       "appleTeamId": "G69A563QHR"
     },
@@ -32,7 +37,7 @@
         "foregroundImage": "./assets/images/adaptive-icon.png",
         "backgroundColor": "#ffffff"
       },
-      "package": "dev.privy.example",
+      "package": "app.cachin",
       "intentFilters": [
         {
           "action": "VIEW",
@@ -43,14 +48,21 @@
               "host": "auth.kevan.ar"
             }
           ],
-          "category": ["BROWSABLE", "DEFAULT"]
+          "category": [
+            "BROWSABLE",
+            "DEFAULT"
+          ]
         }
       ]
     },
     "extra": {
       "privyAppId": "cmhkyp8d300kijs0cl8zhq2rr",
       "privyClientId": "client-WY6SUsXVEy3siy55Asq2EJNyWLrzWgre6jpZDJMAXXFbQ",
-      "passkeyAssociatedDomain": "https://auth.kevan.ar"
+      "passkeyAssociatedDomain": "https://auth.kevan.ar",
+      "router": {},
+      "eas": {
+        "projectId": "3e5e72a6-c0dc-4d3b-adb6-cc5ea4f441ed"
+      }
     },
     "plugins": [
       "expo-router",
@@ -72,6 +84,7 @@
     ],
     "experiments": {
       "typedRoutes": true
-    }
+    },
+    "owner": "kevan1"
   }
 }

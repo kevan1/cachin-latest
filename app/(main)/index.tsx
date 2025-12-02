@@ -1,5 +1,4 @@
 import { StyleSheet, ScrollView, TouchableOpacity, Alert, View, Text, RefreshControl, Linking } from "react-native";
-// import { useTurnkey } from "@turnkey/react-native-wallet-kit";
 import { useRouter } from 'expo-router';
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import * as Clipboard from 'expo-clipboard';
@@ -11,10 +10,11 @@ import BottomSheet, { BottomSheetView, BottomSheetBackdrop } from '@gorhom/botto
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { getUsername, saveUsername } from '@/utils/userStorage';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { fetchTokenPrices } from '@/utils/priceService';
-import { fetchAllTokenBalances } from '@/utils/balanceService';
+import { fetchMultiChainBalances } from '@/utils/multiChainBalanceService';
+import { ChainType } from '@/constants/chains';
+import { ChainFilter, loadSelectedChain, saveSelectedChain } from '@/utils/chainStorage';
 import Svg, { Path } from 'react-native-svg';
-import { usePrivy, useEmbeddedSolanaWallet } from '@privy-io/expo';
+import { usePrivy, useEmbeddedSolanaWallet, useEmbeddedEthereumWallet } from '@privy-io/expo';
 
 
 // Icon components using LineIcons style
@@ -72,7 +72,8 @@ export default function HomeScreen() {
   const router = useRouter();
   const { logout } = usePrivy();
   const { wallets: solanaWallets } = useEmbeddedSolanaWallet();
-  // const [balance] = useState<string>('0.00');
+  const { wallets: evmWallets } = useEmbeddedEthereumWallet();
+  const [selectedChain, setSelectedChain] = useState<ChainFilter>('all');
   const [usdBalance, setUsdBalance] = useState<string>('0.00');
   // const [isLoadingBalance] = useState(false);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
@@ -85,6 +86,46 @@ export default function HomeScreen() {
   
   const bottomSheetRef = useRef<BottomSheet>(null);
   const snapPoints = useMemo(() => ['75%'], []);
+  
+  // Load saved chain preference
+  useEffect(() => {
+    loadSelectedChain().then(setSelectedChain);
+  }, []);
+  
+  // Get the first EVM address
+  const getEvmAddress = () => {
+    if (evmWallets && evmWallets.length > 0) {
+      const wallet = evmWallets[0];
+      return wallet.address || null;
+    }
+    return null;
+  };
+  
+  const getEvmAddressShort = () => {
+    const addr = getEvmAddress();
+    if (addr) {
+      return `${addr.slice(0, 4)}...${addr.slice(-4)}`;
+    }
+    return null;
+  };
+  
+  // Get display address based on selected chain
+  const getDisplayAddress = () => {
+    if (selectedChain === ChainType.MONAD) {
+      return getEvmAddressShort();
+    } else if (selectedChain === ChainType.SOLANA) {
+      return getSolanaAddress();
+    } else {
+      // For 'all', show Solana address by default
+      return getSolanaAddress();
+    }
+  };
+  
+  // Handle chain selection
+  const handleChainSelect = (chain: ChainFilter) => {
+    setSelectedChain(chain);
+    saveSelectedChain(chain);
+  };
   
   // Get full Solana address for username lookup
   const getFullSolanaAddressForUsername = () => {
@@ -151,22 +192,28 @@ export default function HomeScreen() {
   console.log('Solana address to display:', solanaAddress);
   
   // Fetch all token balances and calculate USD value
-  const fetchBalance = async (address: string, forceFresh: boolean = false) => {
+  const fetchBalance = async (forceFresh: boolean = false) => {
     try {
-      // Fetch token balances and prices in parallel
-      const [balances, prices] = await Promise.all([
-        fetchAllTokenBalances(address, forceFresh),
-        fetchTokenPrices(forceFresh),
-      ]);
+      const solAddress = getFullSolanaAddress();
+      const evmAddr = getEvmAddress();
       
-      console.log('Token balances:', balances);
-      console.log('Token prices:', prices);
+      const multiBalances = await fetchMultiChainBalances(
+        solAddress,
+        evmAddr,
+        forceFresh
+      );
       
-      // Calculate total USD value
-      const totalUsd = 
-        (balances.sol * prices.sol) +
-        (balances.usdc * prices.usdc) +
-        (balances.usdt * prices.usdt);
+      console.log('Multi-chain balances:', multiBalances);
+      
+      // Calculate total based on selected chain filter
+      let totalUsd = 0;
+      if (selectedChain === 'all') {
+        totalUsd = multiBalances.totalUsd;
+      } else if (selectedChain === ChainType.SOLANA && multiBalances.solana) {
+        totalUsd = multiBalances.solana.totalUsd;
+      } else if (selectedChain === ChainType.MONAD && multiBalances.monad) {
+        totalUsd = multiBalances.monad.totalUsd;
+      }
       
       setUsdBalance(totalUsd.toFixed(2));
       console.log('Total USD balance:', totalUsd.toFixed(2));
@@ -228,7 +275,7 @@ export default function HomeScreen() {
     // Clear cache to force fresh fetch
     await clearTransactions();
     await Promise.all([
-      fetchBalance(fullAddress, true), // Force fresh prices on manual refresh
+      fetchBalance(true), // Force fresh prices on manual refresh
       fetchTransactions(fullAddress),
     ]);
     setIsRefreshing(false);
@@ -241,7 +288,7 @@ export default function HomeScreen() {
     if (!fullAddress) return;
     
     // Initial fetch
-    fetchBalance(fullAddress);
+    fetchBalance();
     fetchTransactions(fullAddress);
     
     // Start polling for new transactions
@@ -257,7 +304,7 @@ export default function HomeScreen() {
     
     // Refresh balance every 2 minutes (less aggressive to avoid rate limits)
     const balanceInterval = setInterval(() => {
-      fetchBalance(fullAddress);
+      fetchBalance();
     }, 120000); // 2 minutes
     
     return () => {
@@ -265,7 +312,7 @@ export default function HomeScreen() {
       stopPolling();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [solanaWallets]);
+  }, [solanaWallets, evmWallets, selectedChain]);
   
   // Format transaction for display
   const formatTransaction = (tx: Transaction) => {
@@ -398,15 +445,37 @@ export default function HomeScreen() {
           <Text style={styles.username}>{username}</Text>
           <Text style={styles.verifiedBadge}>✓</Text>
         </TouchableOpacity>
-        {solanaAddress ? (
+        {getDisplayAddress() ? (
           <TouchableOpacity style={styles.addressBadge} onPress={handleCopyAddress}>
-            <Text style={styles.addressText}>{solanaAddress}</Text>
+            <Text style={styles.addressText}>{getDisplayAddress()}</Text>
           </TouchableOpacity>
         ) : (
           <View style={styles.addressBadge}>
             <Text style={styles.addressText}>No wallet</Text>
           </View>
         )}
+      </View>
+
+      {/* Chain Selector Tabs */}
+      <View style={styles.chainSelector}>
+        <TouchableOpacity
+          style={[styles.chainTab, selectedChain === 'all' && styles.chainTabActive]}
+          onPress={() => handleChainSelect('all')}
+        >
+          <Text style={[styles.chainTabText, selectedChain === 'all' && styles.chainTabTextActive]}>All</Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={[styles.chainTab, selectedChain === ChainType.SOLANA && styles.chainTabActive]}
+          onPress={() => handleChainSelect(ChainType.SOLANA)}
+        >
+          <Text style={[styles.chainTabText, selectedChain === ChainType.SOLANA && styles.chainTabTextActive]}>Solana</Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={[styles.chainTab, selectedChain === ChainType.MONAD && styles.chainTabActive]}
+          onPress={() => handleChainSelect(ChainType.MONAD)}
+        >
+          <Text style={[styles.chainTabText, selectedChain === ChainType.MONAD && styles.chainTabTextActive]}>Monad</Text>
+        </TouchableOpacity>
       </View>
 
       {/* Action Buttons Row 1 */}
@@ -1008,5 +1077,33 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: 'bold',
     color: '#000000',
+  },
+  chainSelector: {
+    flexDirection: 'row',
+    backgroundColor: '#FFFFFF',
+    borderRadius: 25,
+    borderWidth: 2,
+    borderColor: '#000000',
+    padding: 4,
+    marginBottom: 15,
+  },
+  chainTab: {
+    flex: 1,
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+    borderRadius: 20,
+    alignItems: 'center',
+  },
+  chainTabActive: {
+    backgroundColor: '#60A5FA',
+  },
+  chainTabText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#666666',
+  },
+  chainTabTextActive: {
+    color: '#000000',
+    fontWeight: 'bold',
   },
 });
