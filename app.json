@@ -11,11 +11,6 @@
     "icon": "./assets/images/icon.png",
     "scheme": "myapp",
     "userInterfaceStyle": "automatic",
-    "splash": {
-      "image": "./assets/images/splash.png",
-      "resizeMode": "contain",
-      "backgroundColor": "#ffffff"
-    },
     "ios": {
       "usesAppleSignIn": true,
       "supportsTablet": true,
@@ -25,9 +20,7 @@
         "webcredentials:auth.kevan.ar"
       ],
       "infoPlist": {
-        "NSAppTransportSecurity": {
-          "NSAllowsArbitraryLoads": true
-        },
+        "NSCameraUsageDescription": "Scan QR codes to send and receive payments.",
         "ITSAppUsesNonExemptEncryption": false
       },
       "appleTeamId": "G69A563QHR"
@@ -56,9 +49,9 @@
       ]
     },
     "extra": {
-      "privyAppId": "cmhkyp8d300kijs0cl8zhq2rr",
-      "privyClientId": "client-WY6SUsXVEy3siy55Asq2EJNyWLrzWgre6jpZDJMAXXFbQ",
-      "passkeyAssociatedDomain": "https://auth.kevan.ar",
+      "privyAppId": "",
+      "privyClientId": "",
+      "passkeyAssociatedDomain": "",
       "router": {},
       "eas": {
         "projectId": "3e5e72a6-c0dc-4d3b-adb6-cc5ea4f441ed"
@@ -66,13 +59,26 @@
     },
     "plugins": [
       "expo-router",
-      "expo-secure-store",
+      [
+        "expo-secure-store",
+        {
+          "faceIDPermission": "Authenticate with Face ID to sign in and access your wallet."
+        }
+      ],
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "Scan QR codes to send and receive payments.",
+          "microphonePermission": false,
+          "recordAudioAndroid": false
+        }
+      ],
       "expo-apple-authentication",
       [
         "expo-build-properties",
         {
           "ios": {
-            "deploymentTarget": "17.5"
+            "deploymentTarget": "15.1"
           },
           "android": {
             "compileSdkVersion": 35

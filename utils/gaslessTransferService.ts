@@ -6,12 +6,7 @@
  */
 
 import { Connection, PublicKey, Transaction } from '@solana/web3.js';
-import {
-  getAssociatedTokenAddress,
-  createTransferInstruction,
-  createAssociatedTokenAccountInstruction,
-  TOKEN_PROGRAM_ID,
-} from '@solana/spl-token';
+import { Token, TOKEN_PROGRAM_ID, ASSOCIATED_TOKEN_PROGRAM_ID, u64 } from '@solana/spl-token';
 
 export interface GaslessTransferRequest {
   userAddress: string;
@@ -65,8 +60,15 @@ export async function executeGaslessTransfer(
     ); // Default to USDC
 
     // Get token accounts
-    const userTokenAccount = await getAssociatedTokenAddress(mintPubkey, userPubkey);
-    const recipientTokenAccount = await getAssociatedTokenAddress(
+    const userTokenAccount = await Token.getAssociatedTokenAddress(
+      ASSOCIATED_TOKEN_PROGRAM_ID,
+      TOKEN_PROGRAM_ID,
+      mintPubkey,
+      userPubkey
+    );
+    const recipientTokenAccount = await Token.getAssociatedTokenAddress(
+      ASSOCIATED_TOKEN_PROGRAM_ID,
+      TOKEN_PROGRAM_ID,
       mintPubkey,
       recipientPubkey
     );
@@ -86,11 +88,13 @@ export async function executeGaslessTransfer(
     // If recipient needs token account, create it
     if (request.createRecipientAccount) {
       console.log('[Gasless Service] Adding create token account instruction');
-      const createAccountIx = createAssociatedTokenAccountInstruction(
-        paymasterPubkey, // payer
+      const createAccountIx = Token.createAssociatedTokenAccountInstruction(
+        ASSOCIATED_TOKEN_PROGRAM_ID,
+        TOKEN_PROGRAM_ID,
+        mintPubkey,
         recipientTokenAccount,
         recipientPubkey,
-        mintPubkey
+        paymasterPubkey // payer
       );
       transaction.add(createAccountIx);
     }
@@ -103,13 +107,13 @@ export async function executeGaslessTransfer(
     
     console.log('[Gasless Service] Creating transfer instruction with amount:', request.amount);
     
-    const transferIx = createTransferInstruction(
+    const transferIx = Token.createTransferInstruction(
+      TOKEN_PROGRAM_ID,
       userTokenAccount,
       recipientTokenAccount,
       userPubkey,
-      BigInt(request.amount), // Explicitly convert to BigInt
       [],
-      TOKEN_PROGRAM_ID
+      new u64(request.amount.toString())
     );
     transaction.add(transferIx);
 
@@ -162,12 +166,17 @@ export async function checkRecipientTokenAccount(
 ): Promise<boolean> {
   try {
     const { PublicKey } = await import('@solana/web3.js');
-    const { getAssociatedTokenAddress } = await import('@solana/spl-token');
+    const { Token, ASSOCIATED_TOKEN_PROGRAM_ID, TOKEN_PROGRAM_ID } = await import('@solana/spl-token');
 
     const recipientPubkey = new PublicKey(recipientAddress);
     const mintPubkey = new PublicKey(tokenMint);
 
-    const tokenAccount = await getAssociatedTokenAddress(mintPubkey, recipientPubkey);
+    const tokenAccount = await Token.getAssociatedTokenAddress(
+      ASSOCIATED_TOKEN_PROGRAM_ID,
+      TOKEN_PROGRAM_ID,
+      mintPubkey,
+      recipientPubkey
+    );
     const accountInfo = await connection.getAccountInfo(tokenAccount);
 
     return accountInfo === null; // true if account needs to be created

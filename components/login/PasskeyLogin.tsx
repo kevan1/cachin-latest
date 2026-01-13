@@ -1,4 +1,3 @@
-import Constants from "expo-constants";
 import { useState } from "react";
 import { Button, Text } from "react-native";
 
@@ -6,7 +5,6 @@ import { useLoginWithPasskey, useSignupWithPasskey } from "@privy-io/expo/passke
 
 export default function PasskeyLogin() {
   const [error, setError] = useState("");
-  const [isRegistering, setIsRegistering] = useState(false);
   
   const { loginWithPasskey } = useLoginWithPasskey({
     onError: (err) => {
@@ -14,7 +12,6 @@ export default function PasskeyLogin() {
       // Handle NoCredentials error by prompting to register
       if (err.message?.includes('NoCredentials') || err.message?.includes('No credentials')) {
         setError("No passkey found. Please register a passkey first.");
-        setIsRegistering(true);
       } else {
         setError(JSON.stringify(err.message));
       }
@@ -24,7 +21,6 @@ export default function PasskeyLogin() {
   const { signupWithPasskey } = useSignupWithPasskey({
     onSuccess: () => {
       console.log("Passkey registered and logged in successfully");
-      setIsRegistering(false);
       setError("");
     },
     onError: (err) => {

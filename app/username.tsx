@@ -3,7 +3,7 @@ import { StyleSheet, View, Text, TextInput, TouchableOpacity, Alert, Animated, A
 import { useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useSignupWithPasskey } from '@privy-io/expo/passkey';
-import { useEmbeddedSolanaWallet } from '@privy-io/expo';
+import { useEmbeddedSolanaWallet, useEmbeddedEthereumWallet } from '@privy-io/expo';
 import Svg, { Path } from 'react-native-svg';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
@@ -32,6 +32,14 @@ function PeopleIcon({ size = 28, color = '#3B82F6' }: { size?: number; color?: s
     </Svg>
   );
 }
+
+const formatPasskeyError = (err: any) => {
+  const message = err?.message || 'Unable to complete passkey setup.';
+  if (typeof message === 'string' && message.toLowerCase().includes('biometric')) {
+    return 'Enable Face ID/Touch ID or a device passcode to set up passkeys.';
+  }
+  return message;
+};
 
 // Animated progress bar component
 function ProgressBar({ isActive, isComplete, delay = 0 }: { isActive: boolean; isComplete?: boolean; delay?: number }) {
@@ -81,29 +89,35 @@ export default function UsernameScreen() {
   // Passkey setup state
   const [loading, setLoading] = useState(false);
   const { create: createSolanaWallet } = useEmbeddedSolanaWallet();
+  const { create: createEthereumWallet } = useEmbeddedEthereumWallet();
 
   const { signupWithPasskey } = useSignupWithPasskey({
     onSuccess: async () => {
       console.log("Passkey registered and logged in successfully");
       try {
-        // Create Solana wallet with Privy
+        // Create both Solana and Ethereum (for Monad) wallets with Privy
         console.log('Creating Solana wallet...');
         await createSolanaWallet?.({ recoveryMethod: 'privy' });
         console.log('Solana wallet created successfully');
+        
+        console.log('Creating Ethereum wallet for Monad...');
+        await createEthereumWallet?.({ recoveryMethod: 'privy' });
+        console.log('Ethereum wallet created successfully');
       } catch (error) {
-        console.error('Error creating Solana wallet:', error);
+        console.error('Error creating wallets:', error);
         // Don't block navigation if wallet creation fails
       }
       setLoading(false);
       // Navigate to main app
-      router.replace('/(main)');
+      router.replace('/(main)/home');
     },
     onError: (err) => {
       console.log('Signup error:', JSON.stringify(err, null, 2));
       setLoading(false);
+      const message = formatPasskeyError(err);
       Alert.alert(
         "Registration Error",
-        `Failed to register passkey: ${err.message}`
+        `Failed to register passkey: ${message}`
       );
     },
   });
@@ -156,16 +170,17 @@ export default function UsernameScreen() {
     try {
       setLoading(true);
       
-      signupWithPasskey({
+      await signupWithPasskey({
         relyingParty: "https://auth.kevan.ar",
         username: username,
       });
     } catch (error: any) {
       console.error("Error setting up passkey", error);
       setLoading(false);
+      const message = formatPasskeyError(error);
       Alert.alert(
         "Registration Error",
-        `Failed to setup passkey: ${error.message}`
+        `Failed to setup passkey: ${message}`
       );
     }
   };

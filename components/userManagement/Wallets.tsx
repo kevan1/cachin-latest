@@ -1,17 +1,12 @@
 import {
   useEmbeddedEthereumWallet,
   useEmbeddedSolanaWallet,
-  usePrivy,
 } from "@privy-io/expo";
 import { View, Text, Button } from "react-native";
 
 export default function Wallets() {
-  const { user } = usePrivy();
   const { create: createEthereumWallet } = useEmbeddedEthereumWallet();
   const { create: createSolanaWallet } = useEmbeddedSolanaWallet();
-  const wallets = user?.linked_accounts.filter(
-    (account) => account.type === "wallet",
-  );
   return (
     <View
       style={{

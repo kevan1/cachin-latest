@@ -1,6 +1,6 @@
 import { useEmbeddedSolanaWallet } from "@privy-io/expo";
 import { View, Text, Button } from "react-native";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 
 import {
   Connection,
@@ -16,7 +16,7 @@ export default function SolanaWalletActions() {
   const [balance, setBalance] = useState<number | null>(null);
   const [loadingBalance, setLoadingBalance] = useState(false);
 
-  const fetchBalance = async () => {
+  const fetchBalance = useCallback(async () => {
     if (!wallet?.publicKey) return;
     setLoadingBalance(true);
     try {
@@ -30,11 +30,11 @@ export default function SolanaWalletActions() {
     } finally {
       setLoadingBalance(false);
     }
-  };
+  }, [wallet?.publicKey]);
 
   useEffect(() => {
     fetchBalance();
-  }, [wallet?.publicKey]);
+  }, [fetchBalance]);
 
   const signMessage = async () => {
     try {

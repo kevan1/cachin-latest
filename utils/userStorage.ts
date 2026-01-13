@@ -7,6 +7,37 @@ import {
 
 const USERNAME_KEY = 'user_username';
 const SOLANA_ADDRESS_KEY = 'user_solana_address';
+const CURRENCY_KEY = 'user_currency';
+
+export type Currency = 'USD' | 'ARS' | 'EUR';
+
+/**
+ * Save selected currency
+ */
+export async function saveSelectedCurrency(currency: Currency): Promise<void> {
+  try {
+    await AsyncStorage.setItem(CURRENCY_KEY, currency);
+    console.log('[UserStorage] Currency saved:', currency);
+  } catch (error) {
+    console.error('[UserStorage] Error saving currency:', error);
+  }
+}
+
+/**
+ * Get selected currency (default: USD)
+ */
+export async function getSelectedCurrency(): Promise<Currency> {
+  try {
+    const currency = await AsyncStorage.getItem(CURRENCY_KEY);
+    if (currency === 'USD' || currency === 'ARS' || currency === 'EUR') {
+      return currency as Currency;
+    }
+    return 'USD';
+  } catch (error) {
+    console.error('[UserStorage] Error getting currency:', error);
+    return 'USD';
+  }
+}
 
 /**
  * Save username to both AsyncStorage (cache) and Firestore (cloud)

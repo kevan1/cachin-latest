@@ -10,7 +10,6 @@ export default function BalanceScreen() {
 
   const [balances, setBalances] = useState<TokenBalances>({ sol: 0, usdc: 0, usdt: 0 });
   const [prices, setPrices] = useState<TokenPrices>({ sol: 0, usdc: 1, usdt: 1, mon: 0 });
-  const [loading, setLoading] = useState(false);
 
   const { wallets } = useEmbeddedSolanaWallet();
   const wallet = wallets?.[0];
@@ -27,15 +26,14 @@ export default function BalanceScreen() {
       const address = getAddress();
       if (!address) return;
       try {
-        setLoading(true);
         const [bals, prs] = await Promise.all([
           fetchAllTokenBalances(address),
           fetchTokenPrices(),
         ]);
         setBalances(bals);
         setPrices(prs);
-      } finally {
-        setLoading(false);
+      } catch (error) {
+        console.error('Failed to load balances', error);
       }
     };
     load();

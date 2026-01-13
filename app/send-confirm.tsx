@@ -1,27 +1,96 @@
-import { StyleSheet, View, Text, TouchableOpacity, ActivityIndicator, Alert } from 'react-native';
-import { useRouter, useLocalSearchParams } from 'expo-router';
-import { useState } from 'react';
-import { Connection, PublicKey, Transaction } from '@solana/web3.js';
-import { getAssociatedTokenAddress, createTransferInstruction, createAssociatedTokenAccountInstruction, TOKEN_PROGRAM_ID } from '@solana/spl-token';
-import { saveTransaction } from '@/utils/transactionStorage';
-import { Transaction as TransactionType } from '@/types/types';
-import { ChainType } from '@/constants/chains';
-import { useEmbeddedSolanaWallet } from '@privy-io/expo';
+import {
+  ActivityIndicator,
+  Alert,
+  Platform,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
+  useColorScheme,
+} from "react-native";
+import Animated, { FadeIn, ZoomIn } from "react-native-reanimated";
+import { SafeAreaView } from "react-native-safe-area-context";
+import { useRouter, useLocalSearchParams } from "expo-router";
+import { useState } from "react";
+import { Connection, PublicKey, Transaction } from "@solana/web3.js";
+import { Token, TOKEN_PROGRAM_ID, ASSOCIATED_TOKEN_PROGRAM_ID, u64 } from "@solana/spl-token";
+import MaterialIcons from "@expo/vector-icons/MaterialIcons";
 
-// USDC Token Mint Address on Solana Mainnet
-const USDC_MINT_ADDRESS = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';
+import { saveTransaction } from "@/utils/transactionStorage";
+import { Transaction as TransactionType } from "@/types/types";
+import { ChainType } from "@/constants/chains";
+import { useEmbeddedSolanaWallet } from "@privy-io/expo";
+import { getSolanaRpcUrl } from "@/utils/solanaRpc";
+import { formatTokenUnits, parseDecimalToUnits } from "@/utils/tokenAmount";
+import { Colors } from "@/constants/theme";
+
+const USDC_MINT_ADDRESS = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
+const USDC_DECIMALS = 6;
+const FX_RATE = 0.86;
+
+function firstParam(value: unknown): string {
+  if (Array.isArray(value)) return typeof value[0] === "string" ? value[0] : "";
+  return typeof value === "string" ? value : "";
+}
+
+function isValidSolanaAddress(address: string): boolean {
+  try {
+    new PublicKey(address);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function normalizeUsername(value: string): string {
+  return value.trim().replace(/^@/, "").toLowerCase();
+}
+
+function formatAddress(address: string): string {
+  if (!address) return "";
+  return `${address.slice(0, 4)}...${address.slice(-4)}`;
+}
 
 export default function SendConfirmScreen() {
-const router = useRouter();
+  const router = useRouter();
   const params = useLocalSearchParams();
   const { recipient, address, amount, comment } = params;
-  
+  const colorScheme = useColorScheme() ?? "light";
+  const palette = Colors[colorScheme];
+
+  const recipientAddress = firstParam(address);
+  const amountString = firstParam(amount);
+  const recipientName = firstParam(recipient);
+  const amountUnits = parseDecimalToUnits(amountString, USDC_DECIMALS);
+  const amountDisplay =
+    amountUnits
+      ? formatTokenUnits(amountUnits, USDC_DECIMALS, {
+          minFractionDigits: 2,
+          maxFractionDigits: USDC_DECIMALS,
+        })
+      : amountString;
+
+  const amountNumber = Number(amountDisplay);
+  const equivalentValue =
+    Number.isFinite(amountNumber) && amountNumber > 0
+      ? (amountNumber * FX_RATE).toFixed(2)
+      : "0.00";
+
+  const recipientDisplay = recipientName
+    ? isValidSolanaAddress(recipientName)
+      ? formatAddress(recipientName)
+      : `@${normalizeUsername(recipientName)}`
+    : recipientAddress
+      ? formatAddress(recipientAddress)
+      : "recipient";
+
   const [isSending, setIsSending] = useState(false);
   const [transactionSent, setTransactionSent] = useState(false);
-  const [txSignature, setTxSignature] = useState<string>('');
 
   const { wallets } = useEmbeddedSolanaWallet();
   const wallet = wallets?.[0];
+  const walletAddress = wallet?.publicKey ?? "";
+  const walletDisplay = walletAddress ? formatAddress(walletAddress) : "Not connected";
 
   const getWalletAddress = () => {
     if (wallet?.publicKey) {
@@ -32,549 +101,501 @@ const router = useRouter();
 
   const signTransaction = async (transaction: Transaction): Promise<Transaction> => {
     if (!wallet?.getProvider) {
-      throw new Error('Wallet not available');
-    }
-    
-    // Get the provider
-    const provider = await wallet.getProvider();
-    if (!provider) {
-      throw new Error('Failed to get wallet provider');
+      throw new Error("Wallet not available");
     }
 
-    // Sign the transaction
+    const provider = await wallet.getProvider();
+    if (!provider) {
+      throw new Error("Failed to get wallet provider");
+    }
+
     const { signedTransaction } = await provider.request({
-      method: 'signTransaction',
-      params: { transaction }
+      method: "signTransaction",
+      params: { transaction },
     });
 
     return signedTransaction;
   };
 
   const handleClose = () => {
-    router.push('/(main)');
+    router.push("/(main)/home");
   };
 
   const handleSendTransaction = async () => {
     try {
       setIsSending(true);
 
-      // Get sender's wallet address
       const senderAddress = getWalletAddress();
       if (!senderAddress) {
-        Alert.alert('Error', 'No wallet found');
+        Alert.alert("Error", "No wallet found");
         setIsSending(false);
         return;
       }
 
-      const recipientAddress = address as string;
-      
-      // Validate and parse amount
-      const amountString = amount as string;
-      const parsedAmount = parseFloat(amountString);
-      
-      if (isNaN(parsedAmount) || parsedAmount <= 0) {
-        Alert.alert('Invalid Amount', `Amount "${amountString}" is not valid. Please enter a valid number.`);
+      if (!recipientAddress) {
+        Alert.alert("Error", "Recipient address not found");
         setIsSending(false);
         return;
       }
-      
-      // USDC has 6 decimals
-      const amountInUSDC = Math.floor(parsedAmount * 1000000);
 
-      console.log('Sending USDC transaction:', {
-        from: senderAddress,
-        to: recipientAddress,
-        amountString: amountString,
-        parsedAmount: parsedAmount,
-        amountInUSDC: amountInUSDC,
-      });
+      if (!amountUnits || amountUnits <= 0n) {
+        Alert.alert("Invalid amount", `Amount "${amountString}" is not valid.`);
+        setIsSending(false);
+        return;
+      }
 
-      // Connect to Solana mainnet
-      const connection = new Connection('https://solxar.mainnet.rpcpool.com/efba4db1-e231-40f6-a16f-6e24e8f72b5c', 'confirmed');
-      
-      // Create public keys
+      const connection = new Connection(getSolanaRpcUrl(), "confirmed");
+
       const fromPubkey = new PublicKey(senderAddress);
       const toPubkey = new PublicKey(recipientAddress);
       const usdcMintPubkey = new PublicKey(USDC_MINT_ADDRESS);
-      
-      // Get associated token accounts for sender and recipient
-      const fromTokenAccount = await getAssociatedTokenAddress(
-        usdcMintPubkey,
-        fromPubkey
-      );
-      
-      const toTokenAccount = await getAssociatedTokenAddress(
+
+      const toTokenAccount = await Token.getAssociatedTokenAddress(
+        ASSOCIATED_TOKEN_PROGRAM_ID,
+        TOKEN_PROGRAM_ID,
         usdcMintPubkey,
         toPubkey
       );
-      
-      console.log('From token account:', fromTokenAccount.toString());
-      console.log('To token account:', toTokenAccount.toString());
-      
-      // Check if sender has a USDC token account
-      const senderAccountInfo = await connection.getAccountInfo(fromTokenAccount);
-      if (senderAccountInfo === null) {
+
+      const tokenAccounts = await connection.getParsedTokenAccountsByOwner(fromPubkey, {
+        mint: usdcMintPubkey,
+      });
+
+      const senderTokenAccounts = tokenAccounts.value
+        .map((acc) => {
+          const parsedInfo = acc.account.data.parsed.info;
+          const tokenAmount = parsedInfo.tokenAmount;
+          const accountAmount = BigInt(tokenAmount.amount as string);
+          return {
+            pubkey: acc.pubkey,
+            amount: accountAmount,
+          };
+        })
+        .filter((acc) => acc.amount > 0n)
+        .sort((a, b) => (a.amount > b.amount ? -1 : a.amount < b.amount ? 1 : 0));
+
+      const senderTotalUnits = senderTokenAccounts.reduce((sum, acc) => sum + acc.amount, 0n);
+
+      if (senderTokenAccounts.length === 0 || senderTotalUnits === 0n) {
         Alert.alert(
-          'No USDC Account',
-          'Your wallet does not have a USDC account yet. You need to receive USDC first before you can send it.'
+          "No USDC account",
+          "You need to receive USDC before you can send it."
         );
         setIsSending(false);
         return;
       }
-      
-      // Check sender's USDC balance
-      const senderTokenBalance = await connection.getTokenAccountBalance(fromTokenAccount);
-      const senderBalance = senderTokenBalance.value.uiAmount || 0;
-      console.log('Sender USDC balance:', senderBalance);
-      
-      if (senderBalance < parsedAmount) {
+
+      if (senderTotalUnits < amountUnits) {
         Alert.alert(
-          'Insufficient USDC',
-          `You only have ${senderBalance.toFixed(2)} USDC but trying to send ${parsedAmount} USDC`
+          "Insufficient USDC",
+          `You only have ${formatTokenUnits(senderTotalUnits, USDC_DECIMALS, {
+            minFractionDigits: 2,
+            maxFractionDigits: 2,
+          })} USDC but are trying to send ${amountDisplay} USDC`
         );
         setIsSending(false);
         return;
       }
-      
-      // Check if recipient's token account exists
+
       const recipientAccountInfo = await connection.getAccountInfo(toTokenAccount);
       const needsTokenAccount = recipientAccountInfo === null;
-      
-      if (needsTokenAccount) {
-        console.log('Recipient does not have a USDC token account. Creating one...');
-      }
-      
-      // User pays the fees
+
       const feePayer = fromPubkey;
-      
-      // Check sender's SOL balance for transaction fees
+
       const senderSolBalance = await connection.getBalance(fromPubkey);
       const solBalanceInSol = senderSolBalance / 1e9;
-      console.log('Sender SOL balance:', solBalanceInSol);
-      
+
       if (needsTokenAccount) {
-        const minSolRequired = 0.003; // 0.002 for account + 0.001 for transaction fee
-        
+        const minSolRequired = 0.003;
         if (solBalanceInSol < minSolRequired) {
           Alert.alert(
-            'Insufficient SOL',
-            `You need at least ${minSolRequired} SOL for transaction fees and to create the recipient's USDC account. You have ${solBalanceInSol.toFixed(6)} SOL.`
+            "Insufficient SOL",
+            `You need at least ${minSolRequired} SOL for fees. You have ${solBalanceInSol.toFixed(
+              6
+            )} SOL.`
           );
           setIsSending(false);
           return;
         }
       } else if (solBalanceInSol < 0.0001) {
         Alert.alert(
-          'Insufficient SOL',
-          `You need SOL for transaction fees. You have ${solBalanceInSol.toFixed(6)} SOL.`
+          "Insufficient SOL",
+          `You need SOL for fees. You have ${solBalanceInSol.toFixed(6)} SOL.`
         );
         setIsSending(false);
         return;
       }
-      
+
       const { blockhash } = await connection.getLatestBlockhash();
-      
-      // Create transaction
+
       const transaction = new Transaction({
         recentBlockhash: blockhash,
         feePayer: feePayer,
       });
-      
-      console.log('[Transaction] Fee payer:', feePayer.toString());
-      
-      // If recipient doesn't have a token account, create it first
+
       if (needsTokenAccount) {
-        const createAccountInstruction = createAssociatedTokenAccountInstruction(
-          feePayer, // fee payer pays for account creation
-          toTokenAccount, // account to create
-          toPubkey, // account owner (recipient)
-          usdcMintPubkey // token mint (USDC)
+        const createAccountInstruction = Token.createAssociatedTokenAccountInstruction(
+          ASSOCIATED_TOKEN_PROGRAM_ID,
+          TOKEN_PROGRAM_ID,
+          usdcMintPubkey,
+          toTokenAccount,
+          toPubkey,
+          feePayer
         );
         transaction.add(createAccountInstruction);
-        console.log('Added instruction to create recipient token account');
       }
-      
-      // Add USDC transfer instruction
-      // Ensure amount is a valid number (not NaN, Infinity, or negative)
-      if (!Number.isFinite(amountInUSDC) || amountInUSDC < 0) {
-        throw new Error(`Invalid amount for transfer: ${amountInUSDC}`);
+
+      let remaining = amountUnits;
+      for (const source of senderTokenAccounts) {
+        if (remaining <= 0n) break;
+        const sendUnits = source.amount >= remaining ? remaining : source.amount;
+        if (sendUnits <= 0n) continue;
+
+        const transferInstruction = Token.createTransferInstruction(
+          TOKEN_PROGRAM_ID,
+          source.pubkey,
+          toTokenAccount,
+          fromPubkey,
+          [],
+          new u64(sendUnits.toString())
+        );
+        transaction.add(transferInstruction);
+        remaining -= sendUnits;
       }
-      
-      console.log('[Transaction] Creating transfer instruction with amount:', amountInUSDC);
-      
-      const transferInstruction = createTransferInstruction(
-        fromTokenAccount,
-        toTokenAccount,
-        fromPubkey,
-        BigInt(amountInUSDC), // Explicitly convert to BigInt
-        [],
-        TOKEN_PROGRAM_ID
-      );
-      transaction.add(transferInstruction);
-      
-      console.log('[Transaction] Transfer instruction added successfully');
-      
-      // Sign and send transaction
-      console.log('Signing transaction...');
+
+      if (remaining !== 0n) {
+        throw new Error("Failed to build transfer instructions for full amount");
+      }
+
       const signedTransaction = await signTransaction(transaction);
       const signedTransactionBuffer = signedTransaction.serialize();
-      
-      console.log('Broadcasting transaction to Solana...');
+
       const signature = await connection.sendRawTransaction(signedTransactionBuffer, {
         skipPreflight: false,
-        preflightCommitment: 'confirmed',
+        preflightCommitment: "confirmed",
       });
-      
-      console.log('Transaction broadcasted with signature:', signature);
-      
-      // Wait for confirmation
-      await connection.confirmTransaction(signature, 'confirmed');
-      console.log('Transaction confirmed!');
-      
-      // Save transaction to local storage
+
+      await connection.confirmTransaction(signature, "confirmed");
+
       const newTransaction: TransactionType = {
         id: signature,
         signature,
-        type: 'send',
-        currency: 'USDC',
+        type: "send",
+        currency: "USDC",
         chain: ChainType.SOLANA,
-        amount: parseFloat(amount as string),
-        recipient: recipient as string,
+        amount: parseFloat(amountDisplay),
+        recipient: recipientName,
         address: recipientAddress,
         timestamp: Date.now(),
-        status: 'confirmed',
+        status: "confirmed",
         comment: comment as string | undefined,
       };
-      
-      await saveTransaction(newTransaction);
-      console.log('Transaction saved to local storage');
-      
-      setTransactionSent(true);
-      setTxSignature(signature);
-      setIsSending(false);
 
+      await saveTransaction(newTransaction);
+
+      setTransactionSent(true);
+      setIsSending(false);
     } catch (error) {
-      console.error('Error sending transaction:', error);
-      Alert.alert('Error', `Failed to send transaction: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      console.error("Error sending transaction:", error);
+      Alert.alert(
+        "Error",
+        `Failed to send transaction: ${error instanceof Error ? error.message : "Unknown error"}`
+      );
       setIsSending(false);
     }
   };
 
-  const getInitials = (name: string) => {
-    if (!name || name.length < 3) return name?.toUpperCase() || 'U';
-    return name.slice(0, 2).toUpperCase();
-  };
-
   if (transactionSent) {
     return (
-      <View style={styles.container}>
-        {/* Header */}
+      <SafeAreaView
+        edges={["left", "right", "bottom"]}
+        style={[styles.container, { backgroundColor: palette.background }]}
+      >
         <View style={styles.header}>
-          <View style={styles.placeholder} />
-          <Text style={styles.title}>Send</Text>
-          <TouchableOpacity style={styles.closeButton} onPress={handleClose}>
-            <Text style={styles.closeIcon}>✕</Text>
+          <View style={styles.headerSpacer} />
+          <Text style={[styles.title, { color: palette.primaryText }]}>Sent</Text>
+          <TouchableOpacity
+            accessibilityRole="button"
+            onPress={handleClose}
+            style={[
+              styles.iconButton,
+              { backgroundColor: palette.surfaceMuted, borderColor: palette.borderSubtle },
+            ]}
+          >
+            <MaterialIcons name="close" size={18} color={palette.primaryText} />
           </TouchableOpacity>
         </View>
 
-        {/* Success Message */}
         <View style={styles.successContainer}>
-          <View style={styles.successIcon}>
-            <Text style={styles.checkmark}>✓</Text>
-          </View>
-          <Text style={styles.successTitle}>You sent {recipient}</Text>
-          <Text style={styles.successAmount}>${amount} USDC</Text>
+          <Animated.View 
+            entering={ZoomIn.springify().damping(12)}
+            style={[styles.heroIcon, { backgroundColor: palette.success }]}
+          >
+            <MaterialIcons name="check" size={26} color={palette.actionPrimaryText} />
+          </Animated.View>
+          <Animated.Text 
+            entering={FadeIn.delay(200).duration(500)}
+            style={[styles.successTitle, { color: palette.primaryText }]}
+          >
+            Payment sent
+          </Animated.Text>
+          <Animated.Text 
+            entering={FadeIn.delay(400).duration(500)}
+            style={[styles.successAmount, { color: palette.primaryText }]}
+          >
+            ${amountDisplay} USDC
+          </Animated.Text>
         </View>
 
-        {/* Back to Home Button */}
-        <TouchableOpacity style={styles.homeButton} onPress={handleClose}>
-          <Text style={styles.homeButtonText}>Back to home</Text>
-        </TouchableOpacity>
-
-        {/* See Receipt Button */}
-        <TouchableOpacity style={styles.receiptButton}>
-          <Text style={styles.receiptButtonText}>See receipt</Text>
-        </TouchableOpacity>
-      </View>
+        <View style={styles.footer}>
+          <TouchableOpacity
+            accessibilityRole="button"
+            onPress={handleClose}
+            style={[
+              styles.primaryButton,
+              { backgroundColor: palette.actionPrimary },
+            ]}
+          >
+            <Text style={[styles.primaryButtonText, { color: palette.actionPrimaryText }]}>
+              Back to home
+            </Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            accessibilityRole="button"
+            style={[
+              styles.secondaryButton,
+              { backgroundColor: palette.actionSecondary },
+            ]}
+          >
+            <Text style={[styles.secondaryButtonText, { color: palette.actionSecondaryText }]}>
+              View receipt
+            </Text>
+          </TouchableOpacity>
+        </View>
+      </SafeAreaView>
     );
   }
 
   return (
-    <View style={styles.container}>
-      {/* Header */}
+    <SafeAreaView
+      edges={["left", "right", "bottom"]}
+      style={[styles.container, { backgroundColor: palette.background }]}
+    >
       <View style={styles.header}>
-        <TouchableOpacity style={styles.backButton} onPress={() => router.back()}>
-          <Text style={styles.backIcon}>‹</Text>
+        <TouchableOpacity
+          accessibilityRole="button"
+          onPress={() => router.back()}
+          style={[
+            styles.iconButton,
+            { backgroundColor: palette.surfaceMuted, borderColor: palette.borderSubtle },
+          ]}
+        >
+          <MaterialIcons name="arrow-back" size={20} color={palette.primaryText} />
         </TouchableOpacity>
-        <Text style={styles.title}>Send</Text>
-        <View style={styles.placeholder} />
+        <Text style={[styles.title, { color: palette.primaryText }]}>Confirm</Text>
+        <View style={styles.headerSpacer} />
       </View>
 
-      {/* Recipient Card */}
-      <View style={styles.recipientCard}>
-        <View style={styles.recipientInfo}>
-          <View style={styles.avatar}>
-            <Text style={styles.avatarText}>{getInitials(recipient as string)}</Text>
-          </View>
-          <View>
-            <Text style={styles.sendingToText}>↗ You&apos;re sending money to</Text>
-            <Text style={styles.recipientName}>{recipient}</Text>
-          </View>
-        </View>
+      <View style={[styles.heroIcon, { backgroundColor: palette.success }]}>
+        <MaterialIcons name="send" size={22} color={palette.actionPrimaryText} />
       </View>
+      <Text style={[styles.headline, { color: palette.primaryText }]}>
+        Send to {recipientDisplay}
+      </Text>
+      <Text style={[styles.subheadline, { color: palette.secondaryText }]}>
+        Double-check the details before you send.
+      </Text>
 
-      {/* Amount Display */}
-      <View style={styles.amountContainer}>
-        <Text style={styles.currencySymbol}>$</Text>
-        <Text style={styles.amountText}>{amount}</Text>
-      </View>
-
-      {/* Comment Display */}
-      {comment && (
-        <View style={styles.commentCard}>
-          <Text style={styles.commentLabel}>Comment</Text>
-          <Text style={styles.commentText}>{comment}</Text>
-        </View>
-      )}
-
-      {/* Send Button */}
-      <TouchableOpacity 
-        style={[styles.sendButton, isSending && styles.sendButtonDisabled]} 
-        onPress={handleSendTransaction}
-        disabled={isSending}
+      <View
+        style={[
+          styles.amountCard,
+          { backgroundColor: palette.surface, borderColor: palette.borderSubtle },
+        ]}
       >
-        {isSending ? (
-          <ActivityIndicator color="#000000" />
-        ) : (
-          <>
-            <Text style={styles.sendIcon}>↗</Text>
-            <Text style={styles.sendButtonText}>Send with Ca¢hin</Text>
-          </>
-        )}
-      </TouchableOpacity>
-    </View>
+        <View style={[styles.amountBadge, { backgroundColor: palette.surfaceMuted }]}>
+          <Text style={[styles.amountBadgeText, { color: palette.secondaryText }]}>
+            Transfer amount
+          </Text>
+        </View>
+        <Text style={[styles.amountText, { color: palette.primaryText }]}>
+          ${amountDisplay}
+        </Text>
+        <Text style={[styles.equivalentText, { color: palette.secondaryText }]}>
+          ~{equivalentValue}
+        </Text>
+      </View>
+
+      <View style={styles.metaRow}>
+        <Text style={[styles.metaLabel, { color: palette.secondaryText }]}>Recipient</Text>
+        <Text style={[styles.metaValue, { color: palette.primaryText }]}>
+          {recipientDisplay}
+        </Text>
+      </View>
+      <View style={styles.metaRow}>
+        <Text style={[styles.metaLabel, { color: palette.secondaryText }]}>Transfer from</Text>
+        <Text style={[styles.metaValue, { color: palette.primaryText }]}>
+          {walletDisplay}
+        </Text>
+      </View>
+      <View style={styles.footer}>
+        <TouchableOpacity
+          accessibilityRole="button"
+          onPress={() => router.back()}
+          style={[
+            styles.secondaryButton,
+            { backgroundColor: palette.actionSecondary },
+          ]}
+        >
+          <Text style={[styles.secondaryButtonText, { color: palette.actionSecondaryText }]}>
+            Cancel
+          </Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          accessibilityRole="button"
+          onPress={handleSendTransaction}
+          disabled={isSending}
+          style={[
+            styles.primaryButton,
+            { backgroundColor: palette.actionPrimary, opacity: isSending ? 0.6 : 1 },
+          ]}
+        >
+          {isSending ? (
+            <ActivityIndicator color={palette.actionPrimaryText} />
+          ) : (
+            <Text style={[styles.primaryButtonText, { color: palette.actionPrimaryText }]}>
+              Send
+            </Text>
+          )}
+        </TouchableOpacity>
+      </View>
+    </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
-    flex: 1,
-    backgroundColor: '#F5E6D3',
-    padding: 20,
+    flex: Platform.OS === "ios" ? 0 : 1,
+    paddingHorizontal: 20,
+    paddingTop: 12,
+    paddingBottom: 16,
   },
   header: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginTop: 50,
-    marginBottom: 30,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: 16,
   },
-  backButton: {
-    width: 50,
-    height: 50,
-    borderRadius: 10,
-    borderWidth: 3,
-    borderColor: '#000000',
-    backgroundColor: '#FFFFFF',
-    justifyContent: 'center',
-    alignItems: 'center',
+  iconButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 1,
   },
-  backIcon: {
-    fontSize: 32,
-    fontWeight: 'bold',
-    color: '#000000',
-  },
-  closeButton: {
-    width: 50,
-    height: 50,
-    borderRadius: 10,
-    borderWidth: 3,
-    borderColor: '#000000',
-    backgroundColor: '#FFFFFF',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  closeIcon: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    color: '#000000',
+  headerSpacer: {
+    width: 40,
   },
   title: {
-    fontSize: 32,
-    fontWeight: 'bold',
-    color: '#000000',
+    fontSize: 18,
+    fontWeight: "600",
   },
-  placeholder: {
-    width: 50,
+  heroIcon: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    alignItems: "center",
+    justifyContent: "center",
+    alignSelf: "center",
+    marginBottom: 12,
   },
-  recipientCard: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 12,
-    borderWidth: 3,
-    borderColor: '#000000',
+  headline: {
+    fontSize: 18,
+    fontWeight: "600",
+    textAlign: "center",
+    marginBottom: 6,
+  },
+  subheadline: {
+    fontSize: 13,
+    textAlign: "center",
+    marginBottom: 14,
+    lineHeight: 18,
+  },
+  amountCard: {
+    borderRadius: 20,
+    borderWidth: 1,
     padding: 20,
-    marginBottom: 30,
+    marginBottom: 12,
+    alignItems: "center",
   },
-  recipientInfo: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 15,
+  amountBadge: {
+    alignSelf: "center",
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 999,
+    marginBottom: 12,
   },
-  avatar: {
-    width: 60,
-    height: 60,
-    borderRadius: 30,
-    backgroundColor: '#FFB380',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  avatarText: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    color: '#FFFFFF',
-  },
-  sendingToText: {
-    fontSize: 14,
-    color: '#666666',
-    marginBottom: 2,
-  },
-  recipientName: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    color: '#000000',
-  },
-  amountContainer: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 12,
-    borderWidth: 3,
-    borderColor: '#000000',
-    padding: 30,
-    marginBottom: 30,
-    alignItems: 'center',
-    position: 'relative',
-  },
-  currencySymbol: {
-    fontSize: 32,
-    fontWeight: 'bold',
-    color: '#666666',
-    position: 'absolute',
-    top: 30,
-    left: 30,
+  amountBadgeText: {
+    fontSize: 12,
+    fontWeight: "600",
   },
   amountText: {
-    fontSize: 64,
-    fontWeight: 'bold',
-    color: '#666666',
-    textAlign: 'center',
+    fontSize: 36,
+    fontWeight: "600",
+    marginBottom: 6,
   },
-  commentCard: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 12,
-    borderWidth: 3,
-    borderColor: '#000000',
-    padding: 20,
-    marginBottom: 30,
+  equivalentText: {
+    fontSize: 13,
   },
-  commentLabel: {
+  metaRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginBottom: 12,
+  },
+  metaLabel: {
+    fontSize: 13,
+  },
+  metaValue: {
+    fontSize: 13,
+    fontWeight: "600",
+  },
+  footer: {
+    marginTop: 16,
+    gap: 12,
+    paddingBottom: 10,
+  },
+  primaryButton: {
+    borderRadius: 999,
+    paddingVertical: 14,
+    alignItems: "center",
+  },
+  primaryButtonText: {
     fontSize: 14,
-    color: '#666666',
-    marginBottom: 5,
+    fontWeight: "600",
   },
-  commentText: {
-    fontSize: 16,
-    color: '#000000',
+  secondaryButton: {
+    borderRadius: 999,
+    paddingVertical: 14,
+    alignItems: "center",
   },
-  sendButton: {
-    flexDirection: 'row',
-    backgroundColor: '#FFFFFF',
-    borderRadius: 12,
-    borderWidth: 3,
-    borderColor: '#000000',
-    paddingVertical: 20,
-    justifyContent: 'center',
-    alignItems: 'center',
-    gap: 10,
-    shadowColor: '#000000',
-    shadowOffset: { width: 4, height: 4 },
-    shadowOpacity: 1,
-    shadowRadius: 0,
-  },
-  sendButtonDisabled: {
-    opacity: 0.6,
-  },
-  sendIcon: {
-    fontSize: 24,
-  },
-  sendButtonText: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    color: '#000000',
+  secondaryButtonText: {
+    fontSize: 14,
+    fontWeight: "600",
   },
   successContainer: {
     flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginBottom: 100,
-  },
-  successIcon: {
-    width: 100,
-    height: 100,
-    borderRadius: 50,
-    backgroundColor: '#10b981',
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginBottom: 30,
-  },
-  checkmark: {
-    fontSize: 60,
-    color: '#FFFFFF',
-    fontWeight: 'bold',
+    alignItems: "center",
+    justifyContent: "center",
+    marginBottom: 40,
   },
   successTitle: {
     fontSize: 18,
-    color: '#666666',
-    marginBottom: 10,
+    fontWeight: "600",
+    marginBottom: 8,
   },
   successAmount: {
-    fontSize: 48,
-    fontWeight: 'bold',
-    color: '#000000',
-  },
-  homeButton: {
-    backgroundColor: '#E8B5E8',
-    borderRadius: 12,
-    borderWidth: 3,
-    borderColor: '#000000',
-    paddingVertical: 20,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginBottom: 15,
-    shadowColor: '#000000',
-    shadowOffset: { width: 4, height: 4 },
-    shadowOpacity: 1,
-    shadowRadius: 0,
-  },
-  homeButtonText: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    color: '#000000',
-  },
-  receiptButton: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 12,
-    borderWidth: 3,
-    borderColor: '#000000',
-    paddingVertical: 20,
-    justifyContent: 'center',
-    alignItems: 'center',
-    shadowColor: '#000000',
-    shadowOffset: { width: 4, height: 4 },
-    shadowOpacity: 1,
-    shadowRadius: 0,
-  },
-  receiptButtonText: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    color: '#000000',
+    fontSize: 36,
+    fontWeight: "700",
   },
 });

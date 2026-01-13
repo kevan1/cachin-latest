@@ -1,13 +1,21 @@
-import { StyleSheet, View, Text, TouchableOpacity, Alert, Switch, Share } from 'react-native';
+import { StyleSheet, View, Text, TouchableOpacity, Alert, Switch, Share, ActionSheetIOS, Platform } from 'react-native';
 import * as Clipboard from 'expo-clipboard';
 import { useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useState, useEffect } from 'react';
-import { getUsername, clearUsername } from '@/utils/userStorage';
+import { getUsername, clearUsername, Currency, getSelectedCurrency, saveSelectedCurrency } from '@/utils/userStorage';
 import { usePrivy } from '@privy-io/expo';
 import Svg, { Path } from 'react-native-svg';
 
 // Icon components
+function CurrencyIcon({ size = 24, color = '#000' }: { size?: number; color?: string }) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <Path d="M12 1v22M17 5H9.5a3.5 3.5 0 000 7h5a3.5 3.5 0 010 7H6" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+    </Svg>
+  );
+}
+
 function SmileIcon({ size = 24, color = '#000' }: { size?: number; color?: string }) {
   return (
     <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
@@ -78,6 +86,7 @@ export default function ProfileScreen() {
   const { logout, user } = usePrivy();
   const [username, setUsername] = useState<string>('User');
   const [showFullName, setShowFullName] = useState(true);
+  const [currency, setCurrency] = useState<Currency>('USD');
 
   useEffect(() => {
     const loadUsername = async () => {
@@ -93,7 +102,14 @@ export default function ProfileScreen() {
         setUsername('User');
       }
     };
+    
+    const loadCurrency = async () => {
+      const storedCurrency = await getSelectedCurrency();
+      setCurrency(storedCurrency);
+    };
+
     loadUsername();
+    loadCurrency();
   }, []);
   
   // Monitor user state and redirect if logged out
@@ -148,7 +164,7 @@ export default function ProfileScreen() {
   };
 
   const handlePersonalDetails = () => {
-    router.push('/export-private-key');
+    router.push('/export');
   };
 
   const handleIdentityVerification = () => {
@@ -157,6 +173,39 @@ export default function ProfileScreen() {
 
   const handleExchangeRates = () => {
     Alert.alert('Exchange rates and fees', 'Coming soon!');
+  };
+
+  const handleCurrencyChange = () => {
+    const options: Currency[] = ['USD', 'ARS', 'EUR'];
+    
+    if (Platform.OS === 'ios') {
+      ActionSheetIOS.showActionSheetWithOptions(
+        {
+          options: [...options, 'Cancel'],
+          cancelButtonIndex: 3,
+          title: 'Select Currency',
+        },
+        async (buttonIndex) => {
+          if (buttonIndex < 3) {
+            const selected = options[buttonIndex];
+            setCurrency(selected);
+            await saveSelectedCurrency(selected);
+          }
+        }
+      );
+    } else {
+      Alert.alert(
+        'Select Currency',
+        'Choose your preferred currency',
+        options.map((opt) => ({
+          text: opt,
+          onPress: async () => {
+            setCurrency(opt);
+            await saveSelectedCurrency(opt);
+          },
+        }))
+      );
+    }
   };
 
   const handleCopyLink = async () => {
@@ -251,6 +300,19 @@ export default function ProfileScreen() {
         </View>
 
         <View style={styles.menuSection}>
+          <TouchableOpacity style={styles.menuItem} onPress={handleCurrencyChange}>
+            <View style={styles.menuLeft}>
+              <CurrencyIcon size={24} color="#000" />
+              <Text style={styles.menuText}>Currency</Text>
+            </View>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+              <Text style={{ fontSize: 16, color: '#666' }}>{currency}</Text>
+              <Text style={styles.chevron}>›</Text>
+            </View>
+          </TouchableOpacity>
+        
+          <View style={styles.divider} />
+
           <TouchableOpacity style={styles.menuItem} onPress={handleExchangeRates}>
             <View style={styles.menuLeft}>
               <ExchangeIcon size={24} color="#000" />

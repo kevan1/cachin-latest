@@ -4,6 +4,15 @@ import * as Application from "expo-application";
 import PasskeyLogin from "./login/PasskeyLogin";
 
 export default function LoginScreen() {
+  const privyAppId =
+    process.env.EXPO_PUBLIC_PRIVY_APP_ID ||
+    Constants.expoConfig?.extra?.privyAppId ||
+    "";
+  const privyClientId =
+    process.env.EXPO_PUBLIC_PRIVY_CLIENT_ID ||
+    Constants.expoConfig?.extra?.privyClientId ||
+    "";
+
   return (
     <View
       style={{
@@ -15,19 +24,15 @@ export default function LoginScreen() {
       }}
     >
       <Text>Privy App ID:</Text>
-      <Text style={{ fontSize: 10 }}>
-        {Constants.expoConfig?.extra?.privyAppId}
-      </Text>
+      <Text style={{ fontSize: 10 }}>{privyAppId}</Text>
       <Text>Privy Client ID:</Text>
-      <Text style={{ fontSize: 10 }}>
-        {Constants.expoConfig?.extra?.privyClientId}
-      </Text>
+      <Text style={{ fontSize: 10 }}>{privyClientId}</Text>
       <Text>
         Navigate to your{" "}
         <Text
           onPress={() =>
             Linking.openURL(
-              `https://dashboard.privy.io/apps/${Constants.expoConfig?.extra?.privyAppId}/settings?setting=clients`
+              `https://dashboard.privy.io/apps/${privyAppId}/settings?setting=clients`
             )
           }
         >
@@ -42,7 +47,7 @@ export default function LoginScreen() {
         <Text
           onPress={() =>
             Linking.openURL(
-              `https://dashboard.privy.io/apps/${Constants.expoConfig?.extra?.privyAppId}/settings?setting=clients`
+              `https://dashboard.privy.io/apps/${privyAppId}/settings?setting=clients`
             )
           }
         >

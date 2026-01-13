@@ -9,9 +9,22 @@ export interface TokenPrices {
   mon: number;
 }
 
+export interface ArsQuote {
+  name: string;
+  buy: number;
+  sell: number;
+  timestamp: number;
+  variation: null;
+  spread: number;
+  volumen: null;
+  extra: null;
+}
+
 // Price cache
 let cachedPrices: TokenPrices | null = null;
+let cachedArsPrice: number | null = null;
 let lastFetchTime: number = 0;
+let lastArsFetchTime: number = 0;
 const CACHE_DURATION = 10 * 60 * 1000; // 10 minutes (increased to reduce API calls)
 
 /**
@@ -79,5 +92,58 @@ export async function fetchTokenPrices(forceFresh: boolean = false): Promise<Tok
       usdt: 1,
       mon: 0, // MON testnet has no real value
     };
+  }
+}
+
+/**
+ * Fetch ARS price from Dolarito API
+ * Specifically fetches the p2pme sell price
+ */
+export async function fetchArsPrice(forceFresh: boolean = false): Promise<number> {
+  const now = Date.now();
+  if (!forceFresh && cachedArsPrice !== null && (now - lastArsFetchTime) < CACHE_DURATION) {
+    console.log('Using cached ARS price:', cachedArsPrice);
+    return cachedArsPrice;
+  }
+
+  try {
+    const response = await fetch(
+      'https://api.dolarito.ar/api/frontend/quotations/usdt',
+      {
+        headers: {
+          'auth-client': 'f2988deca3ae4e916bfb01406268143b'
+        }
+      }
+    );
+
+    if (!response.ok) {
+      console.warn(`ARS Price API error: ${response.status}`);
+      if (cachedArsPrice !== null) return cachedArsPrice;
+      throw new Error(`ARS Price API error: ${response.status}`);
+    }
+
+    const data = await response.json();
+    
+    // Find p2pme quote
+    // The API seems to return an object where keys are the provider names, or an array?
+    // Based on the user description: "p2pme": { ... }
+    // It's likely an object map.
+    
+    // Let's assume the response is a map of string -> ArsQuote
+    const p2pme = data.p2pme;
+    
+    if (p2pme && p2pme.sell) {
+      cachedArsPrice = p2pme.sell;
+      lastArsFetchTime = now;
+      console.log('Fetched fresh ARS price:', cachedArsPrice);
+      return p2pme.sell;
+    }
+    
+    throw new Error('p2pme quote not found in response');
+    
+  } catch (error) {
+    console.error('Error fetching ARS price:', error);
+    if (cachedArsPrice !== null) return cachedArsPrice;
+    return 0; // Fallback
   }
 }

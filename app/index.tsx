@@ -1,8 +1,9 @@
 import { useState, useEffect, useRef } from "react";
-import { View, Text, StyleSheet, TouchableOpacity, Animated, Image } from "react-native";
+import { View, Text, StyleSheet, TouchableOpacity, Animated, Image, Alert, Platform, ToastAndroid } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { useRouter } from "expo-router";
+import { Redirect, useRouter } from "expo-router";
 import { useLoginWithPasskey } from "@privy-io/expo/passkey";
+import { usePrivy } from "@privy-io/expo";
 
 // Decorative element configuration
 const decorations = [
@@ -145,28 +146,70 @@ function AnimatedDecoration({ item }: { item: any }) {
 export default function Index() {
   const router = useRouter();
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const { user, isReady } = usePrivy();
+
+  const showToast = (message: string) => {
+    if (Platform.OS === 'android') {
+      ToastAndroid.show(message, ToastAndroid.SHORT);
+    } else {
+      Alert.alert('', message);
+    }
+  };
+
+  const formatPasskeyError = (err: any) => {
+    const message = err?.message || 'Unable to log in with a passkey.';
+    if (typeof message === 'string' && message.toLowerCase().includes('biometric')) {
+      return 'Enable Face ID/Touch ID or a device passcode to use passkey login.';
+    }
+    return message;
+  };
   
   const { loginWithPasskey } = useLoginWithPasskey({
-    onError: (err) => {
-      console.error('Login error:', err);
-      setLoading(false);
-    },
     onSuccess: () => {
       console.log('Login successful');
+      setError(null);
       setLoading(false);
-      router.replace('/(main)');
+      showToast('Logged in');
+      router.replace('/(main)/home');
     },
   });
 
+  if (!isReady) return null;
+
+  if (user) {
+    return <Redirect href="/(main)/home" />;
+  }
+
   const handleRegister = () => {
+    setError(null);
     router.push("/username");
   };
 
   const handleLogin = async () => {
+    if (user) {
+      router.replace("/(main)/home");
+      return;
+    }
+
     setLoading(true);
-    loginWithPasskey({
-      relyingParty: "https://auth.kevan.ar",
-    });
+    setError(null);
+    try {
+      await loginWithPasskey({
+        relyingParty: "https://auth.kevan.ar",
+      });
+    } catch (err: any) {
+      console.error('Login error:', err);
+      const message = formatPasskeyError(err);
+      if (err?.code === 'attempted_login_with_passkey_while_already_logged_in') {
+        router.replace('/(main)/home');
+        setLoading(false);
+        return;
+      }
+      setError(message);
+      showToast(message);
+      setLoading(false);
+    }
   };
 
   return (
@@ -213,6 +256,8 @@ export default function Index() {
             <Text style={styles.secondaryText}>Log In</Text>
           </TouchableOpacity>
         </View>
+
+        {error ? <Text style={styles.errorText}>{error}</Text> : null}
 
         <Text style={styles.legal}>
           By using Family, you agree to accept our <Text style={styles.link}>Terms of Use</Text> and <Text style={styles.link}>Privacy Policy</Text>.
@@ -291,6 +336,12 @@ const styles = StyleSheet.create({
     color: "#111827",
     fontSize: 18,
     fontWeight: "700",
+  },
+  errorText: {
+    marginTop: 12,
+    color: "#EF4444",
+    textAlign: "center",
+    fontWeight: "600",
   },
   legal: {
     marginTop: 18,

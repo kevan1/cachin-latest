@@ -7,9 +7,7 @@ import {
   getUserEmbeddedEthereumWallet,
   PrivyEmbeddedWalletProvider,
 } from "@privy-io/expo";
-import Constants from "expo-constants";
-import { useLinkWithPasskey } from "@privy-io/expo/passkey";
-import { PrivyUser, WalletAddress } from "@privy-io/public-api";
+import { PrivyUser } from "@privy-io/public-api";
 import Wallets from "./userManagement/Wallets";
 import SolanaWalletActions from "./walletActions/SolanaWalletActions";
 import EVMWalletActions from "./walletActions/EVMWalletActions";
@@ -23,29 +21,10 @@ const toMainIdentifier = (x: PrivyUser["linked_accounts"][number]) => {
 
 export const UserScreen = () => {
   const [chainId, setChainId] = useState("1");
-  const [signedMessages, setSignedMessages] = useState<string[]>([]);
 
   const { logout, user } = usePrivy();
-  const { linkWithPasskey } = useLinkWithPasskey();
-  const { wallets, create } = useEmbeddedEthereumWallet();
+  const { wallets } = useEmbeddedEthereumWallet();
   const account = getUserEmbeddedEthereumWallet(user);
-
-  const signMessage = useCallback(
-    async (provider: PrivyEmbeddedWalletProvider) => {
-      try {
-        const message = await provider.request({
-          method: "personal_sign",
-          params: [`0x0${Date.now()}`, account?.address],
-        });
-        if (message) {
-          setSignedMessages((prev) => prev.concat(message));
-        }
-      } catch (e) {
-        console.error(e);
-      }
-    },
-    [account?.address]
-  );
 
   const switchChain = useCallback(
     async (provider: PrivyEmbeddedWalletProvider, id: string) => {
@@ -59,7 +38,7 @@ export const UserScreen = () => {
         console.error(e);
       }
     },
-    [account?.address]
+    []
   );
 
   if (!user) {
