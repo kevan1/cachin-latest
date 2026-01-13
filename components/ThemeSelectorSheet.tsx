@@ -1,6 +1,6 @@
 
 import React, { useEffect } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, useColorScheme, Dimensions, Platform, ScrollView } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, useColorScheme, Dimensions, Platform, ScrollView, Modal } from 'react-native';
 import { BlurView } from 'expo-blur';
 import { IconSymbol } from '@/components/ui/icon-symbol';
 import { THEMES, MESH_POINTS } from '@/constants/themes';
@@ -53,120 +53,128 @@ export function ThemeSelectorSheet({
   if (!isVisible) return null;
 
   return (
-    <View style={StyleSheet.absoluteFill}>
-      {/* Backdrop */}
-      <TouchableOpacity 
-        style={styles.backdrop} 
-        activeOpacity={1} 
-        onPress={onClose}
-      >
-        <BlurView intensity={20} style={StyleSheet.absoluteFill} tint="dark" />
-      </TouchableOpacity>
-
-      {/* Modal Content */}
-      <Animated.View style={[styles.container, animatedStyle]}>
-        <View style={styles.header}>
-          <TouchableOpacity onPress={onClose} style={styles.closeButton}>
-            <IconSymbol name="xmark" size={16} color="#000" />
-          </TouchableOpacity>
-          <Text style={styles.title}>Theme preview</Text>
-          <View style={{ width: 40 }} /> 
-        </View>
-
-        <ScrollView 
-          horizontal 
-          showsHorizontalScrollIndicator={false}
-          contentContainerStyle={styles.scrollContent}
-          snapToInterval={CARD_WIDTH + SPACING}
-          decelerationRate="fast"
+    <Modal
+      transparent
+      visible={isVisible}
+      animationType="none"
+      onRequestClose={onClose}
+      statusBarTranslucent
+    >
+      <View style={StyleSheet.absoluteFill}>
+        {/* Backdrop */}
+        <TouchableOpacity 
+          style={styles.backdrop} 
+          activeOpacity={1} 
+          onPress={onClose}
         >
-          {THEMES.map((theme) => {
-            const isActive = currentThemeId === theme.id;
-            const colors = colorScheme === 'dark' ? theme.colors.dark : theme.colors.light;
-            
-            return (
-              <TouchableOpacity 
-                key={theme.id}
-                onPress={() => {
-                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                  onSelectTheme(theme.id);
-                }}
-                activeOpacity={0.9}
-                style={[
-                  styles.cardContainer,
-                  isActive && styles.activeCardContainer
-                ]}
-              >
-                <View style={styles.card}>
-                  {Platform.OS === 'ios' ? (
-                     <MeshGradientView
-                       meshWidth={3}
-                       meshHeight={3}
-                       points={MESH_POINTS}
-                       primaryColors={colors.primary}
-                       secondaryColors={colors.secondary}
-                       background={colors.background}
-                       smoothsColors={true}
-                       style={StyleSheet.absoluteFill}
-                       pointerEvents="none"
-                     />
-                  ) : (
-                    <LinearGradient
-                      colors={[colors.primary[0], colors.primary[4], colors.primary[8]]}
-                      style={StyleSheet.absoluteFill}
-                    />
-                  )}
-                  
-                  <View style={styles.cardContent}>
-                    <View style={styles.topDots}>
-                      <View style={styles.dot} />
-                      <View style={styles.pill} />
-                      <View style={styles.dot} />
-                    </View>
-                    
-                    <View style={styles.centerContent}>
-                      <Text style={styles.cardTitle}>{theme.name} · {theme.currency}</Text>
-                      <View style={styles.iconCircle}>
-                        <IconSymbol name="photo" size={20} color="#FFF" />
-                      </View>
-                    </View>
-                    
-                    <View style={styles.bottomDots}>
-                       <View style={styles.bottomDot} />
-                       <View style={styles.bottomDot} />
-                       <View style={styles.bottomDot} />
-                       <View style={styles.bottomDot} />
-                    </View>
-                    
-                    <View style={styles.cardFooter} />
-                  </View>
-                </View>
-                
-                {isActive && (
-                  <View style={styles.activeIndicator} />
-                )}
-              </TouchableOpacity>
-            );
-          })}
-        </ScrollView>
+          <BlurView intensity={20} style={StyleSheet.absoluteFill} tint="dark" />
+        </TouchableOpacity>
 
-        <View style={styles.footer}>
-          <TouchableOpacity style={styles.footerButton} onPress={toggleThemeMode}>
-            <View style={styles.footerIconCircle}>
-              <IconSymbol name="circle.lefthalf.filled" size={20} color="#000" />
-            </View>
-            <Text style={styles.footerLabel}>Mode</Text>
-          </TouchableOpacity>
-          
-          <TouchableOpacity style={styles.footerButton}>
-            <View style={styles.footerIconCircle}>
-              <IconSymbol name="paintpalette.fill" size={20} color="#000" />
-            </View>
-            <Text style={styles.footerLabel}>Theme</Text>
-          </TouchableOpacity>
-        </View>
-      </Animated.View>
-    </View>
+        {/* Modal Content */}
+        <Animated.View style={[styles.container, animatedStyle]}>
+          <View style={styles.header}>
+            <TouchableOpacity onPress={onClose} style={styles.closeButton}>
+              <IconSymbol name="xmark" size={16} color="#000" />
+            </TouchableOpacity>
+            <Text style={styles.title}>Theme preview</Text>
+            <View style={{ width: 40 }} /> 
+          </View>
+
+          <ScrollView 
+            horizontal 
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.scrollContent}
+            snapToInterval={CARD_WIDTH + SPACING}
+            decelerationRate="fast"
+          >
+            {THEMES.map((theme) => {
+              const isActive = currentThemeId === theme.id;
+              const colors = colorScheme === 'dark' ? theme.colors.dark : theme.colors.light;
+              
+              return (
+                <TouchableOpacity 
+                  key={theme.id}
+                  onPress={() => {
+                    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                    onSelectTheme(theme.id);
+                  }}
+                  activeOpacity={0.9}
+                  style={[
+                    styles.cardContainer,
+                    isActive && styles.activeCardContainer
+                  ]}
+                >
+                  <View style={styles.card}>
+                    {Platform.OS === 'ios' ? (
+                       <MeshGradientView
+                         meshWidth={3}
+                         meshHeight={3}
+                         points={MESH_POINTS}
+                         primaryColors={colors.primary}
+                         secondaryColors={colors.secondary}
+                         background={colors.background}
+                         smoothsColors={true}
+                         style={StyleSheet.absoluteFill}
+                         pointerEvents="none"
+                       />
+                    ) : (
+                      <LinearGradient
+                        colors={[colors.primary[0], colors.primary[4], colors.primary[8]]}
+                        style={StyleSheet.absoluteFill}
+                      />
+                    )}
+                    
+                    <View style={styles.cardContent}>
+                      <View style={styles.topDots}>
+                        <View style={styles.dot} />
+                        <View style={styles.pill} />
+                        <View style={styles.dot} />
+                      </View>
+                      
+                      <View style={styles.centerContent}>
+                        <Text style={styles.cardTitle}>{theme.name} · {theme.currency}</Text>
+                        <View style={styles.iconCircle}>
+                          <IconSymbol name="photo" size={20} color="#FFF" />
+                        </View>
+                      </View>
+                      
+                      <View style={styles.bottomDots}>
+                         <View style={styles.bottomDot} />
+                         <View style={styles.bottomDot} />
+                         <View style={styles.bottomDot} />
+                         <View style={styles.bottomDot} />
+                      </View>
+                      
+                      <View style={styles.cardFooter} />
+                    </View>
+                  </View>
+                  
+                  {isActive && (
+                    <View style={styles.activeIndicator} />
+                  )}
+                </TouchableOpacity>
+              );
+            })}
+          </ScrollView>
+
+          <View style={styles.footer}>
+            <TouchableOpacity style={styles.footerButton} onPress={toggleThemeMode}>
+              <View style={styles.footerIconCircle}>
+                <IconSymbol name="circle.lefthalf.filled" size={20} color="#000" />
+              </View>
+              <Text style={styles.footerLabel}>Mode</Text>
+            </TouchableOpacity>
+            
+            <TouchableOpacity style={styles.footerButton}>
+              <View style={styles.footerIconCircle}>
+                <IconSymbol name="paintpalette.fill" size={20} color="#000" />
+              </View>
+              <Text style={styles.footerLabel}>Theme</Text>
+            </TouchableOpacity>
+          </View>
+        </Animated.View>
+      </View>
+    </Modal>
   );
 }
 
@@ -180,7 +188,7 @@ const styles = StyleSheet.create({
     bottom: 0,
     left: 0,
     right: 0,
-    height: '85%',
+    height: '92%',
     backgroundColor: '#F2F2F7',
     borderTopLeftRadius: 30,
     borderTopRightRadius: 30,
