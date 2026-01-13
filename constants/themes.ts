@@ -3,7 +3,8 @@ export const THEMES = [
   {
     id: 'blue',
     name: 'Personal',
-    currency: 'EUR', // Just a label based on the image "Personal · EUR"
+    currency: 'EUR',
+    category: 'glow',
     colors: {
       light: {
         primary: [
@@ -37,6 +38,7 @@ export const THEMES = [
     id: 'orange',
     name: 'Flexible',
     currency: 'USD',
+    category: 'glow',
     colors: {
       light: {
         primary: [
@@ -70,6 +72,7 @@ export const THEMES = [
     id: 'green',
     name: 'Business',
     currency: 'GBP',
+    category: 'glow',
     colors: {
       light: {
         primary: [
@@ -96,6 +99,40 @@ export const THEMES = [
           "#1D4ED8", "#047857", "#1D4ED8",
         ],
         background: "#05060A",
+      }
+    }
+  },
+  {
+    id: 'mono',
+    name: 'Minimal',
+    currency: 'USD',
+    category: 'mono',
+    colors: {
+      light: {
+        primary: [
+          "#E5E5E5", "#F5F5F5", "#FFFFFF",
+          "#F5F5F5", "#E5E5E5", "#F5F5F5",
+          "#FFFFFF", "#F5F5F5", "#E5E5E5",
+        ],
+        secondary: [
+          "#F5F5F5", "#FFFFFF", "#E5E5E5",
+          "#E5E5E5", "#F5F5F5", "#FFFFFF",
+          "#FFFFFF", "#E5E5E5", "#F5F5F5",
+        ],
+        background: "#FFFFFF",
+      },
+      dark: {
+        primary: [
+          "#111111", "#222222", "#000000",
+          "#222222", "#111111", "#222222",
+          "#000000", "#222222", "#111111",
+        ],
+        secondary: [
+          "#222222", "#000000", "#111111",
+          "#111111", "#222222", "#000000",
+          "#000000", "#111111", "#222222",
+        ],
+        background: "#000000",
       }
     }
   }

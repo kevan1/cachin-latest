@@ -1,5 +1,5 @@
 
-import React, { useEffect } from 'react';
+import React, { useEffect, useState, useMemo } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, useColorScheme, Dimensions, Platform, ScrollView, Modal } from 'react-native';
 import { BlurView } from 'expo-blur';
 import { IconSymbol } from '@/components/ui/icon-symbol';
@@ -19,29 +19,44 @@ interface ThemeSelectorSheetProps {
   onClose: () => void;
   currentThemeId: string;
   onSelectTheme: (themeId: string) => void;
-  toggleThemeMode: () => void; // For light/dark mode
+  toggleThemeMode: () => void; // For light/dark mode - we might replace this with selectMode
 }
+
+type EditMode = 'style' | 'mode';
+type ThemeCategory = 'glow' | 'mono';
+type AppearanceMode = 'light' | 'dark' | 'system';
 
 export function ThemeSelectorSheet({ 
   isVisible, 
   onClose, 
   currentThemeId, 
   onSelectTheme,
-  toggleThemeMode 
+  toggleThemeMode // We'll keep this for compatibility but implement our own logic
 }: ThemeSelectorSheetProps) {
-  const colorScheme = useColorScheme();
+  const systemColorScheme = useColorScheme();
+  const [activeCategory, setActiveCategory] = useState<ThemeCategory>('glow');
+  const [appearanceMode, setAppearanceMode] = useState<AppearanceMode>('system');
+  const [editMode, setEditMode] = useState<EditMode>('style'); // 'style' or 'mode'
+  
   const opacity = useSharedValue(0);
   const translateY = useSharedValue(100);
 
+  // Sync initial state when visible
   useEffect(() => {
     if (isVisible) {
       opacity.value = withTiming(1, { duration: 300 });
       translateY.value = withSpring(0, { damping: 15 });
+      
+      // Determine category from current theme
+      const current = THEMES.find(t => t.id === currentThemeId);
+      if (current) {
+        setActiveCategory(current.category as ThemeCategory);
+      }
     } else {
       opacity.value = withTiming(0, { duration: 200 });
       translateY.value = withTiming(100, { duration: 200 });
     }
-  }, [isVisible, opacity, translateY]);
+  }, [isVisible, currentThemeId]);
 
   const animatedStyle = useAnimatedStyle(() => {
     return {
@@ -49,6 +64,24 @@ export function ThemeSelectorSheet({
       transform: [{ translateY: translateY.value }],
     };
   });
+
+  const filteredThemes = useMemo(() => {
+    return THEMES.filter(t => t.category === activeCategory);
+  }, [activeCategory]);
+  
+  // Determine effective color scheme based on selection
+  const effectiveColorScheme = appearanceMode === 'system' ? systemColorScheme : appearanceMode;
+
+  const handleApply = () => {
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    onClose();
+  };
+
+  const handleReset = () => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    // Logic to reset? For now maybe just close or reset to defaults
+    // onClose();
+  };
 
   if (!isVisible) return null;
 
@@ -80,6 +113,7 @@ export function ThemeSelectorSheet({
             <View style={{ width: 40 }} /> 
           </View>
 
+          {/* Cards Area */}
           <ScrollView 
             horizontal 
             showsHorizontalScrollIndicator={false}
@@ -87,9 +121,10 @@ export function ThemeSelectorSheet({
             snapToInterval={CARD_WIDTH + SPACING}
             decelerationRate="fast"
           >
-            {THEMES.map((theme) => {
+            {filteredThemes.map((theme) => {
               const isActive = currentThemeId === theme.id;
-              const colors = colorScheme === 'dark' ? theme.colors.dark : theme.colors.light;
+              // Use the effective color scheme for preview
+              const colors = effectiveColorScheme === 'dark' ? theme.colors.dark : theme.colors.light;
               
               return (
                 <TouchableOpacity 
@@ -157,21 +192,158 @@ export function ThemeSelectorSheet({
             })}
           </ScrollView>
 
-          <View style={styles.footer}>
-            <TouchableOpacity style={styles.footerButton} onPress={toggleThemeMode}>
-              <View style={styles.footerIconCircle}>
-                <IconSymbol name="circle.lefthalf.filled" size={20} color="#000" />
-              </View>
-              <Text style={styles.footerLabel}>Mode</Text>
-            </TouchableOpacity>
+          {/* Controls Area */}
+          <View style={styles.controlsContainer}>
+            {/* Mode Switcher (Hidden but implied by navigation? Or explicit buttons?) 
+                User requested: "selection of the current type of themes" vs "selection is the mode"
+                We'll use icons to switch context
+            */}
             
-            <TouchableOpacity style={styles.footerButton}>
-              <View style={styles.footerIconCircle}>
-                <IconSymbol name="paintpalette.fill" size={20} color="#000" />
-              </View>
-              <Text style={styles.footerLabel}>Theme</Text>
+            <View style={styles.optionsRow}>
+              {editMode === 'style' ? (
+                <>
+                  <TouchableOpacity 
+                    style={styles.optionItem}
+                    onPress={() => {
+                      Haptics.selectionAsync();
+                      setActiveCategory('glow');
+                      // Also select the first theme in this category if current is not in it?
+                      // keeping simple for now
+                    }}
+                  >
+                    <View style={[styles.circleOption, activeCategory === 'glow' && styles.activeCircleOption]}>
+                      <LinearGradient
+                        colors={['#00C2FF', '#7C3AED']}
+                        style={StyleSheet.absoluteFill}
+                      />
+                    </View>
+                    <Text style={[styles.optionLabel, activeCategory === 'glow' && styles.activeOptionLabel]}>Glow</Text>
+                  </TouchableOpacity>
+
+                  <TouchableOpacity 
+                    style={styles.optionItem}
+                    onPress={() => {
+                      Haptics.selectionAsync();
+                      setActiveCategory('mono');
+                    }}
+                  >
+                    <View style={[styles.circleOption, activeCategory === 'mono' && styles.activeCircleOption]}>
+                      <View style={[StyleSheet.absoluteFill, { backgroundColor: '#333' }]} />
+                    </View>
+                    <Text style={[styles.optionLabel, activeCategory === 'mono' && styles.activeOptionLabel]}>Minimal</Text>
+                  </TouchableOpacity>
+                  
+                  {/* Locked / Future Options */}
+                  <TouchableOpacity style={[styles.optionItem, { opacity: 0.5 }]} disabled>
+                     <View style={styles.circleOption}>
+                        <LinearGradient colors={['#FFD700', '#FFA500']} style={StyleSheet.absoluteFill} />
+                        <View style={styles.lockIcon}><IconSymbol name="lock.fill" size={12} color="#FFF"/></View>
+                     </View>
+                     <Text style={styles.optionLabel}>Premium</Text>
+                  </TouchableOpacity>
+                  
+                  <TouchableOpacity style={[styles.optionItem, { opacity: 0.5 }]} disabled>
+                     <View style={styles.circleOption}>
+                        <LinearGradient colors={['#A0A0A0', '#404040']} style={StyleSheet.absoluteFill} />
+                        <View style={styles.lockIcon}><IconSymbol name="lock.fill" size={12} color="#FFF"/></View>
+                     </View>
+                     <Text style={styles.optionLabel}>Metal</Text>
+                  </TouchableOpacity>
+                </>
+              ) : (
+                <>
+                  <TouchableOpacity 
+                    style={styles.optionItem}
+                    onPress={() => {
+                      Haptics.selectionAsync();
+                      setAppearanceMode('light');
+                      // In a real app we'd toggle the system theme here
+                    }}
+                  >
+                    <View style={[styles.circleOption, appearanceMode === 'light' && styles.activeCircleOption, { backgroundColor: '#FFF', borderWidth: 1, borderColor: '#E5E5E5' }]}>
+                    </View>
+                    <Text style={[styles.optionLabel, appearanceMode === 'light' && styles.activeOptionLabel]}>Light</Text>
+                  </TouchableOpacity>
+
+                  <TouchableOpacity 
+                    style={styles.optionItem}
+                    onPress={() => {
+                      Haptics.selectionAsync();
+                      setAppearanceMode('dark');
+                    }}
+                  >
+                    <View style={[styles.circleOption, appearanceMode === 'dark' && styles.activeCircleOption, { backgroundColor: '#000' }]}>
+                    </View>
+                    <Text style={[styles.optionLabel, appearanceMode === 'dark' && styles.activeOptionLabel]}>Dark</Text>
+                  </TouchableOpacity>
+
+                  <TouchableOpacity 
+                    style={styles.optionItem}
+                    onPress={() => {
+                      Haptics.selectionAsync();
+                      setAppearanceMode('system');
+                    }}
+                  >
+                    <View style={[styles.circleOption, appearanceMode === 'system' && styles.activeCircleOption, { overflow: 'hidden' }]}>
+                       <View style={{flexDirection: 'row', flex: 1}}>
+                         <View style={{flex: 1, backgroundColor: '#FFF'}} />
+                         <View style={{flex: 1, backgroundColor: '#000'}} />
+                       </View>
+                    </View>
+                    <Text style={[styles.optionLabel, appearanceMode === 'system' && styles.activeOptionLabel]}>System</Text>
+                  </TouchableOpacity>
+                </>
+              )}
+            </View>
+
+            {/* Navigation / Undo / Apply Row */}
+            <View style={styles.bottomNavRow}>
+               <TouchableOpacity 
+                  style={styles.undoButton} 
+                  onPress={() => {
+                     // Toggle between modes for "Back" behavior? Or implement undo?
+                     // Let's use it to toggle back to 'style' if in 'mode', or just visual
+                     if (editMode === 'mode') {
+                       Haptics.selectionAsync();
+                       setEditMode('style');
+                     } else {
+                       handleReset();
+                     }
+                  }}
+               >
+                 <IconSymbol name="arrow.uturn.backward" size={20} color="#000" />
+               </TouchableOpacity>
+               
+               {/* Mode Toggles (Small) */}
+               <View style={styles.togglePill}>
+                 <TouchableOpacity 
+                   style={[styles.toggleSegment, editMode === 'style' && styles.activeToggleSegment]}
+                   onPress={() => {
+                     Haptics.selectionAsync();
+                     setEditMode('style');
+                   }}
+                 >
+                   <IconSymbol name="paintpalette.fill" size={16} color={editMode === 'style' ? "#FFF" : "#000"} />
+                 </TouchableOpacity>
+                 <TouchableOpacity 
+                   style={[styles.toggleSegment, editMode === 'mode' && styles.activeToggleSegment]}
+                   onPress={() => {
+                     Haptics.selectionAsync();
+                     setEditMode('mode');
+                   }}
+                 >
+                   <IconSymbol name="circle.lefthalf.filled" size={16} color={editMode === 'mode' ? "#FFF" : "#000"} />
+                 </TouchableOpacity>
+               </View>
+
+               <View style={{ width: 40 }} /> 
+            </View>
+
+            <TouchableOpacity style={styles.applyButton} onPress={handleApply}>
+              <Text style={styles.applyButtonText}>Apply</Text>
             </TouchableOpacity>
           </View>
+
         </Animated.View>
       </View>
     </Modal>
@@ -223,7 +395,7 @@ const styles = StyleSheet.create({
   },
   scrollContent: {
     paddingHorizontal: SCREEN_WIDTH * 0.225, // Center the first card
-    paddingVertical: 40,
+    paddingVertical: 20,
     alignItems: 'center',
   },
   cardContainer: {
@@ -309,27 +481,91 @@ const styles = StyleSheet.create({
     borderRadius: 3,
     backgroundColor: '#000',
   },
-  footer: {
+  controlsContainer: {
+    paddingHorizontal: 24,
+    paddingBottom: 40,
+    gap: 20,
+  },
+  optionsRow: {
     flexDirection: 'row',
     justifyContent: 'center',
-    gap: 60,
-    paddingBottom: 50,
+    gap: 20,
+    height: 90,
   },
-  footerButton: {
+  optionItem: {
     alignItems: 'center',
     gap: 8,
   },
-  footerIconCircle: {
-    width: 50,
-    height: 50,
-    borderRadius: 25,
+  circleOption: {
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    overflow: 'hidden',
     backgroundColor: '#E5E5EA',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  activeCircleOption: {
+    borderWidth: 2,
+    borderColor: '#007AFF', // Or theme color
+    transform: [{scale: 1.1}]
+  },
+  optionLabel: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#8E8E93',
+  },
+  activeOptionLabel: {
+    color: '#000',
+    fontWeight: '700',
+  },
+  lockIcon: {
+    position: 'absolute',
+    bottom: 0,
+    right: 0,
+    backgroundColor: 'rgba(0,0,0,0.4)',
+    padding: 4,
+    borderTopLeftRadius: 8,
+  },
+  bottomNavRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 10,
+  },
+  undoButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  footerLabel: {
-    fontSize: 14,
-    color: '#000',
-    fontWeight: '500',
+  togglePill: {
+    flexDirection: 'row',
+    backgroundColor: '#E5E5EA',
+    borderRadius: 20,
+    padding: 4,
+    gap: 4,
+  },
+  toggleSegment: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  activeToggleSegment: {
+    backgroundColor: '#000',
+  },
+  applyButton: {
+    backgroundColor: '#E5E5EA', 
+    borderRadius: 24,
+    paddingVertical: 16,
+    alignItems: 'center',
+  },
+  applyButtonText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#000', // Better contrast on light gray
   }
 });
