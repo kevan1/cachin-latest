@@ -537,9 +537,9 @@ export default function HomeScreen() {
     sendSheetRef.current?.expand();
   };
 
-  const handleSearch = () => {
+  const handleOpenTheme = () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    showToast("Search is coming soon.");
+    setShowThemeSelector(true);
   };
 
   const handleOpenProfile = useCallback(() => {
@@ -579,10 +579,10 @@ export default function HomeScreen() {
               )}
             </PlatformPressable>
             <PlatformPressable
-              onPress={handleSearch}
+              onPress={handleOpenTheme}
               pressOpacity={0.6}
               accessibilityRole="button"
-              accessibilityLabel="Search items"
+              accessibilityLabel="Select theme"
             >
               {supportsLiquidGlass ? (
                 <GlassEffectView
@@ -590,11 +590,11 @@ export default function HomeScreen() {
                   isInteractive={false}
                   glassEffectStyle="clear"
                 >
-                  <IconSymbol name="magnifyingglass" size={18} color="rgba(0,0,0,0.72)" />
+                  <IconSymbol name="paintpalette.fill" size={18} color="rgba(0,0,0,0.72)" />
                 </GlassEffectView>
               ) : (
                 <GlassView style={[styles.headerGlassButton, headerAvatarFallbackStyle]}>
-                  <IconSymbol name="magnifyingglass" size={18} color="rgba(0,0,0,0.72)" />
+                  <IconSymbol name="paintpalette.fill" size={18} color="rgba(0,0,0,0.72)" />
                 </GlassView>
               )}
             </PlatformPressable>
@@ -603,7 +603,7 @@ export default function HomeScreen() {
         hidesSharedBackground: true,
       },
     ],
-    [handleAdd, handleSearch]
+    [handleAdd, handleOpenTheme]
   );
 
   const headerLeftItems = useCallback(
@@ -801,54 +801,53 @@ export default function HomeScreen() {
 
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
-    <View style={styles.container}>
       <GestureDetector gesture={longPressGesture}>
-        <View style={StyleSheet.absoluteFill}>
-      {Platform.OS === "ios" ? (
-        <MeshGradientView
-          meshWidth={MESH_DIMENSION}
-          meshHeight={MESH_DIMENSION}
-          points={MESH_POINTS}
-          primaryColors={meshColors.primary}
-          secondaryColors={meshColors.secondary}
-          background={meshColors.background}
-          smoothsColors={true}
-          colorSpace="device"
-          isAnimated={true}
-          animationDuration={1800}
-          animationType="sine"
-          style={styles.background}
-          pointerEvents="none"
-        />
-      ) : (
-        <LinearGradient
-          colors={[
-            meshColors.primary[0],
-            meshColors.primary[4],
-            meshColors.primary[8],
-          ]}
-          locations={[0, 0.6, 1]}
-          style={styles.background}
-          pointerEvents="none"
-        />
-      )}
-      <LinearGradient
-        colors={[
-          "rgba(255,255,255,0.95)",
-          "rgba(255,255,255,0.75)",
-          "rgba(255,255,255,0)",
-        ]}
-        locations={[0, 0.35, 1]}
-        start={{ x: 0.5, y: 1 }}
-        end={{ x: 0.5, y: 0.5 }}
-        style={styles.backgroundFade}
-        pointerEvents="none"
-      />
-      </View>
-      </GestureDetector>
+        <View style={styles.container}>
+          <View style={StyleSheet.absoluteFill}>
+            {Platform.OS === "ios" ? (
+              <MeshGradientView
+                meshWidth={MESH_DIMENSION}
+                meshHeight={MESH_DIMENSION}
+                points={MESH_POINTS}
+                primaryColors={meshColors.primary}
+                secondaryColors={meshColors.secondary}
+                background={meshColors.background}
+                smoothsColors={true}
+                colorSpace="device"
+                isAnimated={true}
+                animationDuration={1800}
+                animationType="sine"
+                style={styles.background}
+                pointerEvents="none"
+              />
+            ) : (
+              <LinearGradient
+                colors={[
+                  meshColors.primary[0],
+                  meshColors.primary[4],
+                  meshColors.primary[8],
+                ]}
+                locations={[0, 0.6, 1]}
+                style={styles.background}
+                pointerEvents="none"
+              />
+            )}
+            <LinearGradient
+              colors={[
+                "rgba(255,255,255,0.95)",
+                "rgba(255,255,255,0.75)",
+                "rgba(255,255,255,0)",
+              ]}
+              locations={[0, 0.35, 1]}
+              start={{ x: 0.5, y: 1 }}
+              end={{ x: 0.5, y: 0.5 }}
+              style={styles.backgroundFade}
+              pointerEvents="none"
+            />
+          </View>
 
-      <SafeAreaView style={styles.safeArea} edges={["top"]}>
-        <ScrollView
+          <SafeAreaView style={styles.safeArea} edges={["top"]}>
+            <ScrollView
           contentContainerStyle={[
             styles.scrollContent,
             Platform.OS === "ios" ? styles.scrollContentIos : null,
@@ -1605,7 +1604,8 @@ export default function HomeScreen() {
         onSelectTheme={handleThemeSelect}
         toggleThemeMode={() => {}} 
       />
-    </View>
+        </View>
+      </GestureDetector>
     </GestureHandlerRootView>
   );
 }
