@@ -1,14 +1,13 @@
-import { StyleSheet, ScrollView, TouchableOpacity, View, Text, RefreshControl, Linking, Switch, Animated, Platform, useColorScheme } from "react-native";
-import { useNavigation, useRouter, useFocusEffect } from "expo-router";
+import { StyleSheet, ScrollView, TouchableOpacity, View, Text, RefreshControl, Linking, Switch, Animated, useColorScheme, Platform, StatusBar } from "react-native";
+import { useRouter, useFocusEffect } from "expo-router";
 import * as Haptics from 'expo-haptics';
-import { useState, useEffect, useCallback, useRef, useMemo, useLayoutEffect } from 'react';
+import { useState, useEffect, useCallback, useRef, useMemo, type ReactNode } from 'react';
 import * as Clipboard from 'expo-clipboard';
 import { Transaction } from '@/types/types';
 import { getMergedTransactions, startTransactionPolling } from '@/utils/transactionListener';
 import { clearTransactions } from '@/utils/transactionStorage';
 import { getUsernameByAddress } from '@/services/firestoreService';
 import BottomSheet, { BottomSheetView, BottomSheetBackdrop } from '@gorhom/bottom-sheet';
-import { GestureHandlerRootView, GestureDetector, Gesture } from 'react-native-gesture-handler';
 import { getUsername, saveUsername, getSelectedCurrency, Currency } from '@/utils/userStorage';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { fetchMultiChainBalances } from '@/utils/multiChainBalanceService';
@@ -18,20 +17,18 @@ import { ChainFilter, loadSelectedChain, saveSelectedChain } from '@/utils/chain
 import { THEMES, MESH_POINTS } from '@/constants/themes';
 import { ThemeSelectorSheet } from '@/components/ThemeSelectorSheet';
 import Svg, { Path } from 'react-native-svg';
-import { usePrivy, useEmbeddedSolanaWallet, useEmbeddedEthereumWallet } from '@privy-io/expo';
+import { usePrivy, useEmbeddedSolanaWallet, useEmbeddedEthereumWallet, useSessionSigners, useIdentityToken, getAccessToken } from '@privy-io/expo';
 import QRCode from 'react-native-qrcode-svg';
-import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { LinearGradient } from "expo-linear-gradient";
 import { GlassView } from "@/components/ui/GlassView";
-import { GlassView as GlassEffectView, isLiquidGlassAvailable } from "expo-glass-effect";
 import { IconSymbol } from "@/components/ui/icon-symbol";
 import { PlatformPressable } from "@react-navigation/elements";
-import { Button as SwiftUIButton, Image as SwiftUIImage, Text as SwiftUIText, ZStack, Host } from "@expo/ui/swift-ui";
-import { background, border, cornerRadius, frame, offset } from "@expo/ui/swift-ui/modifiers";
-import { Image } from "expo-image";
 import { useToast } from "heroui-native";
 import { MeshGradientView } from "@wilmxre/react-native-mesh-gradient/src";
 import { buildSolanaPayUri, createSolanaPayReferences, SOLANA_USDC_MINT } from "@/utils/solanaPay";
+import { ensureSponsoredSolanaWallet } from "@/utils/privySponsorship";
+import { getSponsoredSolanaWallet, setSponsoredSolanaWallet } from "@/utils/sponsoredWalletStorage";
 
 const MESH_DIMENSION = 3;
 
@@ -115,7 +112,6 @@ function CryptoDot({ size = 32, color = '#f97316' }: { size?: number; color?: st
 
 export default function HomeScreen() {
   const router = useRouter();
-  const navigation = useNavigation();
   const colorScheme = useColorScheme() ?? "light";
   const [themeId, setThemeId] = useState<string>('blue');
   const [showThemeSelector, setShowThemeSelector] = useState(false);
@@ -134,16 +130,20 @@ export default function HomeScreen() {
 
   const currentTheme = THEMES.find(t => t.id === themeId) || THEMES[0];
   const meshColors = colorScheme === "dark" ? currentTheme.colors.dark : currentTheme.colors.light;
+  const supportsMeshGradient = Platform.OS === "ios" && Number(Platform.Version) >= 16;
   
   const insets = useSafeAreaInsets();
-  const supportsLiquidGlass = isLiquidGlassAvailable();
-  const { user } = usePrivy();
+  const topInset = Math.max(insets.top, StatusBar.currentHeight ?? 0);
+  const androidHeaderOffset = Math.max(6, topInset + 6) + 52;
+  const { user, isReady } = usePrivy();
   const { wallets: solanaWallets } = useEmbeddedSolanaWallet();
-  const { wallets: evmWallets, create: createEthereumWallet } = useEmbeddedEthereumWallet();
+  const { addSessionSigners, removeSessionSigners } = useSessionSigners();
+  const { wallets: evmWallets } = useEmbeddedEthereumWallet();
+  const { getIdentityToken } = useIdentityToken();
   const { toast } = useToast();
+  const didLogUserJwt = useRef(false);
   const [selectedChain, setSelectedChain] = useState<ChainFilter>('all');
   const [usdBalance, setUsdBalance] = useState<string>('0.00');
-  // const [isLoadingBalance] = useState(false);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [isLoadingTransactions, setIsLoadingTransactions] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
@@ -155,6 +155,135 @@ export default function HomeScreen() {
   const [receiveAsset, setReceiveAsset] = useState<'usdc' | 'sol'>('usdc');
   const [currency, setCurrency] = useState<Currency>('USD');
   const [arsPrice, setArsPrice] = useState<number>(0);
+  const [sponsoredWalletId, setSponsoredWalletId] = useState<string | null>(null);
+  const [sponsoredWalletAddress, setSponsoredWalletAddress] = useState<string | null>(null);
+  const [sponsoredWalletLoaded, setSponsoredWalletLoaded] = useState(false);
+
+  const keyQuorumId = process.env.EXPO_PUBLIC_PRIVY_KEY_QUORUM_ID;
+  const sessionSignerPolicyIds = useMemo(() => {
+    const raw = process.env.EXPO_PUBLIC_PRIVY_GAS_SPONSOR_POLICY_IDS;
+    if (!raw) return [];
+    return raw
+      .split(",")
+      .map((id) => id.trim())
+      .filter(Boolean);
+  }, []);
+
+  useEffect(() => {
+    console.log("[Home] EXPO_PUBLIC_PRIVY_KEY_QUORUM_ID:", keyQuorumId);
+  }, [keyQuorumId]);
+
+  useEffect(() => {
+    // Dev-only helper to fetch the Privy user access token (aka "user-jwt") for REST calls like /v1/wallets/authenticate.
+    if (!__DEV__) return;
+    if (process.env.EXPO_PUBLIC_PRIVY_LOG_USER_JWT !== "true") return;
+    if (!isReady || !user?.id) return;
+    if (didLogUserJwt.current) return;
+    didLogUserJwt.current = true;
+
+    getAccessToken()
+      .then(async (accessToken) => {
+        // Make it very obvious in Metro logs (colors + a single emoji), and also print a raw copy-safe line.
+        const green = "\u001b[32m";
+        const cyan = "\u001b[36m";
+        const reset = "\u001b[0m";
+        console.log(`${green}🔑 [Privy] Tokens${reset}`);
+        console.log(`PRIVY_ACCESS_TOKEN=${accessToken}`);
+
+        const idToken = await getIdentityToken().catch(() => null);
+        if (idToken) {
+          console.log(`PRIVY_ID_TOKEN=${idToken}`);
+        } else {
+          console.log(`${cyan}[Privy] No identity token available (getIdentityToken returned null)${reset}`);
+        }
+
+        // Wallet API endpoints like /v1/wallets/authenticate expect the user's *access token* ("user_jwt") most of the time.
+        // Copy the access token by default to avoid confusion. (ID token is still logged above when available.)
+        await Clipboard.setStringAsync(accessToken);
+        toast.show("Copied PRIVY_ACCESS_TOKEN to clipboard.");
+      })
+      .catch((error) => {
+        console.warn("[Privy] Failed to fetch access token", error);
+      });
+  }, [getIdentityToken, isReady, toast, user?.id]);
+
+  const handleAuthorizeGasless = useCallback(async () => {
+    try {
+      const address =
+        sponsoredWalletAddress ||
+        (solanaWallets && solanaWallets.length > 0
+          ? solanaWallets[0]?.publicKey ?? solanaWallets[0]?.address
+          : null);
+      if (!address) {
+        toast.show("No Solana address available.");
+        return;
+      }
+      if (!keyQuorumId) {
+        toast.show(
+          "Missing EXPO_PUBLIC_PRIVY_KEY_QUORUM_ID. Add it to .env and restart Metro."
+        );
+        return;
+      }
+
+      console.log("[Home] Adding session signer", {
+        address,
+        keyQuorumId,
+        policyIds: sessionSignerPolicyIds,
+        sponsoredWalletId,
+      });
+      await addSessionSigners({
+        address,
+        signers: [
+          {
+            signerId: keyQuorumId,
+            policyIds: sessionSignerPolicyIds,
+          },
+        ],
+      });
+
+      toast.show("Gasless authorization enabled for this wallet.");
+    } catch (error: any) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (message.includes("Duplicate signer")) {
+        toast.show("Gasless authorization is already enabled for this wallet.");
+        return;
+      }
+      console.error("[Home] Failed to add session signer", error);
+      toast.show(message || "Failed to authorize wallet.");
+    }
+  }, [
+    addSessionSigners,
+    keyQuorumId,
+    sessionSignerPolicyIds,
+    solanaWallets,
+    sponsoredWalletAddress,
+    toast,
+  ]);
+
+  const handleRevokeGasless = useCallback(async () => {
+    try {
+      const address =
+        sponsoredWalletAddress ||
+        (solanaWallets && solanaWallets.length > 0
+          ? solanaWallets[0]?.publicKey ?? solanaWallets[0]?.address
+          : null);
+      if (!address) {
+        toast.show("No Solana address available.");
+        return;
+      }
+      await removeSessionSigners({ address });
+      toast.show("Gasless authorization revoked for this wallet.");
+    } catch (error: any) {
+      console.error("[Home] Failed to revoke session signers", error);
+      toast.show(error instanceof Error ? error.message : "Failed to revoke gasless.");
+    }
+  }, [
+    removeSessionSigners,
+    solanaWallets,
+    sponsoredWalletAddress,
+    sponsoredWalletId,
+    toast,
+  ]);
   
   const bottomSheetRef = useRef<BottomSheet>(null);
   const sendSheetRef = useRef<BottomSheet>(null);
@@ -168,12 +297,22 @@ export default function HomeScreen() {
   const receiveSnapPoints = useMemo(() => ['45%'], []);
   const cryptoReceiveSnapPoints = useMemo(() => ['70%'], []);
   const fiatReceiveSnapPoints = useMemo(() => ['75%'], []);
-  const tabBarHeight = Platform.OS === "ios" ? 49 : 56;
+  const isIOS = process.env.EXPO_OS === "ios";
+  const tabBarHeight = isIOS ? 49 : 56;
   const sheetBottomPadding = Math.max(24, insets.bottom + tabBarHeight + 12);
   
   // Load selected chain preference
   useEffect(() => {
     loadSelectedChain().then(setSelectedChain);
+  }, []);
+
+  useEffect(() => {
+    getSponsoredSolanaWallet()
+      .then(({ id, address }) => {
+        setSponsoredWalletId(id);
+        setSponsoredWalletAddress(address);
+      })
+      .finally(() => setSponsoredWalletLoaded(true));
   }, []);
 
   // Load currency and prices on focus
@@ -196,23 +335,6 @@ export default function HomeScreen() {
     }, [])
   );
   
-  // Auto-create EVM wallet for existing users who don't have one
-  useEffect(() => {
-    const ensureEVMWallet = async () => {
-      if (user && solanaWallets && solanaWallets.length > 0 && (!evmWallets || evmWallets.length === 0)) {
-        console.log('User has Solana wallet but no EVM wallet. Creating EVM wallet for Monad...');
-        try {
-          await createEthereumWallet?.({ recoveryMethod: 'privy' });
-          console.log('EVM wallet created successfully for existing user');
-        } catch (error) {
-          console.error('Error creating EVM wallet for existing user:', error);
-        }
-      }
-    };
-    
-    ensureEVMWallet();
-  }, [user, solanaWallets, evmWallets, createEthereumWallet]);
-  
   // Get the first EVM address
   const getEvmAddress = () => {
     if (evmWallets && evmWallets.length > 0) {
@@ -234,12 +356,8 @@ export default function HomeScreen() {
   const getDisplayAddress = () => {
     if (selectedChain === ChainType.MONAD) {
       return getEvmAddressShort();
-    } else if (selectedChain === ChainType.SOLANA) {
-      return getSolanaAddress();
-    } else {
-      // For 'all', show Solana address by default
-      return getSolanaAddress();
     }
+    return getSolanaAddress();
   };
   
   // Handle chain selection
@@ -251,6 +369,9 @@ export default function HomeScreen() {
   
   // Get full Solana address for username lookup
   const getFullSolanaAddressForUsername = () => {
+    if (sponsoredWalletAddress) {
+      return sponsoredWalletAddress;
+    }
     if (solanaWallets && solanaWallets.length > 0) {
       const wallet = solanaWallets[0];
       return wallet.publicKey || null;
@@ -294,11 +415,43 @@ export default function HomeScreen() {
     };
     loadUsername();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [solanaWallets]);
+  }, [solanaWallets, sponsoredWalletAddress]);
+
+  const walletInitAttempted = useRef(false);
+  useEffect(() => {
+    if (!sponsoredWalletLoaded) return;
+    if (!isReady || !user?.id || walletInitAttempted.current) return;
+    walletInitAttempted.current = true;
+
+    const walletAddress =
+      solanaWallets && solanaWallets.length > 0
+        ? solanaWallets[0]?.publicKey ?? solanaWallets[0]?.address
+        : undefined;
+
+    ensureSponsoredSolanaWallet({
+      userId: user.id,
+      walletId: sponsoredWalletId ?? undefined,
+      walletAddress,
+    })
+      .then((wallet) => {
+        console.log("[Home] ✅ Sponsored wallet ready", wallet?.address);
+        const nextId = wallet?.walletId ?? null;
+        const nextAddress = wallet?.publicKey ?? wallet?.address ?? null;
+        setSponsoredWalletId(nextId);
+        setSponsoredWalletAddress(nextAddress);
+        void setSponsoredSolanaWallet({ id: nextId, address: nextAddress });
+      })
+      .catch((error) => {
+        console.error("[Home] ❌ Failed to ensure sponsored wallet", error);
+      });
+  }, [isReady, solanaWallets, sponsoredWalletId, sponsoredWalletLoaded, user]);
   
   // Get the first Solana address
   const getSolanaAddress = () => {
     console.log('Solana Wallets:', solanaWallets);
+    if (sponsoredWalletAddress) {
+      return `${sponsoredWalletAddress.slice(0, 4)}...${sponsoredWalletAddress.slice(-4)}`;
+    }
     if (solanaWallets && solanaWallets.length > 0) {
       const wallet = solanaWallets[0];
       console.log('First Solana wallet:', wallet);
@@ -347,6 +500,9 @@ export default function HomeScreen() {
   
   // Get full Solana address for balance fetch
   const getFullSolanaAddress = () => {
+    if (sponsoredWalletAddress) {
+      return sponsoredWalletAddress;
+    }
     if (solanaWallets && solanaWallets.length > 0) {
       const wallet = solanaWallets[0];
       return wallet.publicKey || null;
@@ -513,15 +669,6 @@ export default function HomeScreen() {
         ? "Solana"
         : "Monad";
 
-  const headerAvatarFallbackStyle = useMemo(
-    () => ({
-      backgroundColor: colorScheme === "dark" ? "rgba(12,16,24,0.7)" : "rgba(255,255,255,0.7)",
-      borderWidth: 1,
-      borderColor: colorScheme === "dark" ? "rgba(255,255,255,0.2)" : "rgba(0,0,0,0.08)",
-    }),
-    [colorScheme]
-  );
-
   const handleAdd = () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     receiveSheetRef.current?.expand();
@@ -534,128 +681,18 @@ export default function HomeScreen() {
 
   const handleSend = () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    if (isIOS) {
+      router.push("/send-options");
+      return;
+    }
+
     sendSheetRef.current?.expand();
   };
-
-  const handleOpenTheme = () => {
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    setShowThemeSelector(true);
-  };
-
-  const handleOpenProfile = useCallback(() => {
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    router.push("/profile");
-  }, [router]);
 
   const handleBalance = () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     router.push('/balance');
   };
-
-  const headerRightItems = useCallback(
-    () => [
-      {
-        type: "custom",
-        element: (
-          <View style={styles.headerRightRow}>
-            <PlatformPressable
-              onPress={handleAdd}
-              pressOpacity={0.6}
-              accessibilityRole="button"
-              accessibilityLabel="Add"
-            >
-              {supportsLiquidGlass ? (
-                <GlassEffectView
-                  style={styles.headerGlassButton}
-                  isInteractive={true}
-                  glassEffectStyle="clear"
-                >
-                  <IconSymbol name="plus" size={18} color="rgba(0,0,0,0.72)" />
-                </GlassEffectView>
-              ) : (
-                <GlassView style={[styles.tintedGlassView, headerAvatarFallbackStyle]}>
-                  <IconSymbol name="plus" size={18} color="rgba(0,0,0,0.72)" />
-                </GlassView>
-              )}
-            </PlatformPressable>
-            <PlatformPressable
-              onPress={handleOpenTheme}
-              pressOpacity={0.6}
-              accessibilityRole="button"
-              accessibilityLabel="Select theme"
-            >
-              {supportsLiquidGlass ? (
-                <GlassEffectView
-                  style={styles.headerGlassButton}
-                  isInteractive={false}
-                  glassEffectStyle="clear"
-                >
-                  <IconSymbol name="paintpalette.fill" size={18} color="rgba(0,0,0,0.72)" />
-                </GlassEffectView>
-              ) : (
-                <GlassView style={[styles.headerGlassButton, headerAvatarFallbackStyle]}>
-                  <IconSymbol name="paintpalette.fill" size={18} color="rgba(0,0,0,0.72)" />
-                </GlassView>
-              )}
-            </PlatformPressable>
-          </View>
-        ),
-        hidesSharedBackground: true,
-      },
-    ],
-    [handleAdd, handleOpenTheme]
-  );
-
-  const headerLeftItems = useCallback(
-    () => [
-      {
-        type: "custom",
-        element: (
-          <PlatformPressable
-            onPress={handleOpenProfile}
-            pressOpacity={0.7}
-            accessibilityRole="button"
-            accessibilityLabel="Open profile"
-          >
-            <View style={styles.headerProfileRow}>
-              {supportsLiquidGlass ? (
-                <GlassEffectView
-                  style={styles.headerGlassAvatar}
-                  isInteractive={true}
-                  glassEffectStyle="clear"
-                >
-                  <Image
-                    source={{ uri: "https://github.com/betomoedano.png" }}
-                    style={styles.headerGlassAvatarImage}
-                  />
-                </GlassEffectView>
-              ) : (
-                <GlassView style={[styles.headerGlassAvatar, headerAvatarFallbackStyle]}>
-                  <Image
-                    source={{ uri: "https://github.com/betomoedano.png" }}
-                    style={styles.headerGlassAvatarImage}
-                  />
-                </GlassView>
-              )}
-              <Text style={styles.headerGreetingText} numberOfLines={1}>
-                Hello, {displayUsername}
-              </Text>
-            </View>
-          </PlatformPressable>
-        ),
-        hidesSharedBackground: true,
-      },
-    ],
-    [displayUsername, handleOpenProfile, headerAvatarFallbackStyle, supportsLiquidGlass]
-  );
-
-  useLayoutEffect(() => {
-    if (Platform.OS !== "ios") return;
-    navigation.setOptions({
-      unstable_headerLeftItems: headerLeftItems,
-      unstable_headerRightItems: headerRightItems,
-    } as any);
-  }, [headerLeftItems, headerRightItems, navigation]);
 
   const showToast = useCallback(
     (message: string) => {
@@ -709,11 +746,6 @@ export default function HomeScreen() {
       return <WalletIcon size={24} color="#000" />;
     }
   };
-
-  const displayUsername = useMemo(() => {
-    if (!username || username === "User") return "User";
-    return username.startsWith("$") ? username : `$${username}`;
-  }, [username]);
   
   const handleTransactionPress = (tx: Transaction) => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
@@ -791,20 +823,97 @@ export default function HomeScreen() {
     []
   );
 
-  const longPressGesture = Gesture.LongPress()
-    .minDuration(500)
-    .onStart(() => {
-      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-      setShowThemeSelector(true);
-    })
-    .runOnJS(true);
+  // const longPressGesture = Gesture.LongPress()
+  //   .minDuration(500)
+  //   .maxDistance(12)
+  //   .shouldCancelWhenOutside(false)
+  //   .onStart(() => {
+  //     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+  //     setShowThemeSelector(true);
+  //   })
+  //   .runOnJS(true);
 
-  return (
-    <GestureHandlerRootView style={{ flex: 1 }}>
-      <GestureDetector gesture={longPressGesture}>
-        <View style={styles.container}>
-          <View style={StyleSheet.absoluteFill}>
-            {Platform.OS === "ios" ? (
+  // const rootGesture = Gesture.Simultaneous(
+  //   longPressGesture,
+  //   Gesture.Native()
+  // );
+
+  const renderGlassSurface = (
+    content: ReactNode,
+    style: any,
+    intensity: number,
+    _interactive = false
+  ) =>
+    (
+      <GlassView style={style} intensity={intensity}>
+        {content}
+      </GlassView>
+    );
+
+  const recentCardContent = (
+    <>
+      {transactions.length === 0 && !isLoadingTransactions ? (
+        <View style={styles.emptyStateLiquid}>
+          <Text style={styles.emptyTitle}>No activity yet</Text>
+          <Text style={styles.emptySubtitle}>Your recent transfers will appear here.</Text>
+        </View>
+      ) : (
+        transactions.slice(0, 6).map((tx) => {
+          const item = formatTransaction(tx);
+          const status =
+            tx.status === "confirmed"
+              ? { label: "Successful", dot: "#22C55E" }
+              : tx.status === "pending"
+                ? { label: "Pending", dot: "#F59E0B" }
+                : { label: "Failed", dot: "#EF4444" };
+
+          const dateText = new Date(tx.timestamp).toLocaleString(undefined, {
+            month: "short",
+            day: "numeric",
+            hour: "numeric",
+            minute: "2-digit",
+          });
+
+          return (
+            <TouchableOpacity
+              key={item.id}
+              style={styles.recentRow}
+              activeOpacity={0.85}
+              onPress={() => handleTransactionPress(tx)}
+            >
+              <View style={styles.recentLeft}>
+                <View style={styles.recentIcon}>
+                  {getActivityIcon(item.type)}
+                </View>
+                <View style={styles.recentText}>
+                  <Text style={styles.recentTitle} numberOfLines={1}>
+                    {item.title}
+                  </Text>
+                  <Text style={styles.recentMeta} numberOfLines={1}>
+                    {dateText}
+                  </Text>
+                </View>
+              </View>
+              <View style={styles.recentRight}>
+                <Text style={styles.recentAmount} numberOfLines={1}>
+                  {isBalanceVisible ? `$${tx.amount.toFixed(2)}` : "$••••"}
+                </Text>
+                <View style={styles.statusRow}>
+                  <View style={[styles.statusDot, { backgroundColor: status.dot }]} />
+                  <Text style={styles.statusTextLiquid}>{status.label}</Text>
+                </View>
+              </View>
+            </TouchableOpacity>
+          );
+        })
+      )}
+    </>
+  );
+
+  const screenContent = (
+    <View style={styles.container}>
+      <View style={StyleSheet.absoluteFill} pointerEvents="none">
+            {supportsMeshGradient ? (
               <MeshGradientView
                 meshWidth={MESH_DIMENSION}
                 meshHeight={MESH_DIMENSION}
@@ -824,8 +933,8 @@ export default function HomeScreen() {
               <LinearGradient
                 colors={[
                   meshColors.primary[0],
-                  meshColors.primary[4],
-                  meshColors.primary[8],
+                  meshColors.primary[1],
+                  meshColors.primary[2],
                 ]}
                 locations={[0, 0.6, 1]}
                 style={styles.background}
@@ -846,108 +955,69 @@ export default function HomeScreen() {
             />
           </View>
 
-          <SafeAreaView style={styles.safeArea} edges={["top"]}>
-            <ScrollView
-          contentContainerStyle={[
-            styles.scrollContent,
-            Platform.OS === "ios" ? styles.scrollContentIos : null,
-          ]}
-          refreshControl={
-            <RefreshControl refreshing={isRefreshing} onRefresh={onRefresh} tintColor="#FFFFFF" />
-          }
-          showsVerticalScrollIndicator={false}
-        >
-          {Platform.OS !== "ios" ? (
-            <View style={styles.topHeader}>
+          <View style={styles.safeArea}>
+            <View style={[styles.topHeader, { paddingTop: Math.max(6, topInset + 6) }]}>
               <View style={styles.headerRight}>
-                {Platform.OS === "ios" ? (
-                  <Host matchContents style={styles.headerIconHit}>
-                    <SwiftUIButton
-                      onPress={() => {
-                        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                        router.push("/activity");
-                      }}
-                      variant="plain"
-                      controlSize="small"
-                      modifiers={[
-                        frame({ width: 38, height: 38 }),
-                        background("rgba(255,255,255,0.45)"),
-                        cornerRadius(19),
-                      ]}
-                    >
-                      <ZStack alignment="topTrailing" modifiers={[frame({ width: 38, height: 38 })]}>
-                        <SwiftUIImage systemName="bell.fill" size={18} color="rgba(0,0,0,0.72)" />
-                        <ZStack
-                          modifiers={[
-                            frame({ width: 16, height: 16 }),
-                            background("rgba(255,255,255,0.85)"),
-                            cornerRadius(8),
-                            border({ color: "rgba(0,0,0,0.08)", width: 1 }),
-                            offset({ x: 4, y: -4 }),
-                          ]}
-                        >
-                          <SwiftUIText size={10} weight="bold" color="rgba(0,0,0,0.72)">
-                            2
-                          </SwiftUIText>
-                        </ZStack>
-                      </ZStack>
-                    </SwiftUIButton>
-                  </Host>
-                ) : (
-                  <PlatformPressable
-                    onPress={() => {
-                        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                        router.push("/activity");
-                      }}
-                    pressOpacity={0.7}
-                    style={styles.headerIconHit}
-                  >
-                    <GlassView style={styles.headerIconButton} intensity={30}>
-                      <IconSymbol name="bell.fill" size={18} color="rgba(0,0,0,0.72)" />
-                      <View style={styles.badge}>
-                        <Text style={styles.badgeText}>2</Text>
-                      </View>
-                    </GlassView>
-                  </PlatformPressable>
-                )}
+                <PlatformPressable
+                  onPress={() => {
+                    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                    router.push("/activity");
+                  }}
+                  pressOpacity={0.7}
+                  style={styles.headerIconHit}
+                >
+                  <GlassView style={styles.headerIconButton} intensity={30}>
+                    <IconSymbol
+                      name="bell.fill"
+                      size={18}
+                      color="rgba(0,0,0,0.72)"
+                    />
+                    <View style={styles.badge}>
+                      <Text style={styles.badgeText}>2</Text>
+                    </View>
+                  </GlassView>
+                </PlatformPressable>
 
-                {Platform.OS === "ios" ? (
-                  <Host matchContents style={styles.headerIconHit}>
-                    <SwiftUIButton
-                      onPress={() => {
-                        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                        router.push("/profile");
-                      }}
-                      variant="plain"
-                      controlSize="small"
-                      modifiers={[
-                        frame({ width: 38, height: 38 }),
-                        background("rgba(255,255,255,0.45)"),
-                        cornerRadius(19),
-                      ]}
-                    >
-                      <ZStack modifiers={[frame({ width: 38, height: 38 })]}>
-                        <SwiftUIImage systemName="ellipsis" size={18} color="rgba(0,0,0,0.72)" />
-                      </ZStack>
-                    </SwiftUIButton>
-                  </Host>
-                ) : (
-                  <PlatformPressable
-                    onPress={() => {
-                        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                        router.push("/profile");
-                      }}
-                    pressOpacity={0.7}
-                    style={styles.headerIconHit}
-                  >
-                    <GlassView style={styles.headerIconButton} intensity={30}>
-                      <IconSymbol name="ellipsis" size={18} color="rgba(0,0,0,0.72)" />
-                    </GlassView>
-                  </PlatformPressable>
-                )}
+                <PlatformPressable
+                  onPress={() => {
+                    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                    router.push("/profile");
+                  }}
+                  onLongPress={() => {
+                    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+                    setShowThemeSelector(true);
+                  }}
+                  pressOpacity={0.7}
+                  style={styles.headerIconHit}
+                >
+                  <GlassView style={styles.headerIconButton} intensity={30}>
+                    <IconSymbol
+                      name="ellipsis"
+                      size={18}
+                      color="rgba(0,0,0,0.72)"
+                    />
+                  </GlassView>
+                </PlatformPressable>
               </View>
             </View>
-          ) : null}
+
+            <ScrollView
+              contentInsetAdjustmentBehavior="automatic"
+              contentContainerStyle={[
+                styles.scrollContent,
+                process.env.EXPO_OS === "ios" ? styles.scrollContentIos : null,
+                process.env.EXPO_OS !== "ios" ? { paddingTop: androidHeaderOffset } : null,
+                styles.safeAreaContent,
+              ]}
+              refreshControl={
+                <RefreshControl
+                  refreshing={isRefreshing}
+                  onRefresh={onRefresh}
+                  tintColor="#FFFFFF"
+                />
+              }
+              showsVerticalScrollIndicator={false}
+            >
 
           <View style={styles.balanceBlock}>
             <TouchableOpacity
@@ -972,10 +1042,15 @@ export default function HomeScreen() {
 
             <View style={styles.pillsRow}>
               <TouchableOpacity onPress={handleCopyAddress} activeOpacity={0.85}>
-                <GlassView style={styles.addressPill} intensity={28}>
-                  <Text style={styles.addressPillText}>{getDisplayAddress() ?? "No wallet"}</Text>
-                  <IconSymbol name="doc.on.doc" size={16} color="rgba(0,0,0,0.55)" />
-                </GlassView>
+                {renderGlassSurface(
+                  <>
+                    <Text style={styles.addressPillText}>{getDisplayAddress() ?? "No wallet"}</Text>
+                    <IconSymbol name="doc.on.doc" size={16} color="rgba(0,0,0,0.55)" />
+                  </>,
+                  styles.addressPill,
+                  28,
+                  true
+                )}
               </TouchableOpacity>
 
               <TouchableOpacity
@@ -990,39 +1065,72 @@ export default function HomeScreen() {
                 }}
                 activeOpacity={0.85}
               >
-                <GlassView style={styles.chainPill} intensity={22}>
-                  <Text style={styles.chainPillText}>{selectedChainLabel}</Text>
-                </GlassView>
+                {renderGlassSurface(
+                  <Text style={styles.chainPillText}>{selectedChainLabel}</Text>,
+                  styles.chainPill,
+                  22,
+                  true
+                )}
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                onPress={handleAuthorizeGasless}
+                onLongPress={handleRevokeGasless}
+                activeOpacity={0.85}
+              >
+                {renderGlassSurface(
+                  <Text style={styles.chainPillText}>
+                    {keyQuorumId ? "Authorize gasless" : "Setup gasless"}
+                  </Text>,
+                  styles.chainPill,
+                  22,
+                  true
+                )}
               </TouchableOpacity>
             </View>
           </View>
 
           <View style={styles.actionsRowLiquid}>
             <TouchableOpacity style={styles.actionHit} activeOpacity={0.9} onPress={handleAdd}>
-              <GlassView style={styles.actionTile} intensity={30}>
-                <View style={styles.actionIconCircle}>
-                  <IconSymbol name="plus" size={18} color="rgba(0,0,0,0.72)" />
-                </View>
-                <Text style={styles.actionLabel}>Deposit</Text>
-              </GlassView>
+              {renderGlassSurface(
+                <>
+                  <View style={styles.actionIconCircle}>
+                    <IconSymbol name="plus" size={18} color="rgba(0,0,0,0.72)" />
+                  </View>
+                  <Text style={styles.actionLabel}>Deposit</Text>
+                </>,
+                styles.actionTile,
+                30,
+                true
+              )}
             </TouchableOpacity>
 
             <TouchableOpacity style={styles.actionHit} activeOpacity={0.9} onPress={handleWithdraw}>
-              <GlassView style={styles.actionTile} intensity={30}>
-                <View style={styles.actionIconCircle}>
-                  <IconSymbol name="arrow.up" size={18} color="rgba(0,0,0,0.72)" />
-                </View>
-                <Text style={styles.actionLabel}>Withdraw</Text>
-              </GlassView>
+              {renderGlassSurface(
+                <>
+                  <View style={styles.actionIconCircle}>
+                    <IconSymbol name="arrow.up" size={18} color="rgba(0,0,0,0.72)" />
+                  </View>
+                  <Text style={styles.actionLabel}>Withdraw</Text>
+                </>,
+                styles.actionTile,
+                30,
+                true
+              )}
             </TouchableOpacity>
 
             <TouchableOpacity style={styles.actionHit} activeOpacity={0.9} onPress={handleSend}>
-              <GlassView style={styles.actionTile} intensity={30}>
-                <View style={styles.actionIconCircle}>
-                  <IconSymbol name="paperplane.fill" size={18} color="rgba(0,0,0,0.72)" />
-                </View>
-                <Text style={styles.actionLabel}>Send</Text>
-              </GlassView>
+              {renderGlassSurface(
+                <>
+                  <View style={styles.actionIconCircle}>
+                    <IconSymbol name="paperplane.fill" size={18} color="rgba(0,0,0,0.72)" />
+                  </View>
+                  <Text style={styles.actionLabel}>Send</Text>
+                </>,
+                styles.actionTile,
+                30,
+                true
+              )}
             </TouchableOpacity>
           </View>
 
@@ -1038,65 +1146,11 @@ export default function HomeScreen() {
 
           <View style={styles.recentCardWrap}>
             <GlassView style={styles.recentCard} intensity={18}>
-              {transactions.length === 0 && !isLoadingTransactions ? (
-                <View style={styles.emptyStateLiquid}>
-                  <Text style={styles.emptyTitle}>No activity yet</Text>
-                  <Text style={styles.emptySubtitle}>Your recent transfers will appear here.</Text>
-                </View>
-              ) : (
-                transactions.slice(0, 6).map((tx) => {
-                  const item = formatTransaction(tx);
-                  const status =
-                    tx.status === "confirmed"
-                      ? { label: "Successful", dot: "#22C55E" }
-                      : tx.status === "pending"
-                        ? { label: "Pending", dot: "#F59E0B" }
-                        : { label: "Failed", dot: "#EF4444" };
-
-                  const dateText = new Date(tx.timestamp).toLocaleString(undefined, {
-                    month: "short",
-                    day: "numeric",
-                    hour: "numeric",
-                    minute: "2-digit",
-                  });
-
-                  return (
-                    <TouchableOpacity
-                      key={item.id}
-                      style={styles.recentRow}
-                      activeOpacity={0.85}
-                      onPress={() => handleTransactionPress(tx)}
-                    >
-                      <View style={styles.recentLeft}>
-                        <View style={styles.recentIcon}>
-                          {getActivityIcon(item.type)}
-                        </View>
-                        <View style={styles.recentText}>
-                          <Text style={styles.recentTitle} numberOfLines={1}>
-                            {item.title}
-                          </Text>
-                          <Text style={styles.recentMeta} numberOfLines={1}>
-                            {dateText}
-                          </Text>
-                        </View>
-                      </View>
-                      <View style={styles.recentRight}>
-                        <Text style={styles.recentAmount} numberOfLines={1}>
-                          {isBalanceVisible ? `$${tx.amount.toFixed(2)}` : "$••••"}
-                        </Text>
-                        <View style={styles.statusRow}>
-                          <View style={[styles.statusDot, { backgroundColor: status.dot }]} />
-                          <Text style={styles.statusTextLiquid}>{status.label}</Text>
-                        </View>
-                      </View>
-                    </TouchableOpacity>
-                  );
-                })
-              )}
+              {recentCardContent}
             </GlassView>
           </View>
-        </ScrollView>
-      </SafeAreaView>
+            </ScrollView>
+          </View>
       
       {/* Transaction Detail Bottom Sheet */}
       <BottomSheet
@@ -1104,7 +1158,7 @@ export default function HomeScreen() {
         index={-1}
         snapPoints={snapPoints}
         enablePanDownToClose
-        backdropComponent={renderBackdrop}
+        backdropComponent={disableBottomSheetBackdrops ? undefined : renderBackdrop}
         backgroundStyle={styles.bottomSheetBackground}
         handleIndicatorStyle={styles.bottomSheetIndicator}
       >
@@ -1208,84 +1262,88 @@ export default function HomeScreen() {
         </BottomSheetView>
       </BottomSheet>
 
-      {/* Send Options Bottom Sheet */}
-      <BottomSheet
-        ref={sendSheetRef}
-        index={-1}
-        snapPoints={sendSnapPoints}
-        enablePanDownToClose
-        backdropComponent={renderBackdrop}
-        backgroundStyle={styles.sendSheetBackground}
-        handleIndicatorStyle={styles.sendSheetIndicator}
-      >
-        <BottomSheetView style={styles.sendSheetContent}>
-          <View style={styles.sendSheetHeader}>
-            <View style={styles.sendArrow}>
-              <SendIcon size={28} color="#2563EB" />
-            </View>
-            <TouchableOpacity
-              style={styles.sendClose}
-              onPress={() => {
-                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                sendSheetRef.current?.close();
-              }}
-              hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-            >
-              <Text style={styles.sendCloseText}>✕</Text>
-            </TouchableOpacity>
-          </View>
-          <Text style={styles.sendTitle}>Send</Text>
-          <Text style={styles.sendSubtitle}>
-            Choose how you want to send money
-          </Text>
-
-          <View style={styles.sendOptions}>
-            <TouchableOpacity
-              style={styles.sendOption}
-              onPress={() => {
-                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-                sendSheetRef.current?.close();
-                setTimeout(() => router.push('/send-amount'), 150);
-              }}
-            >
-              <View style={styles.sendOptionLeft}>
-                <View style={styles.sendIcon}>
-                  <UserIcon size={22} color="#2563EB" />
+      {!isIOS ? (
+        <>
+          {/* Send Options Bottom Sheet */}
+          <BottomSheet
+            ref={sendSheetRef}
+            index={-1}
+            snapPoints={sendSnapPoints}
+            enablePanDownToClose
+            backdropComponent={disableBottomSheetBackdrops ? undefined : renderBackdrop}
+            backgroundStyle={styles.sendSheetBackground}
+            handleIndicatorStyle={styles.sendSheetIndicator}
+          >
+            <BottomSheetView style={styles.sendSheetContent}>
+              <View style={styles.sendSheetHeader}>
+                <View style={styles.sendArrow}>
+                  <SendIcon size={28} color="#2563EB" />
                 </View>
-                <View>
-                  <Text style={styles.sendOptionTitle}>Send to username</Text>
-                  <Text style={styles.sendOptionSubtitle}>
-                    Send to a Cachin username or Solana address
-                  </Text>
-                </View>
+                <TouchableOpacity
+                  style={styles.sendClose}
+                  onPress={() => {
+                    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                    sendSheetRef.current?.close();
+                  }}
+                  hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                >
+                  <Text style={styles.sendCloseText}>✕</Text>
+                </TouchableOpacity>
               </View>
-              <Text style={styles.sendChevron}>›</Text>
-            </TouchableOpacity>
+              <Text style={styles.sendTitle}>Send</Text>
+              <Text style={styles.sendSubtitle}>
+                Choose how you want to send money
+              </Text>
 
-            <TouchableOpacity
-              style={styles.sendOption}
-              onPress={() => {
-                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-                sendSheetRef.current?.close();
-                setTimeout(() => router.push('/send-link'), 150);
-              }}
-            >
-              <View style={styles.sendOptionLeft}>
-                <View style={[styles.sendIcon, styles.sendIconLink]}>
-                  <LinkIcon size={22} color="#0F766E" />
-                </View>
-                <View>
-                  <Text style={styles.sendOptionTitle}>Create payment link</Text>
-                  <Text style={styles.sendOptionSubtitle}>
-                    Share a link that anyone can claim
-                  </Text>
-                </View>
+              <View style={styles.sendOptions}>
+                <TouchableOpacity
+                  style={styles.sendOption}
+                  onPress={() => {
+                    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+                    sendSheetRef.current?.close();
+                    setTimeout(() => router.push('/send-amount'), 150);
+                  }}
+                >
+                  <View style={styles.sendOptionLeft}>
+                    <View style={styles.sendIcon}>
+                      <UserIcon size={22} color="#2563EB" />
+                    </View>
+                    <View>
+                      <Text style={styles.sendOptionTitle}>Send to username</Text>
+                      <Text style={styles.sendOptionSubtitle}>
+                        Send to a Cachin username or Solana address
+                      </Text>
+                    </View>
+                  </View>
+                  <Text style={styles.sendChevron}>›</Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={styles.sendOption}
+                  onPress={() => {
+                    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+                    sendSheetRef.current?.close();
+                    setTimeout(() => router.push('/send-link'), 150);
+                  }}
+                >
+                  <View style={styles.sendOptionLeft}>
+                    <View style={[styles.sendIcon, styles.sendIconLink]}>
+                      <LinkIcon size={22} color="#0F766E" />
+                    </View>
+                    <View>
+                      <Text style={styles.sendOptionTitle}>Create payment link</Text>
+                      <Text style={styles.sendOptionSubtitle}>
+                        Share a link that anyone can claim
+                      </Text>
+                    </View>
+                  </View>
+                  <Text style={styles.sendChevron}>›</Text>
+                </TouchableOpacity>
               </View>
-              <Text style={styles.sendChevron}>›</Text>
-            </TouchableOpacity>
-          </View>
-        </BottomSheetView>
-      </BottomSheet>
+            </BottomSheetView>
+          </BottomSheet>
+        </>
+      ) : null}
 
       {/* Receive Options Bottom Sheet */}
       <BottomSheet
@@ -1293,7 +1351,7 @@ export default function HomeScreen() {
         index={-1}
         snapPoints={receiveSnapPoints}
         enablePanDownToClose
-        backdropComponent={renderBackdrop}
+        backdropComponent={disableBottomSheetBackdrops ? undefined : renderBackdrop}
         backgroundStyle={styles.receiveSheetBackground}
         handleIndicatorStyle={styles.receiveSheetIndicator}
       >
@@ -1368,7 +1426,7 @@ export default function HomeScreen() {
         index={-1}
         snapPoints={cryptoReceiveSnapPoints}
         enablePanDownToClose
-        backdropComponent={renderLockedBackdrop}
+        backdropComponent={disableBottomSheetBackdrops ? undefined : renderLockedBackdrop}
         backgroundStyle={styles.cryptoSheetBackground}
         handleIndicatorStyle={styles.cryptoSheetIndicator}
         enableDismissOnClose={false}
@@ -1499,7 +1557,7 @@ export default function HomeScreen() {
         index={-1}
         snapPoints={fiatReceiveSnapPoints}
         enablePanDownToClose
-        backdropComponent={renderBackdrop}
+        backdropComponent={disableBottomSheetBackdrops ? undefined : renderBackdrop}
         backgroundStyle={styles.cryptoSheetBackground}
         handleIndicatorStyle={styles.cryptoSheetIndicator}
       >
@@ -1604,10 +1662,10 @@ export default function HomeScreen() {
         onSelectTheme={handleThemeSelect}
         toggleThemeMode={() => {}} 
       />
-        </View>
-      </GestureDetector>
-    </GestureHandlerRootView>
+    </View>
   );
+
+  return screenContent;
 }
 
 const styles = StyleSheet.create({
@@ -1624,6 +1682,9 @@ const styles = StyleSheet.create({
   safeArea: {
     flex: 1,
   },
+  safeAreaContent: {
+    flexGrow: 1,
+  },
   scrollContent: {
     paddingHorizontal: 18,
     paddingBottom: 32,
@@ -1632,11 +1693,28 @@ const styles = StyleSheet.create({
     paddingTop: 72,
   },
   topHeader: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    right: 0,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "flex-end",
+    paddingHorizontal: 18,
     paddingTop: 6,
     paddingBottom: 14,
+    zIndex: 20,
+    elevation: 20,
+  },
+  centerProfileWrap: {
+    position: "absolute",
+    left: 0,
+    right: 0,
+    top: "50%",
+    alignItems: "center",
+    zIndex: 30,
+    elevation: 30,
+    transform: [{ translateY: -18 }],
   },
   headerProfileRow: {
     flexDirection: "row",
@@ -1675,6 +1753,21 @@ const styles = StyleSheet.create({
     borderRadius: 19,
     alignItems: "center",
     justifyContent: "center",
+  },
+  headerProfileFallback: {
+    paddingHorizontal: 12,
+    height: 36,
+    borderRadius: 18,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(255,255,255,0.75)",
+    borderWidth: 1,
+    borderColor: "rgba(0,0,0,0.12)",
+  },
+  headerProfileFallbackText: {
+    fontSize: 12,
+    fontWeight: "700",
+    color: "rgba(0,0,0,0.72)",
   },
   headerGlassAvatar: {
     width: 45,
@@ -1753,6 +1846,13 @@ const styles = StyleSheet.create({
     alignItems: "center",
     gap: 10,
     marginTop: 14,
+  },
+  glassButtonSurface: {
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.32)",
+    backgroundColor: "rgba(255,255,255,0.1)",
+    overflow: "hidden",
+    boxShadow: "0 14px 26px rgba(12, 24, 46, 0.22)",
   },
   addressPill: {
     flexDirection: "row",
@@ -1862,6 +1962,14 @@ const styles = StyleSheet.create({
     borderRadius: 22,
     paddingVertical: 8,
     paddingHorizontal: 8,
+    borderCurve: "continuous",
+  },
+  recentCardGlass: {
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.35)",
+    backgroundColor: "rgba(255,255,255,0.08)",
+    overflow: "hidden",
+    boxShadow: "0 16px 32px rgba(13, 28, 54, 0.2)",
   },
   emptyStateLiquid: {
     paddingVertical: 18,
@@ -2242,6 +2350,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     backgroundColor: '#E8B5E8',
     borderRadius: 10,
+    borderCurve: 'continuous',
     borderWidth: 2,
     borderColor: '#000000',
     paddingVertical: 14,
@@ -2249,10 +2358,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 8,
     marginBottom: 12,
-    shadowColor: '#000000',
-    shadowOffset: { width: 3, height: 3 },
-    shadowOpacity: 1,
-    shadowRadius: 0,
+    boxShadow: '3px 3px 0px rgba(0, 0, 0, 1)',
   },
   explorerIcon: {
     fontSize: 18,
@@ -2265,16 +2371,14 @@ const styles = StyleSheet.create({
   closeSheetButton: {
     backgroundColor: '#FFFFFF',
     borderRadius: 10,
+    borderCurve: 'continuous',
     borderWidth: 2,
     borderColor: '#000000',
     paddingVertical: 14,
     justifyContent: 'center',
     alignItems: 'center',
     marginBottom: 20,
-    shadowColor: '#000000',
-    shadowOffset: { width: 3, height: 3 },
-    shadowOpacity: 1,
-    shadowRadius: 0,
+    boxShadow: '3px 3px 0px rgba(0, 0, 0, 1)',
   },
   closeSheetButtonText: {
     fontSize: 16,
@@ -2566,11 +2670,7 @@ const styles = StyleSheet.create({
   },
   cryptoAssetButtonActive: {
     backgroundColor: '#ffffff',
-    shadowColor: '#000',
-    shadowOpacity: 0.06,
-    shadowRadius: 6,
-    shadowOffset: { width: 0, height: 3 },
-    elevation: 2,
+    boxShadow: '0 3px 6px rgba(0, 0, 0, 0.06)',
   },
   cryptoAssetText: {
     fontSize: 13,
@@ -2584,13 +2684,10 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     backgroundColor: '#ffffff',
     borderRadius: 20,
+    borderCurve: 'continuous',
     paddingVertical: 14,
     paddingHorizontal: 12,
-    shadowColor: '#000',
-    shadowOpacity: 0.06,
-    shadowRadius: 10,
-    shadowOffset: { width: 0, height: 6 },
-    elevation: 3,
+    boxShadow: '0 6px 10px rgba(0, 0, 0, 0.06)',
     gap: 12,
   },
   cryptoQrFrame: {
@@ -2677,12 +2774,9 @@ const styles = StyleSheet.create({
     width: '100%',
     backgroundColor: '#ffffff',
     borderRadius: 20,
+    borderCurve: 'continuous',
     padding: 16,
-    shadowColor: '#000',
-    shadowOpacity: 0.04,
-    shadowRadius: 10,
-    shadowOffset: { width: 0, height: 6 },
-    elevation: 2,
+    boxShadow: '0 6px 10px rgba(0, 0, 0, 0.04)',
     gap: 12,
   },
   fiatCardHeader: {

@@ -1,4 +1,4 @@
-import { StyleSheet, View, Text, TouchableOpacity, ScrollView, RefreshControl, SafeAreaView, Linking, Alert } from 'react-native';
+import { StyleSheet, View, Text, TouchableOpacity, ScrollView, RefreshControl, Linking, Alert } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { Transaction } from '@/types/types';
@@ -9,6 +9,7 @@ import * as Clipboard from 'expo-clipboard';
 import { getUsernameByAddress } from '@/services/firestoreService';
 import { useEmbeddedSolanaWallet } from '@privy-io/expo';
 import Svg, { Path } from 'react-native-svg';
+import { formatAmount } from '@/utils/formatAmount';
 
 // Icon components
 function SendIcon({ size = 24, color = '#FFF' }: { size?: number; color?: string }) {
@@ -184,16 +185,8 @@ export default function ActivityScreen() {
   };
 
   const getAvatarColor = (type: string) => {
-    switch(type) {
-      case 'send':
-        return '#FFB380';
-      case 'receive':
-        return '#FFB380';
-      case 'withdraw':
-        return '#FFD966';
-      default:
-        return '#FFB380';
-    }
+    if (type === 'withdraw') return '#FFD966';
+    return '#FFB380';
   };
 
   const getIcon = (type: string) => {
@@ -241,7 +234,12 @@ export default function ActivityScreen() {
 
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
-      <SafeAreaView style={{ flex: 1, backgroundColor: '#F5E6D3' }}>
+      <ScrollView
+        contentInsetAdjustmentBehavior="automatic"
+        style={styles.rootScroll}
+        contentContainerStyle={styles.rootContent}
+        scrollEnabled={false}
+      >
         <View style={styles.container}>
 
         {/* Header */}
@@ -295,7 +293,10 @@ export default function ActivityScreen() {
                       styles.transactionAmount,
                       tx.type === 'receive' && styles.transactionAmountPositive
                     ]}>
-                      {tx.type === 'send' ? '-' : '+'}{tx.amount.toFixed(tx.currency === 'USDC' ? 2 : 4)}
+                      {tx.type === 'send' ? '-' : '+'}
+                      {formatAmount(tx.amount, {
+                        maxFractionDigits: tx.currency === 'USDC' ? 2 : 4,
+                      })}
                     </Text>
                     <Text style={styles.transactionCurrency}>{tx.currency || 'SOL'}</Text>
                     {tx.type === 'send' && tx.currencyEquivalent && (
@@ -345,7 +346,11 @@ export default function ActivityScreen() {
                       </Text>
                     </Text>
                     <Text style={styles.detailAmount}>
-                      {selectedTransaction.amount.toFixed(selectedTransaction.currency === 'USDC' ? 2 : 4)} {selectedTransaction.currency || 'SOL'}
+                      {formatAmount(selectedTransaction.amount, {
+                        maxFractionDigits:
+                          selectedTransaction.currency === 'USDC' ? 2 : 4,
+                      })}{' '}
+                      {selectedTransaction.currency || 'SOL'}
                     </Text>
                   </View>
                   <View style={styles.summaryRight}>
@@ -388,7 +393,10 @@ export default function ActivityScreen() {
                       <View style={styles.detailRow}>
                         <Text style={styles.detailLabel}>Network fee</Text>
                         <Text style={styles.detailValue}>
-                          {(selectedTransaction.fee / 1000000000).toFixed(6)} SOL
+                          {formatAmount(selectedTransaction.fee / 1000000000, {
+                            maxFractionDigits: 6,
+                          })}{' '}
+                          SOL
                         </Text>
                       </View>
                     </>
@@ -412,12 +420,19 @@ export default function ActivityScreen() {
           </BottomSheetView>
         </BottomSheet>
         </View>
-      </SafeAreaView>
+      </ScrollView>
     </GestureHandlerRootView>
   );
 }
 
 const styles = StyleSheet.create({
+  rootScroll: {
+    flex: 1,
+    backgroundColor: '#F5E6D3',
+  },
+  rootContent: {
+    flexGrow: 1,
+  },
   container: {
     flex: 1,
     backgroundColor: '#F5E6D3',
@@ -675,10 +690,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 8,
     marginBottom: 12,
-    shadowColor: '#000000',
-    shadowOffset: { width: 3, height: 3 },
-    shadowOpacity: 1,
-    shadowRadius: 0,
+    boxShadow: '3px 3px 0px rgba(0, 0, 0, 1)',
   },
   explorerIcon: {
     fontSize: 18,
@@ -697,10 +709,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     marginBottom: 20,
-    shadowColor: '#000000',
-    shadowOffset: { width: 3, height: 3 },
-    shadowOpacity: 1,
-    shadowRadius: 0,
+    boxShadow: '3px 3px 0px rgba(0, 0, 0, 1)',
   },
   closeSheetButtonText: {
     fontSize: 16,

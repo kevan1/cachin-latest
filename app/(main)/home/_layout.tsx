@@ -1,11 +1,8 @@
 import { Stack } from "expo-router";
-import { isLiquidGlassAvailable } from "expo-glass-effect";
 import { useColorScheme } from "react-native";
 
 export default function HomeLayout() {
-  const rawTheme = useColorScheme();
-  const theme = rawTheme === "dark" ? "dark" : "light";
-  const isGlassAvailable = isLiquidGlassAvailable();
+  const theme = useColorScheme() ?? "light";
   const blurEffect =
     theme === "dark" ? "systemMaterialDark" : "systemMaterialLight";
 
@@ -18,7 +15,7 @@ export default function HomeLayout() {
           headerTransparent: true,
           headerTintColor: theme === "dark" ? "white" : "black",
           headerLargeStyle: { backgroundColor: "transparent" },
-          headerBlurEffect: isGlassAvailable ? undefined : blurEffect,
+          headerBlurEffect: blurEffect,
           title: "",
           headerTitle: "",
         }}

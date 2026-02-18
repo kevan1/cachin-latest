@@ -3,7 +3,7 @@ import {
   DefaultTheme,
   ThemeProvider,
 } from "@react-navigation/native";
-import { Stack, Redirect, useSegments } from "expo-router";
+import { Stack, Redirect, useSegments, useRouter } from "expo-router";
 import { StatusBar } from "expo-status-bar";
 import "react-native-reanimated";
 import { Component, ReactNode, ErrorInfo } from "react";
@@ -23,6 +23,8 @@ import { monadTestnet } from "@/constants/chains";
 import { Colors } from "@/constants/theme";
 import { useNetworkStatus } from "@/hooks/use-network-status";
 import { HeroUINativeProvider } from "heroui-native";
+import { ChinPopoutOverlay, ChinPopoutProvider } from "@/components/ChinPopout";
+import { IconSymbol } from "@/components/ui/icon-symbol";
 
 
 class ErrorBoundary extends Component<
@@ -89,11 +91,76 @@ function OfflineScreen({ onRetry }: { onRetry: () => void }) {
   );
 }
 
+function MissingPrivyConfigScreen({
+  appId,
+  clientId,
+}: {
+  appId: string;
+  clientId: string;
+}) {
+  const colorScheme = useColorScheme() ?? "light";
+  const palette = Colors[colorScheme];
+
+  return (
+    <View style={[styles.stateContainer, { backgroundColor: palette.background }]}>
+      <View style={[styles.badge, { borderColor: palette.buttonBorder }]}>
+        <View style={[styles.badgeDot, { backgroundColor: palette.primary }]} />
+        <Text style={[styles.badgeText, { color: palette.secondaryText }]}>
+          Missing Privy config
+        </Text>
+      </View>
+      <Text style={[styles.stateTitle, { color: palette.primaryText }]}>
+        Privy credentials not loaded
+      </Text>
+      <Text style={[styles.stateSubtitle, { color: palette.secondaryText }]}>
+        Set these in your environment and restart Expo:
+      </Text>
+      <View style={styles.configList}>
+        <Text style={[styles.configCode, { color: palette.primaryText }]}>
+          EXPO_PUBLIC_PRIVY_APP_ID (length: {appId.length})
+        </Text>
+        <Text style={[styles.configCode, { color: palette.primaryText }]}>
+          EXPO_PUBLIC_PRIVY_CLIENT_ID (length: {clientId.length})
+        </Text>
+      </View>
+      <Text style={[styles.stateSubtitle, { color: palette.secondaryText }]}>
+        Then run: npx expo start -c
+      </Text>
+    </View>
+  );
+}
+
 
 function AppNavigator() {
   const { user, isReady } = usePrivy();
   const { isConnected, refresh } = useNetworkStatus();
   const segments = useSegments();
+  const router = useRouter();
+  const isIOS = process.env.EXPO_OS === "ios";
+  const colorScheme = useColorScheme() ?? "light";
+  const headerBlurEffect =
+    colorScheme === "dark" ? "systemMaterialDark" : "systemMaterialLight";
+
+  const renderSheetCloseButton = () => (
+    <TouchableOpacity
+      accessibilityRole="button"
+      onPress={() => router.back()}
+      hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+      style={{
+        width: 32,
+        height: 32,
+        borderRadius: 16,
+        borderCurve: "continuous",
+        alignItems: "center",
+        justifyContent: "center",
+        backgroundColor: isIOS ? "rgba(118,118,128,0.12)" : "rgba(0,0,0,0.06)",
+        borderWidth: isIOS ? 0 : 1,
+        borderColor: "rgba(60,60,67,0.18)",
+      }}
+    >
+      <IconSymbol name="xmark" size={14} color={isIOS ? "#1C1C1E" : "#111827"} />
+    </TouchableOpacity>
+  );
 
   if (isConnected === false) {
     return <OfflineScreen onRetry={refresh} />;
@@ -101,7 +168,10 @@ function AppNavigator() {
   
   const inAuthGroup = segments[0] === '(main)';
   const isUnauthScreen =
-    segments.length === 0 || segments[0] === "index" || segments[0] === "username";
+    segments.length === 0 ||
+    segments[0] === "index" ||
+    segments[0] === "username" ||
+    segments[0] === "email";
   
   // Redirect logic
   if (isReady && !user && inAuthGroup) {
@@ -118,17 +188,24 @@ function AppNavigator() {
     <Stack screenOptions={{ headerShown: false }}>
       <Stack.Screen name="index" options={{ headerShown: false }} />
       <Stack.Screen name="username" options={{ headerShown: false }} />
+      <Stack.Screen name="email" options={{ headerShown: false }} />
       <Stack.Screen name="(main)" options={{ headerShown: false }} />
       <Stack.Screen
         name="send-amount"
         options={{
-          headerShown: false,
+          headerShown: true,
+          title: "Send to username",
+          headerShadowVisible: false,
+          headerTransparent: false,
+          headerStyle: { backgroundColor: "transparent" },
+          headerBlurEffect,
+          headerRight: renderSheetCloseButton,
           presentation: "formSheet",
           sheetAllowedDetents: "fitToContents",
           sheetLargestUndimmedDetentIndex: "last",
           sheetGrabberVisible: false,
           sheetCornerRadius: 28,
-          contentStyle: { backgroundColor: "#FFFFFF" },
+          contentStyle: { backgroundColor: "transparent" },
         }}
       />
       <Stack.Screen
@@ -144,7 +221,80 @@ function AppNavigator() {
         }}
       />
       <Stack.Screen
+        name="send-options"
+        options={{
+          headerShown: true,
+          title: "Send",
+          headerShadowVisible: false,
+          headerTransparent: false,
+          headerStyle: { backgroundColor: "transparent" },
+          headerBlurEffect,
+          headerRight: renderSheetCloseButton,
+          presentation: "formSheet",
+          sheetAllowedDetents: "fitToContents",
+          sheetLargestUndimmedDetentIndex: "last",
+          sheetGrabberVisible: false,
+          sheetCornerRadius: 28,
+          contentStyle: { backgroundColor: "transparent" },
+        }}
+      />
+      <Stack.Screen
         name="send-confirm"
+        options={{
+          headerShown: false,
+          gestureEnabled: false,
+        }}
+      />
+      <Stack.Screen
+        name="withdraw"
+        options={{
+          headerShown: false,
+          presentation: "formSheet",
+          sheetAllowedDetents: "fitToContents",
+          sheetLargestUndimmedDetentIndex: "last",
+          sheetGrabberVisible: false,
+          sheetCornerRadius: 28,
+          contentStyle: { backgroundColor: "#FFFFFF" },
+        }}
+      />
+      <Stack.Screen
+        name="withdraw-amount"
+        options={{
+          headerShown: false,
+          presentation: "formSheet",
+          sheetAllowedDetents: "fitToContents",
+          sheetLargestUndimmedDetentIndex: "last",
+          sheetGrabberVisible: false,
+          sheetCornerRadius: 28,
+          contentStyle: { backgroundColor: "#FFFFFF" },
+        }}
+      />
+      <Stack.Screen
+        name="withdraw-bank"
+        options={{
+          headerShown: false,
+          presentation: "formSheet",
+          sheetAllowedDetents: "fitToContents",
+          sheetLargestUndimmedDetentIndex: "last",
+          sheetGrabberVisible: false,
+          sheetCornerRadius: 28,
+          contentStyle: { backgroundColor: "#FFFFFF" },
+        }}
+      />
+      <Stack.Screen
+        name="withdraw-crypto"
+        options={{
+          headerShown: false,
+          presentation: "formSheet",
+          sheetAllowedDetents: "fitToContents",
+          sheetLargestUndimmedDetentIndex: "last",
+          sheetGrabberVisible: false,
+          sheetCornerRadius: 28,
+          contentStyle: { backgroundColor: "#FFFFFF" },
+        }}
+      />
+      <Stack.Screen
+        name="withdraw-crypto-review"
         options={{
           headerShown: false,
           presentation: "formSheet",
@@ -159,6 +309,18 @@ function AppNavigator() {
         name="profile"
         options={{ headerShown: false, animation: "slide_from_left" }}
       />
+      <Stack.Screen
+        name="my-qr"
+        options={{
+          headerShown: false,
+          presentation: "formSheet",
+          sheetAllowedDetents: "fitToContents",
+          sheetLargestUndimmedDetentIndex: "last",
+          sheetGrabberVisible: false,
+          sheetCornerRadius: 28,
+          contentStyle: { backgroundColor: "transparent" },
+        }}
+      />
     </Stack>
   );
 }
@@ -170,6 +332,7 @@ export default function RootLayout() {
     Inter_500Medium,
     Inter_600SemiBold,
   });
+  const hasPrivyConfig = Boolean(privyAppId && privyClientId);
 
   return (
     <ThemeProvider value={colorScheme === "dark" ? DarkTheme : DefaultTheme}>
@@ -184,19 +347,26 @@ export default function RootLayout() {
           }}
         >
           <ErrorBoundary>
-            <PrivyProvider
-              appId={privyAppId}
-              clientId={privyClientId}
-              supportedChains={[monadTestnet]}
-              embeddedWallets={{
-                createOnLogin: 'all-wallets',
-                noPromptOnSignature: false,
-              }}
-            >
-              <AppNavigator />
-              <PrivyElements />
-              <StatusBar style="auto" />
-            </PrivyProvider>
+            {!hasPrivyConfig ? (
+              <MissingPrivyConfigScreen appId={privyAppId} clientId={privyClientId} />
+            ) : (
+              <PrivyProvider
+                appId={privyAppId}
+                clientId={privyClientId}
+                supportedChains={[monadTestnet]}
+                config={{
+                  embedded: {
+                    ethereum: { createOnLogin: "all-users" },
+                  },
+                }}
+              >
+                <ChinPopoutProvider>
+                  <AppNavigator />
+                </ChinPopoutProvider>
+                <PrivyElements />
+                <StatusBar style="auto" />
+              </PrivyProvider>
+            )}
           </ErrorBoundary>
         </HeroUINativeProvider>
       </GestureHandlerRootView>
@@ -254,5 +424,15 @@ const styles = StyleSheet.create({
     color: "#ffffff",
     fontSize: 16,
     fontWeight: "700",
+  },
+  configList: {
+    marginTop: 12,
+    marginBottom: 8,
+    alignItems: "center",
+  },
+  configCode: {
+    fontSize: 13,
+    fontWeight: "600",
+    marginVertical: 2,
   },
 });

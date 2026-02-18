@@ -1,17 +1,21 @@
 import {
   ActivityIndicator,
   Alert,
-  Platform,
   StyleSheet,
   Text,
   TouchableOpacity,
   View,
   useColorScheme,
+  ScrollView,
 } from "react-native";
-import Animated, { FadeIn, ZoomIn } from "react-native-reanimated";
-import { SafeAreaView } from "react-native-safe-area-context";
+import Animated, {
+  FadeIn,
+  ZoomIn,
+  interpolate,
+  useAnimatedStyle,
+} from "react-native-reanimated";
 import { useRouter, useLocalSearchParams } from "expo-router";
-import { useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Connection, PublicKey, Transaction } from "@solana/web3.js";
 import { Token, TOKEN_PROGRAM_ID, ASSOCIATED_TOKEN_PROGRAM_ID, u64 } from "@solana/spl-token";
 import MaterialIcons from "@expo/vector-icons/MaterialIcons";
@@ -19,14 +23,27 @@ import MaterialIcons from "@expo/vector-icons/MaterialIcons";
 import { saveTransaction } from "@/utils/transactionStorage";
 import { Transaction as TransactionType } from "@/types/types";
 import { ChainType } from "@/constants/chains";
-import { useEmbeddedSolanaWallet } from "@privy-io/expo";
+import { useEmbeddedSolanaWallet, usePrivy } from "@privy-io/expo";
 import { getSolanaRpcUrl } from "@/utils/solanaRpc";
 import { formatTokenUnits, parseDecimalToUnits } from "@/utils/tokenAmount";
 import { Colors } from "@/constants/theme";
+import { ChinPopoutOverlay, useChinPopout } from "@/components/ChinPopout";
+import { formatAmount } from "@/utils/formatAmount";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
+import {
+  getSolanaCaip2,
+  ensureSponsoredSolanaWallet,
+  sendSponsoredSolanaTransaction,
+} from "@/utils/privySponsorship";
+import {
+  getSponsoredSolanaWallet,
+  setSponsoredSolanaWallet,
+} from "@/utils/sponsoredWalletStorage";
 
 const USDC_MINT_ADDRESS = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
 const USDC_DECIMALS = 6;
 const FX_RATE = 0.86;
+const DUMMY_BLOCKHASH = "11111111111111111111111111111111";
 
 function firstParam(value: unknown): string {
   if (Array.isArray(value)) return typeof value[0] === "string" ? value[0] : "";
@@ -57,6 +74,7 @@ export default function SendConfirmScreen() {
   const { recipient, address, amount, comment } = params;
   const colorScheme = useColorScheme() ?? "light";
   const palette = Colors[colorScheme];
+  const insets = useSafeAreaInsets();
 
   const recipientAddress = firstParam(address);
   const amountString = firstParam(amount);
@@ -65,15 +83,16 @@ export default function SendConfirmScreen() {
   const amountDisplay =
     amountUnits
       ? formatTokenUnits(amountUnits, USDC_DECIMALS, {
-          minFractionDigits: 2,
+          minFractionDigits: 0,
           maxFractionDigits: USDC_DECIMALS,
+          trimTrailingZeros: true,
         })
       : amountString;
 
   const amountNumber = Number(amountDisplay);
   const equivalentValue =
     Number.isFinite(amountNumber) && amountNumber > 0
-      ? (amountNumber * FX_RATE).toFixed(2)
+      ? formatAmount(amountNumber * FX_RATE, { maxFractionDigits: 2 })
       : "0.00";
 
   const recipientDisplay = recipientName
@@ -86,46 +105,83 @@ export default function SendConfirmScreen() {
 
   const [isSending, setIsSending] = useState(false);
   const [transactionSent, setTransactionSent] = useState(false);
+  const [lastTransactionId, setLastTransactionId] = useState<string | null>(null);
+  const { showChin, hideChin, progress, isOpen } = useChinPopout();
 
   const { wallets } = useEmbeddedSolanaWallet();
   const wallet = wallets?.[0];
-  const walletAddress = wallet?.publicKey ?? "";
+  const { user } = usePrivy();
+  const [sponsoredWalletAddress, setSponsoredWalletAddress] = useState<string | null>(null);
+  const [sponsoredWalletId, setSponsoredWalletId] = useState<string | null>(null);
+  const walletAddress = sponsoredWalletAddress ?? wallet?.publicKey ?? "";
   const walletDisplay = walletAddress ? formatAddress(walletAddress) : "Not connected";
 
-  const getWalletAddress = () => {
-    if (wallet?.publicKey) {
-      return wallet.publicKey;
-    }
-    return null;
-  };
+  useEffect(() => {
+    getSponsoredSolanaWallet()
+      .then(({ id, address }) => {
+        setSponsoredWalletId(id);
+        setSponsoredWalletAddress(address);
+      })
+      .catch(() => {
+        setSponsoredWalletId(null);
+        setSponsoredWalletAddress(null);
+      });
+  }, []);
 
-  const signTransaction = async (transaction: Transaction): Promise<Transaction> => {
-    if (!wallet?.getProvider) {
-      throw new Error("Wallet not available");
-    }
-
-    const provider = await wallet.getProvider();
-    if (!provider) {
-      throw new Error("Failed to get wallet provider");
-    }
-
-    const { signedTransaction } = await provider.request({
-      method: "signTransaction",
-      params: { transaction },
-    });
-
-    return signedTransaction;
-  };
-
-  const handleClose = () => {
+  const handleClose = useCallback(() => {
+    hideChin();
     router.push("/(main)/home");
-  };
+  }, [hideChin, router]);
 
-  const handleSendTransaction = async () => {
+  const handleViewReceipt = useCallback(() => {
+    hideChin();
+    if (lastTransactionId) {
+      router.push({
+        pathname: "/transaction-detail",
+        params: { transactionId: lastTransactionId },
+      });
+    }
+  }, [hideChin, lastTransactionId, router]);
+
+  const handleSendTransaction = useCallback(async () => {
     try {
       setIsSending(true);
+      hideChin();
 
-      const senderAddress = getWalletAddress();
+      if (!user?.id) {
+        Alert.alert("Error", "User not available");
+        setIsSending(false);
+        return;
+      }
+
+      let ensuredWalletId = sponsoredWalletId ?? undefined;
+      let ensuredWalletAddress = sponsoredWalletAddress ?? undefined;
+
+      try {
+        const ensured = await ensureSponsoredSolanaWallet({
+          userId: user.id,
+          walletId: ensuredWalletId,
+        });
+        ensuredWalletId = ensured?.walletId ?? ensuredWalletId;
+        ensuredWalletAddress =
+          ensured?.publicKey ?? ensured?.address ?? ensuredWalletAddress;
+        setSponsoredWalletId(ensuredWalletId ?? null);
+        setSponsoredWalletAddress(ensuredWalletAddress ?? null);
+        await setSponsoredSolanaWallet({
+          id: ensuredWalletId ?? null,
+          address: ensuredWalletAddress ?? null,
+        });
+      } catch (error) {
+        console.error("Error ensuring sponsored wallet:", error);
+        Alert.alert(
+          "Error",
+          "Could not prepare sponsored wallet. Please try again."
+        );
+        setIsSending(false);
+        return;
+      }
+
+      const senderAddress = ensuredWalletAddress || walletAddress || null;
       if (!senderAddress) {
         Alert.alert("Error", "No wallet found");
         setIsSending(false);
@@ -189,8 +245,9 @@ export default function SendConfirmScreen() {
         Alert.alert(
           "Insufficient USDC",
           `You only have ${formatTokenUnits(senderTotalUnits, USDC_DECIMALS, {
-            minFractionDigits: 2,
-            maxFractionDigits: 2,
+            minFractionDigits: 0,
+            maxFractionDigits: USDC_DECIMALS,
+            trimTrailingZeros: true,
           })} USDC but are trying to send ${amountDisplay} USDC`
         );
         setIsSending(false);
@@ -202,34 +259,8 @@ export default function SendConfirmScreen() {
 
       const feePayer = fromPubkey;
 
-      const senderSolBalance = await connection.getBalance(fromPubkey);
-      const solBalanceInSol = senderSolBalance / 1e9;
-
-      if (needsTokenAccount) {
-        const minSolRequired = 0.003;
-        if (solBalanceInSol < minSolRequired) {
-          Alert.alert(
-            "Insufficient SOL",
-            `You need at least ${minSolRequired} SOL for fees. You have ${solBalanceInSol.toFixed(
-              6
-            )} SOL.`
-          );
-          setIsSending(false);
-          return;
-        }
-      } else if (solBalanceInSol < 0.0001) {
-        Alert.alert(
-          "Insufficient SOL",
-          `You need SOL for fees. You have ${solBalanceInSol.toFixed(6)} SOL.`
-        );
-        setIsSending(false);
-        return;
-      }
-
-      const { blockhash } = await connection.getLatestBlockhash();
-
       const transaction = new Transaction({
-        recentBlockhash: blockhash,
+        recentBlockhash: DUMMY_BLOCKHASH,
         feePayer: feePayer,
       });
 
@@ -267,12 +298,17 @@ export default function SendConfirmScreen() {
         throw new Error("Failed to build transfer instructions for full amount");
       }
 
-      const signedTransaction = await signTransaction(transaction);
-      const signedTransactionBuffer = signedTransaction.serialize();
+      const serializedTransaction = transaction.serialize({
+        requireAllSignatures: false,
+        verifySignatures: false,
+      });
 
-      const signature = await connection.sendRawTransaction(signedTransactionBuffer, {
-        skipPreflight: false,
-        preflightCommitment: "confirmed",
+      const { signature } = await sendSponsoredSolanaTransaction({
+        userId: user.id,
+        walletId: ensuredWalletId,
+        walletAddress: ensuredWalletAddress ?? wallet?.publicKey ?? wallet?.address,
+        transactionBase64: serializedTransaction.toString("base64"),
+        caip2: getSolanaCaip2(),
       });
 
       await connection.confirmTransaction(signature, "confirmed");
@@ -293,6 +329,7 @@ export default function SendConfirmScreen() {
 
       await saveTransaction(newTransaction);
 
+      setLastTransactionId(signature);
       setTransactionSent(true);
       setIsSending(false);
     } catch (error) {
@@ -303,178 +340,291 @@ export default function SendConfirmScreen() {
       );
       setIsSending(false);
     }
-  };
+  }, [
+    amountDisplay,
+    amountString,
+    amountUnits,
+    comment,
+    hideChin,
+    recipientAddress,
+    recipientName,
+    user?.id,
+    sponsoredWalletAddress,
+    sponsoredWalletId,
+    walletAddress,
+  ]);
 
-  if (transactionSent) {
-    return (
-      <SafeAreaView
-        edges={["left", "right", "bottom"]}
-        style={[styles.container, { backgroundColor: palette.background }]}
+  const chinLabel = useMemo(() => {
+    if (!amountDisplay) return "Swipe to send";
+    return `Swipe to send $${amountDisplay}`;
+  }, [amountDisplay]);
+
+  const handleSendPress = useCallback(() => {
+    if (isSending) return;
+    showChin({
+      label: chinLabel,
+      onComplete: () => {
+        void handleSendTransaction();
+      },
+    });
+  }, [chinLabel, handleSendTransaction, isSending, showChin]);
+
+  const displayCornerRadius = 44;
+  const chinHeight = 110;
+  const chinLift = 108;
+  const footerHeightClosed = 132;
+  const footerHeightOpen = 72;
+  const interfaceStyle = useAnimatedStyle(() => ({
+    marginBottom: interpolate(progress.value, [0, 1], [0, chinLift]),
+  }));
+
+  useEffect(() => {
+    return () => {
+      hideChin();
+    };
+  }, [hideChin]);
+
+  return (
+    <View style={styles.container}>
+      <Animated.View
+        style={[
+          styles.mainCard,
+          { borderBottomLeftRadius: displayCornerRadius, borderBottomRightRadius: displayCornerRadius },
+          interfaceStyle,
+        ]}
       >
-        <View style={styles.header}>
-          <View style={styles.headerSpacer} />
-          <Text style={[styles.title, { color: palette.primaryText }]}>Sent</Text>
-          <TouchableOpacity
-            accessibilityRole="button"
-            onPress={handleClose}
-            style={[
-              styles.iconButton,
-              { backgroundColor: palette.surfaceMuted, borderColor: palette.borderSubtle },
-            ]}
-          >
-            <MaterialIcons name="close" size={18} color={palette.primaryText} />
-          </TouchableOpacity>
-        </View>
+        <ScrollView
+          contentInsetAdjustmentBehavior="automatic"
+          style={styles.scrollArea}
+          contentContainerStyle={[
+            styles.containerContent,
+            {
+              paddingTop: insets.top + 12,
+              paddingBottom: (isOpen ? footerHeightOpen : footerHeightClosed) + 16,
+            },
+          ]}
+          showsVerticalScrollIndicator={false}
+        >
+          {transactionSent ? (
+            <>
+              <View style={styles.header}>
+                <View style={styles.headerSpacer} />
+                <Text style={[styles.title, { color: palette.primaryText }]}>Sent</Text>
+                <TouchableOpacity
+                  accessibilityRole="button"
+                  onPress={handleClose}
+                  style={[
+                    styles.iconButton,
+                    {
+                      backgroundColor: palette.surfaceMuted,
+                      borderColor: palette.borderSubtle,
+                    },
+                  ]}
+                >
+                  <MaterialIcons name="close" size={18} color={palette.primaryText} />
+                </TouchableOpacity>
+              </View>
 
-        <View style={styles.successContainer}>
-          <Animated.View 
-            entering={ZoomIn.springify().damping(12)}
-            style={[styles.heroIcon, { backgroundColor: palette.success }]}
-          >
-            <MaterialIcons name="check" size={26} color={palette.actionPrimaryText} />
-          </Animated.View>
-          <Animated.Text 
-            entering={FadeIn.delay(200).duration(500)}
-            style={[styles.successTitle, { color: palette.primaryText }]}
-          >
-            Payment sent
-          </Animated.Text>
-          <Animated.Text 
-            entering={FadeIn.delay(400).duration(500)}
-            style={[styles.successAmount, { color: palette.primaryText }]}
-          >
-            ${amountDisplay} USDC
-          </Animated.Text>
-        </View>
+              <View style={styles.successContainer}>
+                <Animated.View
+                  entering={ZoomIn.springify().damping(12)}
+                  style={[styles.heroIcon, { backgroundColor: palette.success }]}
+                >
+                  <MaterialIcons name="check" size={26} color={palette.actionPrimaryText} />
+                </Animated.View>
+                <Animated.Text
+                  entering={FadeIn.delay(200).duration(500)}
+                  style={[styles.successTitle, { color: palette.primaryText }]}
+                >
+                  Payment sent
+                </Animated.Text>
+                <Animated.Text
+                  entering={FadeIn.delay(400).duration(500)}
+                  style={[styles.successAmount, { color: palette.primaryText }]}
+                >
+                  ${amountDisplay} USDC
+                </Animated.Text>
+              </View>
 
-        <View style={styles.footer}>
+              <View style={styles.footer}>
+                <TouchableOpacity
+                  accessibilityRole="button"
+                  onPress={handleClose}
+                  style={[
+                    styles.primaryButton,
+                    { backgroundColor: palette.actionPrimary },
+                  ]}
+                >
+                  <Text
+                    style={[styles.primaryButtonText, { color: palette.actionPrimaryText }]}
+                  >
+                    Back to home
+                  </Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  accessibilityRole="button"
+                  onPress={handleViewReceipt}
+                  style={[
+                    styles.secondaryButton,
+                    { backgroundColor: palette.actionSecondary },
+                  ]}
+                >
+                  <Text
+                    style={[
+                      styles.secondaryButtonText,
+                      { color: palette.actionSecondaryText },
+                    ]}
+                  >
+                    View receipt
+                  </Text>
+                </TouchableOpacity>
+              </View>
+            </>
+          ) : (
+            <>
+              <View style={styles.header}>
+                <TouchableOpacity
+                  accessibilityRole="button"
+                  onPress={() => router.back()}
+                  style={[
+                    styles.iconButton,
+                    {
+                      backgroundColor: palette.surfaceMuted,
+                      borderColor: palette.borderSubtle,
+                    },
+                  ]}
+                >
+                  <MaterialIcons name="arrow-back" size={20} color={palette.primaryText} />
+                </TouchableOpacity>
+                <Text style={[styles.title, { color: palette.primaryText }]}>Confirm</Text>
+                <View style={styles.headerSpacer} />
+              </View>
+
+              <View style={[styles.heroIcon, { backgroundColor: palette.success }]}>
+                <MaterialIcons name="send" size={22} color={palette.actionPrimaryText} />
+              </View>
+              <Text style={[styles.headline, { color: palette.primaryText }]}>
+                Send to {recipientDisplay}
+              </Text>
+              <Text style={[styles.subheadline, { color: palette.secondaryText }]}>
+                Double-check the details before you send.
+              </Text>
+
+              <View
+                style={[
+                  styles.amountCard,
+                  { backgroundColor: palette.surface, borderColor: palette.borderSubtle },
+                ]}
+              >
+                <View style={[styles.amountBadge, { backgroundColor: palette.surfaceMuted }]}>
+                  <Text style={[styles.amountBadgeText, { color: palette.secondaryText }]}>
+                    Transfer amount
+                  </Text>
+                </View>
+                <Text style={[styles.amountText, { color: palette.primaryText }]}>
+                  ${amountDisplay}
+                </Text>
+                <Text style={[styles.equivalentText, { color: palette.secondaryText }]}>
+                  ~{equivalentValue}
+                </Text>
+              </View>
+
+              <View style={styles.metaRow}>
+                <Text style={[styles.metaLabel, { color: palette.secondaryText }]}>Recipient</Text>
+                <Text style={[styles.metaValue, { color: palette.primaryText }]}>
+                  {recipientDisplay}
+                </Text>
+              </View>
+              <View style={styles.metaRow}>
+                <Text style={[styles.metaLabel, { color: palette.secondaryText }]}>
+                  Transfer from
+                </Text>
+                <Text style={[styles.metaValue, { color: palette.primaryText }]}>
+                  {walletDisplay}
+                </Text>
+              </View>
+            </>
+          )}
+        </ScrollView>
+        <View style={[styles.footer, styles.footerPinned, isOpen && styles.footerChinOpen]}>
           <TouchableOpacity
             accessibilityRole="button"
-            onPress={handleClose}
-            style={[
-              styles.primaryButton,
-              { backgroundColor: palette.actionPrimary },
-            ]}
-          >
-            <Text style={[styles.primaryButtonText, { color: palette.actionPrimaryText }]}>
-              Back to home
-            </Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            accessibilityRole="button"
+            onPress={() => {
+              hideChin();
+              router.back();
+            }}
             style={[
               styles.secondaryButton,
               { backgroundColor: palette.actionSecondary },
             ]}
           >
-            <Text style={[styles.secondaryButtonText, { color: palette.actionSecondaryText }]}>
-              View receipt
+            <Text
+              style={[
+                styles.secondaryButtonText,
+                { color: palette.actionSecondaryText },
+              ]}
+            >
+              Cancel
             </Text>
           </TouchableOpacity>
-        </View>
-      </SafeAreaView>
-    );
-  }
-
-  return (
-    <SafeAreaView
-      edges={["left", "right", "bottom"]}
-      style={[styles.container, { backgroundColor: palette.background }]}
-    >
-      <View style={styles.header}>
-        <TouchableOpacity
-          accessibilityRole="button"
-          onPress={() => router.back()}
-          style={[
-            styles.iconButton,
-            { backgroundColor: palette.surfaceMuted, borderColor: palette.borderSubtle },
-          ]}
-        >
-          <MaterialIcons name="arrow-back" size={20} color={palette.primaryText} />
-        </TouchableOpacity>
-        <Text style={[styles.title, { color: palette.primaryText }]}>Confirm</Text>
-        <View style={styles.headerSpacer} />
-      </View>
-
-      <View style={[styles.heroIcon, { backgroundColor: palette.success }]}>
-        <MaterialIcons name="send" size={22} color={palette.actionPrimaryText} />
-      </View>
-      <Text style={[styles.headline, { color: palette.primaryText }]}>
-        Send to {recipientDisplay}
-      </Text>
-      <Text style={[styles.subheadline, { color: palette.secondaryText }]}>
-        Double-check the details before you send.
-      </Text>
-
-      <View
-        style={[
-          styles.amountCard,
-          { backgroundColor: palette.surface, borderColor: palette.borderSubtle },
-        ]}
-      >
-        <View style={[styles.amountBadge, { backgroundColor: palette.surfaceMuted }]}>
-          <Text style={[styles.amountBadgeText, { color: palette.secondaryText }]}>
-            Transfer amount
-          </Text>
-        </View>
-        <Text style={[styles.amountText, { color: palette.primaryText }]}>
-          ${amountDisplay}
-        </Text>
-        <Text style={[styles.equivalentText, { color: palette.secondaryText }]}>
-          ~{equivalentValue}
-        </Text>
-      </View>
-
-      <View style={styles.metaRow}>
-        <Text style={[styles.metaLabel, { color: palette.secondaryText }]}>Recipient</Text>
-        <Text style={[styles.metaValue, { color: palette.primaryText }]}>
-          {recipientDisplay}
-        </Text>
-      </View>
-      <View style={styles.metaRow}>
-        <Text style={[styles.metaLabel, { color: palette.secondaryText }]}>Transfer from</Text>
-        <Text style={[styles.metaValue, { color: palette.primaryText }]}>
-          {walletDisplay}
-        </Text>
-      </View>
-      <View style={styles.footer}>
-        <TouchableOpacity
-          accessibilityRole="button"
-          onPress={() => router.back()}
-          style={[
-            styles.secondaryButton,
-            { backgroundColor: palette.actionSecondary },
-          ]}
-        >
-          <Text style={[styles.secondaryButtonText, { color: palette.actionSecondaryText }]}>
-            Cancel
-          </Text>
-        </TouchableOpacity>
-        <TouchableOpacity
-          accessibilityRole="button"
-          onPress={handleSendTransaction}
-          disabled={isSending}
-          style={[
-            styles.primaryButton,
-            { backgroundColor: palette.actionPrimary, opacity: isSending ? 0.6 : 1 },
-          ]}
-        >
-          {isSending ? (
-            <ActivityIndicator color={palette.actionPrimaryText} />
-          ) : (
-            <Text style={[styles.primaryButtonText, { color: palette.actionPrimaryText }]}>
-              Send
-            </Text>
+          {isOpen ? null : (
+            <TouchableOpacity
+              accessibilityRole="button"
+              onPress={handleSendPress}
+              disabled={isSending}
+              style={[
+                styles.primaryButton,
+                {
+                  backgroundColor: palette.actionPrimary,
+                  opacity: isSending ? 0.6 : 1,
+                },
+              ]}
+            >
+              {isSending ? (
+                <ActivityIndicator color={palette.actionPrimaryText} />
+              ) : (
+                <Text
+                  style={[
+                    styles.primaryButtonText,
+                    { color: palette.actionPrimaryText },
+                  ]}
+                >
+                  Send
+                </Text>
+              )}
+            </TouchableOpacity>
           )}
-        </TouchableOpacity>
-      </View>
-    </SafeAreaView>
+        </View>
+      </Animated.View>
+
+      <ChinPopoutOverlay
+        useModal={false}
+        showBackdrop={false}
+        bottomPadding={20}
+        chinHeight={chinHeight}
+        includeSafeArea={false}
+        allowPassthrough
+      />
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
-    flex: Platform.OS === "ios" ? 0 : 1,
+    flex: 1,
+    backgroundColor: "#121212",
+  },
+  mainCard: {
+    flex: 1,
+    backgroundColor: "#ffffff",
+    overflow: "hidden",
+  },
+  scrollArea: {
+    flex: 1,
+    backgroundColor: "transparent",
+  },
+  containerContent: {
+    flexGrow: 1,
     paddingHorizontal: 20,
     paddingTop: 12,
     paddingBottom: 16,
@@ -561,9 +711,16 @@ const styles = StyleSheet.create({
     fontWeight: "600",
   },
   footer: {
-    marginTop: 16,
     gap: 12,
-    paddingBottom: 10,
+  },
+  footerPinned: {
+    position: "absolute",
+    left: 20,
+    right: 20,
+    bottom: 16,
+  },
+  footerChinOpen: {
+    bottom: 10,
   },
   primaryButton: {
     borderRadius: 999,

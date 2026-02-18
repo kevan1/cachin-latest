@@ -1,4 +1,4 @@
-import { useEmbeddedSolanaWallet } from "@privy-io/expo";
+import { useEmbeddedSolanaWallet, usePrivy } from "@privy-io/expo";
 import { View, Text, Button } from "react-native";
 import { useState, useEffect, useCallback } from "react";
 
@@ -8,10 +8,18 @@ import {
   SystemProgram,
   Transaction,
 } from "@solana/web3.js";
+import { getSolanaRpcUrl } from "@/utils/solanaRpc";
+import {
+  getSolanaCaip2,
+  sendSponsoredSolanaTransaction,
+} from "@/utils/privySponsorship";
+
+const DUMMY_BLOCKHASH = "11111111111111111111111111111111";
 
 export default function SolanaWalletActions() {
   const { wallets } = useEmbeddedSolanaWallet();
   const wallet = wallets?.[0];
+  const { user } = usePrivy();
   const [result, setResult] = useState<string | null>(null);
   const [balance, setBalance] = useState<number | null>(null);
   const [loadingBalance, setLoadingBalance] = useState(false);
@@ -20,7 +28,7 @@ export default function SolanaWalletActions() {
     if (!wallet?.publicKey) return;
     setLoadingBalance(true);
     try {
-      const connection = new Connection("https://api.devnet.solana.com");
+      const connection = new Connection(getSolanaRpcUrl());
       const balanceInLamports = await connection.getBalance(
         new PublicKey(wallet.publicKey)
       );
@@ -59,7 +67,7 @@ export default function SolanaWalletActions() {
       if (!provider) return;
 
       const transaction = new Transaction();
-      const connection = new Connection("https://api.devnet.solana.com");
+      const connection = new Connection(getSolanaRpcUrl());
       transaction.recentBlockhash = (
         await connection.getLatestBlockhash("finalized")
       ).blockhash;
@@ -86,14 +94,14 @@ export default function SolanaWalletActions() {
 
   const signAndSendTransaction = async () => {
     try {
-      if (!wallet?.getProvider) return;
-      const provider = await wallet.getProvider?.();
-      if (!provider) return;
+      if (!wallet?.publicKey) return;
+      if (!user?.id) {
+        setResult("User not available.");
+        return;
+      }
       const transaction = new Transaction();
-      const connection = new Connection("https://api.devnet.solana.com");
-      transaction.recentBlockhash = (
-        await connection.getLatestBlockhash("finalized")
-      ).blockhash;
+      const connection = new Connection(getSolanaRpcUrl());
+      transaction.recentBlockhash = DUMMY_BLOCKHASH;
       transaction.feePayer = new PublicKey(wallet.publicKey);
       transaction.add(
         SystemProgram.transfer({
@@ -104,13 +112,18 @@ export default function SolanaWalletActions() {
           lamports: 1000, // Amount in lamports (1 SOL = 1,000,000,000 lamports)
         }),
       );
-      const { signature } = await provider.request({
-        method: "signAndSendTransaction",
-        params: {
-          transaction: transaction,
-          connection: connection,
-        },
+      const serializedTransaction = transaction.serialize({
+        requireAllSignatures: false,
+        verifySignatures: false,
       });
+
+      const { signature } = await sendSponsoredSolanaTransaction({
+        userId: user.id,
+        transactionBase64: serializedTransaction.toString("base64"),
+        caip2: getSolanaCaip2(),
+      });
+
+      await connection.confirmTransaction(signature, "confirmed");
       setResult(signature);
     } catch (err: any) {
       setResult(err?.message ?? String(err));
@@ -128,8 +141,8 @@ export default function SolanaWalletActions() {
             {loadingBalance
               ? "Loading..."
               : balance !== null
-              ? `${balance} SOL`
-              : "N/A"}
+                ? `${balance} SOL`
+                : "N/A"}
           </Text>
           <Button title="Refresh Balance" onPress={fetchBalance} />
         </View>

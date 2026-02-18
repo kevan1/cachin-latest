@@ -1,28 +1,33 @@
-import { StyleSheet, View, Text, TouchableOpacity, TextInput } from 'react-native';
+import {
+  StyleSheet,
+  View,
+  Text,
+  TouchableOpacity,
+  TextInput,
+  Keyboard,
+  TouchableWithoutFeedback,
+  useColorScheme,
+  ScrollView,
+} from 'react-native';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { useState, useEffect } from 'react';
+import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 import { useEmbeddedSolanaWallet } from '@privy-io/expo';
 import { fetchAllTokenBalances } from '@/utils/balanceService';
 import { fetchTokenPrices } from '@/utils/priceService';
-import Svg, { Path } from 'react-native-svg';
-
-// Icon component
-function SwapIcon({ size = 24, color = '#000' }: { size?: number; color?: string }) {
-  return (
-    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
-      <Path d="M7 16V4M7 4L3 8M7 4l4 4M17 8v12M17 20l4-4M17 20l-4-4" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-    </Svg>
-  );
-}
+import { Colors } from '@/constants/theme';
 
 export default function WithdrawAmountScreen() {
   const router = useRouter();
   const params = useLocalSearchParams();
   const { method } = params; // 'crypto', 'mercadopago', or 'bank'
   const { wallets } = useEmbeddedSolanaWallet();
+  const colorScheme = useColorScheme() ?? 'light';
+  const palette = Colors[colorScheme];
   
   const [amount, setAmount] = useState('');
   const [balance, setBalance] = useState<string>('0.00');
+  const [isLoadingBalance, setIsLoadingBalance] = useState(true);
   const [isUsdInput, setIsUsdInput] = useState(true); // true = USD input, false = ARS input
   const arsRate = 1500; // 1 USD = 1500 ARS
 
@@ -39,9 +44,13 @@ export default function WithdrawAmountScreen() {
   useEffect(() => {
     const fetchBalance = async () => {
       const address = getFullSolanaAddress();
-      if (!address) return;
+      if (!address) {
+        setIsLoadingBalance(false);
+        return;
+      }
       
       try {
+        setIsLoadingBalance(true);
         const [balances, prices] = await Promise.all([
           fetchAllTokenBalances(address),
           fetchTokenPrices(),
@@ -56,6 +65,8 @@ export default function WithdrawAmountScreen() {
       } catch (error) {
         console.error('Error fetching balance:', error);
         setBalance('0.00');
+      } finally {
+        setIsLoadingBalance(false);
       }
     };
     
@@ -68,26 +79,17 @@ export default function WithdrawAmountScreen() {
   };
 
   const handleContinue = () => {
-    // Navigate based on withdrawal method
-    if (method === 'bank') {
+    const currency = isUsdInput ? 'USD' : 'ARS';
+    if (method === 'bank' || method === 'mercadopago') {
       router.push({
         pathname: '/withdraw-bank',
-        params: { 
-          amount: amount,
-          currency: isUsdInput ? 'USD' : 'ARS'
-        }
-      });
-    } else if (method === 'mercadopago') {
-      router.push({
-        pathname: '/withdraw-bank',
-        params: { 
-          amount: amount,
-          currency: isUsdInput ? 'USD' : 'ARS'
-        }
+        params: { amount, currency },
       });
     } else {
-      // Crypto withdrawal - implement later
-      console.log(`Withdrawing ${amount} ${isUsdInput ? 'USD' : 'ARS'} via ${method}`);
+      router.push({
+        pathname: '/withdraw-crypto',
+        params: { amount, currency },
+      });
     }
   };
 
@@ -116,168 +118,187 @@ export default function WithdrawAmountScreen() {
   };
 
   const hasAmount = amount && parseFloat(amount) > 0;
+  const numAmount = parseFloat(amount) || 0;
+  // Simple check against balance (assuming balance is USD)
+  const isBalanceSufficient = isUsdInput 
+    ? numAmount <= parseFloat(balance)
+    : (numAmount / arsRate) <= parseFloat(balance);
+  
+  const canContinue = hasAmount && isBalanceSufficient;
 
   return (
-    <View style={styles.container}>
-      {/* Header */}
-      <View style={styles.header}>
-        <TouchableOpacity style={styles.backButton} onPress={handleBack}>
-          <Text style={styles.backIcon}>‹</Text>
-        </TouchableOpacity>
-        <Text style={styles.title}>Withdraw</Text>
-        <View style={styles.placeholder} />
-      </View>
+    <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
+      <ScrollView
+        contentInsetAdjustmentBehavior="automatic"
+        style={[styles.container, { backgroundColor: palette.background }]}
+        contentContainerStyle={styles.containerContent}
+        showsVerticalScrollIndicator={false}
+      >
+        {/* Header */}
+        <View style={styles.header}>
+          <TouchableOpacity 
+            style={[styles.iconButton, { backgroundColor: palette.surfaceMuted, borderColor: palette.borderSubtle }]} 
+            onPress={handleBack}
+          >
+            <MaterialIcons name="arrow-back" size={20} color={palette.primaryText} />
+          </TouchableOpacity>
+          <Text style={[styles.headerTitle, { color: palette.primaryText }]}>Withdraw Amount</Text>
+          <View style={styles.headerSpacer} />
+        </View>
 
-      {/* Section Title */}
-      <Text style={styles.sectionTitle}>Amount to withdraw</Text>
+        <View style={styles.content}>
+          {/* Amount Input */}
+          <View style={[styles.amountCard, { backgroundColor: palette.surface, borderColor: palette.borderSubtle }]}>
+            
+            {/* Interactive Badge acting as swap button */}
+            <TouchableOpacity 
+               onPress={handleSwap}
+               style={[styles.amountBadge, { backgroundColor: palette.surfaceMuted }]}
+            >
+               <MaterialIcons name="swap-vert" size={16} color={palette.secondaryText} style={{marginRight: 4}} />
+              <Text style={[styles.amountBadgeText, { color: palette.secondaryText }]}>
+                {isUsdInput ? 'USD' : 'ARS'} Amount
+              </Text>
+            </TouchableOpacity>
+            
+            <View style={styles.amountRow}>
+              <Text style={[styles.currencySymbol, { color: palette.secondaryText }]}>
+                {isUsdInput ? '$' : 'ARS$'}
+              </Text>
+              <TextInput
+                style={[styles.amountInput, { color: palette.primaryText }]}
+                value={amount}
+                onChangeText={setAmount}
+                keyboardType="decimal-pad"
+                placeholder="0.00"
+                placeholderTextColor={palette.secondaryText}
+                autoFocus
+              />
+            </View>
+            
+            <Text style={[styles.equivalentText, { color: palette.secondaryText }]}>
+               ≈ {isUsdInput ? 'ARS$' : '$'} {calculateEquivalent()}
+            </Text>
+            
+            <Text style={[styles.balanceText, { color: palette.secondaryText }]}>
+              {isLoadingBalance 
+                ? "Loading balance..." 
+                : `Available Balance: $${balance} USD`}
+            </Text>
+          </View>
+        </View>
 
-      {/* Amount Input Container */}
-      <View style={styles.amountContainer}>
-        <View style={styles.amountInput}>
-          <Text style={[styles.currencyLabel, hasAmount && styles.currencyLabelActive]}>
-            {isUsdInput ? 'USD' : 'ARS'}
-          </Text>
-          <TextInput
-            style={[styles.amountText, hasAmount && styles.amountTextActive]}
-            value={amount}
-            onChangeText={setAmount}
-            keyboardType="decimal-pad"
-            placeholder="0.00"
-            placeholderTextColor="#CCCCCC"
-          />
-          <TouchableOpacity style={styles.swapButton} onPress={handleSwap}>
-            <SwapIcon size={24} color="#000" />
+        <View style={styles.footer}>
+          <TouchableOpacity
+            onPress={handleContinue}
+            disabled={!canContinue}
+            style={[
+              styles.primaryButton,
+              { backgroundColor: palette.actionPrimary, opacity: canContinue ? 1 : 0.5 },
+            ]}
+          >
+            <Text style={[styles.primaryButtonText, { color: palette.actionPrimaryText }]}>
+              Continue
+            </Text>
           </TouchableOpacity>
         </View>
-        
-        <Text style={styles.equivalentAmount}>
-          ≈ {calculateEquivalent()} {isUsdInput ? 'ARS' : 'USD'}
-        </Text>
-        <Text style={styles.balanceText}>Balance: USD {balance}</Text>
-      </View>
-
-      {/* Continue Button */}
-      <TouchableOpacity 
-        style={[
-          styles.continueButton,
-          !hasAmount && styles.continueButtonDisabled
-        ]} 
-        onPress={handleContinue}
-        disabled={!hasAmount}
-      >
-        <Text style={styles.continueButtonText}>Continue</Text>
-      </TouchableOpacity>
-    </View>
+      </ScrollView>
+    </TouchableWithoutFeedback>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#F5E6D3',
-    padding: 20,
+  },
+  containerContent: {
+    flexGrow: 1,
+    paddingHorizontal: 20,
   },
   header: {
     flexDirection: 'row',
+    alignItems: 'center',
     justifyContent: 'space-between',
-    alignItems: 'center',
-    marginTop: 50,
-    marginBottom: 30,
+    marginBottom: 24,
+    marginTop: 12,
   },
-  backButton: {
-    width: 50,
-    height: 50,
-    borderRadius: 10,
-    borderWidth: 3,
-    borderColor: '#000000',
-    backgroundColor: '#FFFFFF',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  backIcon: {
-    fontSize: 32,
-    fontWeight: 'bold',
-    color: '#000000',
-  },
-  title: {
-    fontSize: 28,
-    fontWeight: 'bold',
-    color: '#000000',
-  },
-  placeholder: {
-    width: 50,
-  },
-  sectionTitle: {
-    fontSize: 22,
-    fontWeight: 'bold',
-    color: '#000000',
-    marginBottom: 20,
-  },
-  amountContainer: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 12,
-    borderWidth: 3,
-    borderColor: '#000000',
-    padding: 30,
-    marginBottom: 30,
-  },
-  amountInput: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 20,
-  },
-  currencyLabel: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    color: '#999999',
-    marginRight: 10,
-  },
-  currencyLabelActive: {
-    color: '#000000',
-  },
-  amountText: {
-    flex: 1,
-    fontSize: 48,
-    fontWeight: 'bold',
-    color: '#999999',
-    padding: 0,
-  },
-  amountTextActive: {
-    color: '#000000',
-  },
-  swapButton: {
+  iconButton: {
     width: 40,
     height: 40,
+    borderRadius: 20,
+    alignItems: 'center',
     justifyContent: 'center',
+    borderWidth: 1,
+  },
+  headerTitle: {
+    fontSize: 18,
+    fontWeight: '600',
+  },
+  headerSpacer: {
+    width: 40,
+  },
+  content: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'flex-start',
+    paddingTop: 20,
+  },
+  amountCard: {
+    width: '100%',
+    borderRadius: 20,
+    borderWidth: 1,
+    padding: 24,
+    marginBottom: 20,
     alignItems: 'center',
   },
-  equivalentAmount: {
-    fontSize: 18,
-    color: '#666666',
-    marginBottom: 15,
+  amountBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 999,
+    marginBottom: 16,
+  },
+  amountBadgeText: {
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  amountRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 8,
+    width: '100%',
+  },
+  currencySymbol: {
+    fontSize: 28,
+    fontWeight: '600',
+    marginRight: 4,
+  },
+  amountInput: {
+    fontSize: 48,
+    fontWeight: '600',
+    textAlign: 'left',
+    minWidth: 100,
+  },
+  equivalentText: {
+    fontSize: 16,
+    marginBottom: 16,
   },
   balanceText: {
-    fontSize: 16,
-    color: '#666666',
+    fontSize: 13,
   },
-  continueButton: {
-    backgroundColor: '#60A5FA',
-    borderRadius: 12,
-    borderWidth: 3,
-    borderColor: '#000000',
-    paddingVertical: 20,
+  footer: {
+    marginBottom: 16,
+  },
+  primaryButton: {
+    width: '100%',
+    borderRadius: 999,
+    paddingVertical: 16,
     alignItems: 'center',
-    shadowColor: '#000000',
-    shadowOffset: { width: 4, height: 4 },
-    shadowOpacity: 1,
-    shadowRadius: 0,
   },
-  continueButtonDisabled: {
-    backgroundColor: '#E0E0E0',
-  },
-  continueButtonText: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    color: '#000000',
+  primaryButtonText: {
+    fontSize: 16,
+    fontWeight: '600',
   },
 });
