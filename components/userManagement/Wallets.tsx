@@ -1,7 +1,9 @@
 import { useEmbeddedEthereumWallet, useEmbeddedSolanaWallet } from "@privy-io/expo";
+import { useRouter } from "expo-router";
 import { View, Text, Button } from "react-native";
 
 export default function Wallets() {
+  const router = useRouter();
   const { create: createEthereumWallet } = useEmbeddedEthereumWallet();
   const { create: createSolanaWallet } = useEmbeddedSolanaWallet();
   return (
@@ -32,6 +34,10 @@ export default function Wallets() {
         <Button
           title="Create Avalanche Wallet"
           onPress={() => createEthereumWallet?.({ createAdditional: true })}
+        />
+        <Button
+          title="Connect Satochip"
+          onPress={() => router.push("/satochip-connect")}
         />
       </View>
     </View>

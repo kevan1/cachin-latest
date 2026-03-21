@@ -3,7 +3,6 @@ import { useRouter } from 'expo-router';
 import QRCode from 'react-native-qrcode-svg';
 import * as Clipboard from 'expo-clipboard';
 import { useEmbeddedSolanaWallet } from '@privy-io/expo';
-import { SafeAreaView } from 'react-native-safe-area-context';
 import { useMemo, useState } from 'react';
 import Svg, { Path } from 'react-native-svg';
 import { buildSolanaPayUri, createSolanaPayReferences, SOLANA_USDC_MINT } from '@/utils/solanaPay';
@@ -79,68 +78,71 @@ export default function CryptoDepositScreen() {
   };
 
   return (
-    <SafeAreaView style={styles.container}>
+    <ScrollView
+      contentInsetAdjustmentBehavior="automatic"
+      style={styles.container}
+      contentContainerStyle={styles.content}
+      showsVerticalScrollIndicator={false}
+    >
       <View style={styles.handle} />
       <TouchableOpacity style={styles.closeButton} onPress={handleClose} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
         <Text style={styles.closeIcon}>✕</Text>
       </TouchableOpacity>
 
-      <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
-        <Text style={styles.title}>Receive</Text>
-        <Text style={styles.subtitle}>Scan with a Solana Pay wallet. USDC is preferred, SOL is supported.</Text>
+      <Text style={styles.title}>Receive</Text>
+      <Text style={styles.subtitle}>Scan with a Solana Pay wallet. USDC is preferred, SOL is supported.</Text>
 
-        <View style={styles.assetToggle}>
-          <TouchableOpacity
-            style={[styles.assetToggleButton, receiveAsset === 'usdc' && styles.assetToggleButtonActive]}
-            onPress={() => setReceiveAsset('usdc')}
-          >
-            <Text style={[styles.assetToggleText, receiveAsset === 'usdc' && styles.assetToggleTextActive]}>
-              USDC
-            </Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={[styles.assetToggleButton, receiveAsset === 'sol' && styles.assetToggleButtonActive]}
-            onPress={() => setReceiveAsset('sol')}
-          >
-            <Text style={[styles.assetToggleText, receiveAsset === 'sol' && styles.assetToggleTextActive]}>
-              SOL
-            </Text>
-          </TouchableOpacity>
-        </View>
+      <View style={styles.assetToggle}>
+        <TouchableOpacity
+          style={[styles.assetToggleButton, receiveAsset === 'usdc' && styles.assetToggleButtonActive]}
+          onPress={() => setReceiveAsset('usdc')}
+        >
+          <Text style={[styles.assetToggleText, receiveAsset === 'usdc' && styles.assetToggleTextActive]}>
+            USDC
+          </Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={[styles.assetToggleButton, receiveAsset === 'sol' && styles.assetToggleButtonActive]}
+          onPress={() => setReceiveAsset('sol')}
+        >
+          <Text style={[styles.assetToggleText, receiveAsset === 'sol' && styles.assetToggleTextActive]}>
+            SOL
+          </Text>
+        </TouchableOpacity>
+      </View>
 
-        <View style={styles.qrCard}>
-          <View style={styles.qrFrame}>
-            <QRCode
-              value={solanaPayUri || solanaAddress || 'No wallet'}
-              size={240}
-              color="#000000"
-              backgroundColor="#ffffff"
-            />
-          </View>
-          <Text selectable style={styles.addressLines}>{getWrappedAddress()}</Text>
-        </View>
-
-        <View style={styles.toggleRow}>
-          <View style={{ flex: 1 }}>
-            <Text style={styles.toggleLabel}>Receive with Hide My Wallet</Text>
-            <TouchableOpacity onPress={() => Alert.alert('Hide My Wallet', 'Hide My Wallet routes deposits through a masked address. Turn it on if you want extra privacy.')}>
-              <Text style={styles.toggleHelp}>How it works? <Text style={styles.toggleHelpIcon}>?</Text></Text>
-            </TouchableOpacity>
-          </View>
-          <Switch
-            value={hideWallet}
-            onValueChange={handleToggleHideWallet}
-            trackColor={{ false: '#E5E7EB', true: '#2563EB' }}
-            thumbColor="#ffffff"
+      <View style={styles.qrCard}>
+        <View style={styles.qrFrame}>
+          <QRCode
+            value={solanaPayUri || solanaAddress || 'No wallet'}
+            size={240}
+            color="#000000"
+            backgroundColor="#ffffff"
           />
         </View>
+        <Text selectable style={styles.addressLines}>{getWrappedAddress()}</Text>
+      </View>
 
-        <TouchableOpacity style={styles.copyButton} onPress={handleCopyPaymentLink}>
-          <CopyIcon size={18} color="#111827" />
-          <Text style={styles.copyButtonText}>Copy payment link</Text>
-        </TouchableOpacity>
-      </ScrollView>
-    </SafeAreaView>
+      <View style={styles.toggleRow}>
+        <View style={{ flex: 1 }}>
+          <Text style={styles.toggleLabel}>Receive with Hide My Wallet</Text>
+          <TouchableOpacity onPress={() => Alert.alert('Hide My Wallet', 'Hide My Wallet routes deposits through a masked address. Turn it on if you want extra privacy.')}>
+            <Text style={styles.toggleHelp}>How it works? <Text style={styles.toggleHelpIcon}>?</Text></Text>
+          </TouchableOpacity>
+        </View>
+        <Switch
+          value={hideWallet}
+          onValueChange={handleToggleHideWallet}
+          trackColor={{ false: '#E5E7EB', true: '#2563EB' }}
+          thumbColor="#ffffff"
+        />
+      </View>
+
+      <TouchableOpacity style={styles.copyButton} onPress={handleCopyPaymentLink}>
+        <CopyIcon size={18} color="#111827" />
+        <Text style={styles.copyButtonText}>Copy payment link</Text>
+      </TouchableOpacity>
+    </ScrollView>
   );
 }
 
@@ -150,6 +152,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#ffffff',
     borderTopLeftRadius: 28,
     borderTopRightRadius: 28,
+    borderCurve: 'continuous',
   },
   handle: {
     alignSelf: 'center',
@@ -206,11 +209,7 @@ const styles = StyleSheet.create({
   },
   assetToggleButtonActive: {
     backgroundColor: '#ffffff',
-    shadowColor: '#000',
-    shadowOpacity: 0.06,
-    shadowRadius: 6,
-    shadowOffset: { width: 0, height: 3 },
-    elevation: 2,
+    boxShadow: '0 3px 6px rgba(0, 0, 0, 0.06)',
   },
   assetToggleText: {
     fontSize: 13,
@@ -224,13 +223,10 @@ const styles = StyleSheet.create({
     width: '100%',
     backgroundColor: '#ffffff',
     borderRadius: 20,
+    borderCurve: 'continuous',
     paddingVertical: 14,
     paddingHorizontal: 12,
-    shadowColor: '#000',
-    shadowOpacity: 0.06,
-    shadowRadius: 10,
-    shadowOffset: { width: 0, height: 6 },
-    elevation: 3,
+    boxShadow: '0 6px 10px rgba(0, 0, 0, 0.06)',
     alignItems: 'center',
     marginBottom: 28,
   },

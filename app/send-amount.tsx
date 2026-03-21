@@ -29,6 +29,12 @@ import { Colors } from "@/constants/theme";
 import { getSelectedCurrency, Currency } from "@/utils/userStorage";
 import { IconSymbol } from "@/components/ui/icon-symbol";
 import { fetchErc20EvmBalance } from "@/utils/evmBalanceService";
+import {
+  coerceAvalancheWalletSource,
+  loadAvalancheWalletSource,
+  loadSatochipAvalancheAddress,
+  type AvalancheWalletSource,
+} from "@/utils/satochipStorage";
 
 const USDC_MINT_ADDRESS = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
 const USDC_DECIMALS = 6;
@@ -61,7 +67,7 @@ function formatAddress(address: string): string {
 export default function SendAmountScreen() {
   const router = useRouter();
   const params = useLocalSearchParams();
-  const colorScheme = useColorScheme() ?? "light";
+  const colorScheme = (useColorScheme() ?? "light") as "light" | "dark";
   const palette = Colors[colorScheme];
   const isIOS = process.env.EXPO_OS === "ios";
   const amountInputRef = useRef<TextInput>(null);
@@ -88,14 +94,53 @@ export default function SendAmountScreen() {
   const [balanceUnits, setBalanceUnits] = useState<bigint>(0n);
   const [isLoadingBalance, setIsLoadingBalance] = useState(true);
   const [currency, setCurrency] = useState<Currency>("USD");
+  const [avalancheWalletSource, setAvalancheWalletSource] =
+    useState<AvalancheWalletSource>("privy");
+  const [satochipAvalancheAddress, setSatochipAvalancheAddress] = useState<string | null>(null);
 
   const { wallets: solanaWallets } = useEmbeddedSolanaWallet();
   const { wallets: ethereumWallets } = useEmbeddedEthereumWallet();
   const solanaWallet = solanaWallets?.[0];
   const avalancheWallet = ethereumWallets?.[0];
   const walletAddress = isAvalancheTransfer
-    ? avalancheWallet?.address ?? null
+    ? avalancheWalletSource === "satochip"
+      ? satochipAvalancheAddress
+      : avalancheWallet?.address ?? null
     : solanaWallet?.publicKey ?? null;
+
+  useFocusEffect(
+    useCallback(() => {
+      let isActive = true;
+
+      const loadAvalancheSource = async () => {
+        if (!isAvalancheTransfer) return;
+
+        try {
+          const [storedSource, storedAddress] = await Promise.all([
+            loadAvalancheWalletSource(),
+            loadSatochipAvalancheAddress(),
+          ]);
+          if (!isActive) return;
+
+          const requestedSource = firstParam(params.walletSource);
+          setAvalancheWalletSource(
+            requestedSource
+              ? coerceAvalancheWalletSource(requestedSource)
+              : storedSource
+          );
+          setSatochipAvalancheAddress(storedAddress);
+        } catch (error) {
+          console.error("[SendAmount] Failed to load Avalanche wallet source", error);
+        }
+      };
+
+      void loadAvalancheSource();
+
+      return () => {
+        isActive = false;
+      };
+    }, [isAvalancheTransfer, params.walletSource])
+  );
 
   useFocusEffect(
     useCallback(() => {
@@ -262,6 +307,8 @@ export default function SendAmountScreen() {
   const currencyLabel = isAvalancheTransfer
     ? "Fuji USDC transfer"
     : `Selected currency: ${currency}`;
+  const avalancheWalletSourceLabel =
+    avalancheWalletSource === "satochip" ? "Satochip card" : "Privy embedded wallet";
 
   const recipientDisplay = recipientUsername
     ? `@${recipientUsername}`
@@ -273,7 +320,8 @@ export default function SendAmountScreen() {
     recipientStatus === "resolved" &&
     !!recipientAddress &&
     isAmountValid &&
-    safeAmountUnits <= balanceUnits;
+    safeAmountUnits <= balanceUnits &&
+    (!isAvalancheTransfer || !!walletAddress);
 
   const handleContinue = () => {
     console.log("[SendAmount] Continue pressed", {
@@ -283,6 +331,7 @@ export default function SendAmountScreen() {
       amount,
       balance,
       chain: activeChain,
+      walletSource: avalancheWalletSource,
     });
     if (!isAmountValid) {
       Alert.alert("Invalid amount", "Please enter an amount greater than 0.");
@@ -298,6 +347,15 @@ export default function SendAmountScreen() {
         isAvalancheTransfer
           ? "Enter a valid Avalanche address."
           : "Enter a valid username or Solana address."
+      );
+      return;
+    }
+    if (isAvalancheTransfer && !walletAddress) {
+      Alert.alert(
+        "Wallet missing",
+        avalancheWalletSource === "satochip"
+          ? "Connect your Satochip card first."
+          : "Your embedded Avalanche wallet is still being prepared."
       );
       return;
     }
@@ -324,6 +382,7 @@ export default function SendAmountScreen() {
       pathname: "/send-confirm",
       params: {
         chain: activeChain,
+        walletSource: isAvalancheTransfer ? avalancheWalletSource : undefined,
         currency: assetSymbol,
         recipient: recipientName,
         address: recipientAddress,
@@ -365,6 +424,40 @@ export default function SendAmountScreen() {
           ? "Enter a USDC amount and an Avalanche Fuji address."
           : "Enter an amount to send to the recipient."}
       </Text>
+
+      {isAvalancheTransfer ? (
+        <View
+          style={[
+            styles.walletSourceCard,
+            { backgroundColor: palette.surface, borderColor: palette.borderSubtle },
+          ]}
+        >
+          <Text style={[styles.walletSourceLabel, { color: palette.secondaryText }]} selectable>
+            Wallet source
+          </Text>
+          <Text style={[styles.walletSourceTitle, { color: palette.primaryText }]} selectable>
+            {avalancheWalletSourceLabel}
+          </Text>
+          <Text style={[styles.walletSourceBody, { color: palette.secondaryText }]} selectable>
+            {avalancheWalletSource === "satochip"
+              ? satochipAvalancheAddress
+                ? `Sending from ${formatAddress(satochipAvalancheAddress)}.`
+                : "Connect your Satochip card before sending from Avalanche."
+              : "Using the embedded Privy Avalanche wallet for this transfer."}
+          </Text>
+          <TouchableOpacity
+            accessibilityRole="button"
+            onPress={() => router.push("/satochip-connect")}
+            style={[styles.walletSourceButton, { backgroundColor: palette.actionSecondary }]}
+          >
+            <Text
+              style={[styles.walletSourceButtonText, { color: palette.actionSecondaryText }]}
+            >
+              {avalancheWalletSource === "satochip" ? "Refresh Satochip" : "Connect Satochip"}
+            </Text>
+          </TouchableOpacity>
+        </View>
+      ) : null}
 
       <View style={styles.inputSection}>
         <Text style={[styles.inputLabel, { color: palette.secondaryText }]} selectable>
@@ -516,6 +609,39 @@ const styles = StyleSheet.create({
     textAlign: "center",
     marginBottom: 14,
     lineHeight: 18,
+  },
+  walletSourceCard: {
+    borderWidth: 1,
+    borderRadius: 18,
+    padding: 16,
+    marginBottom: 16,
+  },
+  walletSourceLabel: {
+    fontSize: 12,
+    fontWeight: "600",
+    textTransform: "uppercase",
+    letterSpacing: 0.6,
+  },
+  walletSourceTitle: {
+    marginTop: 4,
+    fontSize: 18,
+    fontWeight: "700",
+  },
+  walletSourceBody: {
+    marginTop: 8,
+    fontSize: 13,
+    lineHeight: 18,
+  },
+  walletSourceButton: {
+    marginTop: 14,
+    borderRadius: 12,
+    paddingVertical: 11,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  walletSourceButtonText: {
+    fontSize: 14,
+    fontWeight: "600",
   },
   inputSection: {
     marginBottom: 16,

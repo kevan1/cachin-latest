@@ -3,6 +3,7 @@ import {
   Alert,
   StyleSheet,
   Text,
+  TextInput,
   TouchableOpacity,
   View,
   useColorScheme,
@@ -14,7 +15,7 @@ import Animated, {
   interpolate,
   useAnimatedStyle,
 } from "react-native-reanimated";
-import { useRouter, useLocalSearchParams } from "expo-router";
+import { useRouter, useLocalSearchParams, useFocusEffect } from "expo-router";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Connection, PublicKey, Transaction } from "@solana/web3.js";
 import { Token, TOKEN_PROGRAM_ID, ASSOCIATED_TOKEN_PROGRAM_ID, u64 } from "@solana/spl-token";
@@ -62,6 +63,16 @@ import {
   getEmbeddedSolanaWalletAddress,
   getSolanaProviderAddress,
 } from "@/utils/privySolanaWallet";
+import {
+  getSatochipErrorMessage,
+  sendSatochipAvalancheUsdcTransfer,
+} from "@/utils/satochip";
+import {
+  coerceAvalancheWalletSource,
+  loadAvalancheWalletSource,
+  loadSatochipAvalancheAddress,
+  type AvalancheWalletSource,
+} from "@/utils/satochipStorage";
 
 const USDC_MINT_ADDRESS = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
 const USDC_DECIMALS = 6;
@@ -113,7 +124,7 @@ export default function SendConfirmScreen() {
   const router = useRouter();
   const params = useLocalSearchParams();
   const { recipient, address, amount, comment, chain, currency } = params;
-  const colorScheme = useColorScheme() ?? "light";
+  const colorScheme = (useColorScheme() ?? "light") as "light" | "dark";
   const palette = Colors[colorScheme];
   const insets = useSafeAreaInsets();
   const activeChain =
@@ -158,6 +169,10 @@ export default function SendConfirmScreen() {
   const [isSending, setIsSending] = useState(false);
   const [transactionSent, setTransactionSent] = useState(false);
   const [lastTransactionId, setLastTransactionId] = useState<string | null>(null);
+  const [avalancheWalletSource, setAvalancheWalletSource] =
+    useState<AvalancheWalletSource>("privy");
+  const [satochipAvalancheAddress, setSatochipAvalancheAddress] = useState<string | null>(null);
+  const [satochipPin, setSatochipPin] = useState("");
   const { showChin, hideChin, progress, isOpen } = useChinPopout();
 
   const {
@@ -171,8 +186,11 @@ export default function SendConfirmScreen() {
   const { user } = usePrivy();
   const { addSessionSigners } = useSessionSigners();
   const [sponsoredWalletAddress, setSponsoredWalletAddress] = useState<string | null>(null);
+  const isSatochipTransfer = isAvalancheTransfer && avalancheWalletSource === "satochip";
   const walletAddress = isAvalancheTransfer
-    ? avalancheWallet?.address ?? ""
+    ? isSatochipTransfer
+      ? satochipAvalancheAddress ?? ""
+      : avalancheWallet?.address ?? ""
     : sponsoredWalletAddress ?? wallet?.publicKey ?? "";
   const walletDisplay = walletAddress ? formatAddress(walletAddress) : "Not connected";
   const keyQuorumId = process.env.EXPO_PUBLIC_PRIVY_KEY_QUORUM_ID;
@@ -219,6 +237,40 @@ export default function SendConfirmScreen() {
       });
   }, []);
 
+  useFocusEffect(
+    useCallback(() => {
+      let isActive = true;
+
+      const loadAvalancheSource = async () => {
+        if (!isAvalancheTransfer) return;
+
+        try {
+          const [storedSource, storedAddress] = await Promise.all([
+            loadAvalancheWalletSource(),
+            loadSatochipAvalancheAddress(),
+          ]);
+          if (!isActive) return;
+
+          const requestedSource = firstParam(params.walletSource);
+          setAvalancheWalletSource(
+            requestedSource
+              ? coerceAvalancheWalletSource(requestedSource)
+              : storedSource
+          );
+          setSatochipAvalancheAddress(storedAddress);
+        } catch (error) {
+          console.error("[SendConfirm] Failed to load Avalanche wallet source", error);
+        }
+      };
+
+      void loadAvalancheSource();
+
+      return () => {
+        isActive = false;
+      };
+    }, [isAvalancheTransfer, params.walletSource])
+  );
+
   const handleClose = useCallback(() => {
     hideChin();
     router.push("/(main)/home");
@@ -240,9 +292,6 @@ export default function SendConfirmScreen() {
       hideChin();
 
       if (isAvalancheTransfer) {
-        if (!avalancheWallet?.address) {
-          throw new Error("Your Avalanche wallet is still being prepared. Please try again.");
-        }
         if (!avalancheUsdcToken) {
           throw new Error("Avalanche USDC is not configured.");
         }
@@ -255,42 +304,77 @@ export default function SendConfirmScreen() {
           throw new Error(`Amount "${amountString}" is not valid.`);
         }
 
-        const fromAddress = getAddress(avalancheWallet.address);
         const toAddress = getAddress(recipientAddress);
-        const provider = await avalancheWallet.getProvider();
-        const avalancheChainId = getChainMetadata(ChainType.AVALANCHE).chainId ?? avalancheFuji.id;
-        const transferData = encodeFunctionData({
-          abi: ERC20_TRANSFER_ABI,
-          functionName: "transfer",
-          args: [toAddress, amountUnits],
-        });
-        const signature = (await provider.request({
-          method: "eth_sendTransaction",
-          params: [
-            {
-              from: fromAddress,
-              to: avalancheUsdcToken.address,
-              data: transferData,
-              value: "0x0",
-              chainId: `0x${avalancheChainId.toString(16)}`,
-            },
-          ],
-        })) as string;
+        let signature: string;
+        let fromAddress: string;
+        let feeValue: number | undefined;
+        let receiptStatus: "confirmed" | "failed" = "confirmed";
 
-        const client = createPublicClient({
-          chain: avalancheFuji,
-          transport: http(
-            process.env.EXPO_PUBLIC_AVALANCHE_RPC ||
-              getChainMetadata(ChainType.AVALANCHE).rpcUrl
-          ),
-        });
-        const receipt = await client.waitForTransactionReceipt({
-          hash: signature as Hex,
-        });
-        const feeValue =
-          typeof receipt.effectiveGasPrice === "bigint"
-            ? Number(formatEther(receipt.effectiveGasPrice * receipt.gasUsed))
-            : undefined;
+        if (isSatochipTransfer) {
+          if (!satochipAvalancheAddress) {
+            throw new Error("Connect your Satochip card first.");
+          }
+          if (!satochipPin.trim()) {
+            throw new Error("Enter your Satochip PIN before sending.");
+          }
+
+          const result = await sendSatochipAvalancheUsdcTransfer({
+            pin: satochipPin.trim(),
+            recipientAddress: toAddress,
+            amountUnits,
+            expectedAddress: satochipAvalancheAddress,
+          });
+
+          signature = result.signature;
+          fromAddress = result.address;
+          feeValue = result.fee;
+        } else {
+          if (!avalancheWallet?.address) {
+            throw new Error("Your Avalanche wallet is still being prepared. Please try again.");
+          }
+
+          fromAddress = getAddress(avalancheWallet.address);
+          const provider = await avalancheWallet.getProvider();
+          const avalancheChainId =
+            getChainMetadata(ChainType.AVALANCHE).chainId ?? avalancheFuji.id;
+          const transferData = encodeFunctionData({
+            abi: ERC20_TRANSFER_ABI,
+            functionName: "transfer",
+            args: [toAddress, amountUnits],
+          });
+          signature = (await provider.request({
+            method: "eth_sendTransaction",
+            params: [
+              {
+                from: fromAddress,
+                to: avalancheUsdcToken.address,
+                data: transferData,
+                value: "0x0",
+                chainId: `0x${avalancheChainId.toString(16)}`,
+              },
+            ],
+          })) as string;
+
+          const client = createPublicClient({
+            chain: avalancheFuji,
+            transport: http(
+              process.env.EXPO_PUBLIC_AVALANCHE_RPC ||
+                getChainMetadata(ChainType.AVALANCHE).rpcUrl
+            ),
+          });
+          const receipt = await client.waitForTransactionReceipt({
+            hash: signature as Hex,
+          });
+          feeValue =
+            typeof receipt.effectiveGasPrice === "bigint"
+              ? Number(formatEther(receipt.effectiveGasPrice * receipt.gasUsed))
+              : undefined;
+          receiptStatus = receipt.status === "success" ? "confirmed" : "failed";
+
+          if (receipt.status !== "success") {
+            throw new Error("The Avalanche transaction was reverted.");
+          }
+        }
 
         const newTransaction: TransactionType = {
           id: signature,
@@ -303,16 +387,12 @@ export default function SendConfirmScreen() {
           sender: fromAddress,
           address: toAddress,
           timestamp: Date.now(),
-          status: receipt.status === "success" ? "confirmed" : "failed",
+          status: receiptStatus,
           comment: comment as string | undefined,
           fee: feeValue,
         };
 
         await saveTransaction(newTransaction);
-
-        if (receipt.status !== "success") {
-          throw new Error("The Avalanche transaction was reverted.");
-        }
 
         setLastTransactionId(signature);
         setTransactionSent(true);
@@ -504,7 +584,7 @@ export default function SendConfirmScreen() {
           toTokenAccount,
           fromPubkey,
           [],
-          new u64(sendUnits.toString())
+          new (u64 as any)(sendUnits.toString())
         );
         transaction.add(transferInstruction);
         remaining -= sendUnits;
@@ -553,7 +633,10 @@ export default function SendConfirmScreen() {
       console.error("Error sending transaction:", error);
       Alert.alert(
         "Error",
-        `Failed to send transaction: ${error instanceof Error ? error.message : "Unknown error"}`
+        `Failed to send transaction: ${getSatochipErrorMessage(
+          error,
+          "Unknown error"
+        )}`
       );
       setIsSending(false);
     }
@@ -568,8 +651,11 @@ export default function SendConfirmScreen() {
     createSolanaWallet,
     hideChin,
     isAvalancheTransfer,
+    isSatochipTransfer,
     recipientAddress,
     recipientName,
+    satochipAvalancheAddress,
+    satochipPin,
     solanaWalletStatus,
     user?.id,
     sponsoredWalletAddress,
@@ -581,20 +667,26 @@ export default function SendConfirmScreen() {
 
   const chinLabel = useMemo(() => {
     if (!amountDisplay) return "Swipe to send";
-    return isAvalancheTransfer
+    return isSatochipTransfer
+      ? `Swipe to sign ${amountDisplay} ${assetSymbol} with Satochip`
+      : isAvalancheTransfer
       ? `Swipe to send $${amountDisplay} ${assetSymbol}`
       : `Swipe to send $${amountDisplay}`;
-  }, [amountDisplay, assetSymbol, isAvalancheTransfer]);
+  }, [amountDisplay, assetSymbol, isAvalancheTransfer, isSatochipTransfer]);
 
   const handleSendPress = useCallback(() => {
     if (isSending) return;
+    if (isSatochipTransfer && !satochipPin.trim()) {
+      Alert.alert("PIN required", "Enter your Satochip PIN before sending.");
+      return;
+    }
     showChin({
       label: chinLabel,
       onComplete: () => {
         void handleSendTransaction();
       },
     });
-  }, [chinLabel, handleSendTransaction, isSending, showChin]);
+  }, [chinLabel, handleSendTransaction, isSending, isSatochipTransfer, satochipPin, showChin]);
 
   const displayCornerRadius = 44;
   const chinHeight = 110;
@@ -731,10 +823,14 @@ export default function SendConfirmScreen() {
                 <MaterialIcons name="send" size={22} color={palette.actionPrimaryText} />
               </View>
               <Text style={[styles.headline, { color: palette.primaryText }]}>
-                {isAvalancheTransfer ? `Send ${assetSymbol} to ${recipientDisplay}` : `Send to ${recipientDisplay}`}
+                {isAvalancheTransfer
+                  ? `Send ${assetSymbol} to ${recipientDisplay}`
+                  : `Send to ${recipientDisplay}`}
               </Text>
               <Text style={[styles.subheadline, { color: palette.secondaryText }]}>
-                {isAvalancheTransfer
+                {isSatochipTransfer
+                  ? "Hold the Satochip card near the phone when you confirm. The card will sign the Fuji USDC transfer."
+                  : isAvalancheTransfer
                   ? "Double-check the Avalanche Fuji address before you send."
                   : "Double-check the details before you send."}
               </Text>
@@ -772,6 +868,61 @@ export default function SendConfirmScreen() {
                   {walletDisplay}
                 </Text>
               </View>
+
+              {isSatochipTransfer ? (
+                <View
+                  style={[
+                    styles.satochipCard,
+                    {
+                      backgroundColor: palette.surface,
+                      borderColor: palette.borderSubtle,
+                    },
+                  ]}
+                >
+                  <Text style={[styles.satochipLabel, { color: palette.secondaryText }]}>
+                    Sign with Satochip
+                  </Text>
+                  <Text style={[styles.satochipTitle, { color: palette.primaryText }]}>
+                    Enter the card PIN
+                  </Text>
+                  <Text style={[styles.satochipBody, { color: palette.secondaryText }]}>
+                    Cachin will ask the card to sign this Avalanche Fuji USDC transfer over NFC.
+                  </Text>
+                  <TextInput
+                    value={satochipPin}
+                    onChangeText={setSatochipPin}
+                    placeholder="Card PIN"
+                    placeholderTextColor={palette.secondaryText}
+                    keyboardType="number-pad"
+                    secureTextEntry
+                    style={[
+                      styles.satochipInput,
+                      {
+                        color: palette.primaryText,
+                        backgroundColor: palette.surfaceMuted,
+                        borderColor: palette.borderSubtle,
+                      },
+                    ]}
+                  />
+                  <TouchableOpacity
+                    accessibilityRole="button"
+                    onPress={() => router.push("/satochip-connect")}
+                    style={[
+                      styles.satochipManageButton,
+                      { backgroundColor: palette.actionSecondary },
+                    ]}
+                  >
+                    <Text
+                      style={[
+                        styles.satochipManageButtonText,
+                        { color: palette.actionSecondaryText },
+                      ]}
+                    >
+                      Refresh connected card
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+              ) : null}
             </>
           )}
         </ScrollView>
@@ -937,6 +1088,48 @@ const styles = StyleSheet.create({
   },
   metaValue: {
     fontSize: 13,
+    fontWeight: "600",
+  },
+  satochipCard: {
+    borderWidth: 1,
+    borderRadius: 20,
+    padding: 16,
+    marginTop: 8,
+    marginBottom: 12,
+  },
+  satochipLabel: {
+    fontSize: 12,
+    fontWeight: "600",
+    textTransform: "uppercase",
+    letterSpacing: 0.6,
+  },
+  satochipTitle: {
+    marginTop: 4,
+    fontSize: 18,
+    fontWeight: "700",
+  },
+  satochipBody: {
+    marginTop: 8,
+    fontSize: 13,
+    lineHeight: 18,
+  },
+  satochipInput: {
+    borderWidth: 1,
+    borderRadius: 14,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    marginTop: 12,
+    fontSize: 15,
+  },
+  satochipManageButton: {
+    marginTop: 12,
+    borderRadius: 12,
+    paddingVertical: 12,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  satochipManageButtonText: {
+    fontSize: 14,
     fontWeight: "600",
   },
   footer: {

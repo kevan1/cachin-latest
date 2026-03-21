@@ -3,7 +3,6 @@ import {
   StyleSheet,
   View,
   TextInputProps,
-  Platform,
 } from "react-native";
 import { Colors } from "@/constants/theme";
 import { useColorScheme } from "@/hooks/use-color-scheme";
@@ -58,14 +57,7 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     paddingHorizontal: 12,
     fontSize: 16,
-    ...Platform.select({
-      ios: {
-        paddingVertical: 12,
-      },
-      android: {
-        paddingVertical: 8,
-      },
-    }),
+    paddingVertical: process.env.EXPO_OS === "ios" ? 12 : 8,
   },
 });
 

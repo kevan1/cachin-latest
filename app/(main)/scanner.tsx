@@ -1,45 +1,31 @@
-import { useState, useEffect, useCallback, useRef, useMemo } from "react";
-import { Alert, StyleSheet, View, Text, TouchableOpacity, Platform, useColorScheme, StatusBar, Dimensions } from "react-native";
+import { useState, useEffect, useCallback, useRef } from "react";
+import { Alert, StyleSheet, View, Text, TouchableOpacity, useColorScheme, StatusBar } from "react-native";
 import { CameraView, Camera } from "expo-camera";
 import { useRouter, useFocusEffect, useLocalSearchParams } from "expo-router";
-import QRCode from 'react-native-qrcode-svg';
-import * as Clipboard from 'expo-clipboard';
+import { useIsFocused } from "@react-navigation/native";
 import * as Haptics from 'expo-haptics';
-import BottomSheet, { BottomSheetView, BottomSheetBackdrop } from '@gorhom/bottom-sheet';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { getUsername } from '@/utils/userStorage';
 import { parseQrScanData } from '@/utils/qrScan';
-import { useEmbeddedSolanaWallet } from '@privy-io/expo';
 import { IconSymbol } from "@/components/ui/icon-symbol";
 import { Colors } from "@/constants/theme";
 import { GlassView } from "@/components/ui/GlassView";
 
 const SCAN_SIZE = 260;
+const USDC_MINT_ADDRESS = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
 
 export default function ScannerScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
+  const isFocused = useIsFocused();
   const colorScheme = (useColorScheme() ?? "light") as "light" | "dark";
   const palette = Colors[colorScheme];
   const [hasPermission, setHasPermission] = useState<boolean | null>(null);
-  const [username, setUsername] = useState<string>('User');
   const [scanEnabled, setScanEnabled] = useState(true);
   const scanLockRef = useRef(false);
   const lastScanDataRef = useRef<string | null>(null);
   const openQrRef = useRef<string | null>(null);
   const { openQr } = useLocalSearchParams<{ openQr?: string | string[] }>();
-  
-  const bottomSheetRef = useRef<BottomSheet>(null);
-  const snapPoints = useMemo(() => ['50%', '90%'], []);
-  const tabBarInset =
-    Platform.OS === "ios"
-      ? 49 + insets.bottom
-      : 56 + Math.max(insets.bottom + 10, 18);
-  
-  const { wallets } = useEmbeddedSolanaWallet();
-  const wallet = wallets?.[0];
-  const solanaAddress = wallet?.publicKey ?? '';
 
   useEffect(() => {
     const getCameraPermissions = async () => {
@@ -50,26 +36,14 @@ export default function ScannerScreen() {
     getCameraPermissions();
   }, []);
 
-  // Load username on mount
-  useEffect(() => {
-    const loadUsername = async () => {
-      if (!solanaAddress) return;
-      const storedUsername = await getUsername(solanaAddress);
-      if (storedUsername && !storedUsername.startsWith('user-')) {
-        setUsername(storedUsername);
-      }
-    };
-    loadUsername();
-  }, [solanaAddress]);
-
   useEffect(() => {
     const openQrValue = Array.isArray(openQr) ? openQr[0] : openQr;
     if (!openQrValue) return;
     if (openQrRef.current === openQrValue) return;
     openQrRef.current = openQrValue;
     setScanEnabled(false);
-    bottomSheetRef.current?.snapToIndex(0);
-  }, [openQr]);
+    router.push("/my-qr");
+  }, [openQr, router]);
 
   const resetScanner = useCallback(() => {
     scanLockRef.current = false;
@@ -84,36 +58,10 @@ export default function ScannerScreen() {
     }, [resetScanner])
   );
 
-  const handleCopyUsername = async () => {
-    await Clipboard.setStringAsync(`https://cachin.app/${username}`);
-    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-  };
-
   const handleOpenQrSheet = useCallback(() => {
     setScanEnabled(false);
-    bottomSheetRef.current?.snapToIndex(0);
-  }, []);
-
-  const handleSheetChange = useCallback(
-    (index: number) => {
-      if (index === -1) {
-        resetScanner();
-      }
-    },
-    [resetScanner]
-  );
-
-  const renderBackdrop = useCallback(
-    (props: any) => (
-      <BottomSheetBackdrop
-        {...props}
-        disappearsOnIndex={-1}
-        appearsOnIndex={0}
-        opacity={0.7}
-      />
-    ),
-    []
-  );
+    router.push("/my-qr");
+  }, [router]);
 
   const handleBarCodeScanned = useCallback(
     async ({ data }: { type: string; data: string }) => {
@@ -159,6 +107,30 @@ export default function ScannerScreen() {
         return;
       }
 
+      if (result.kind === 'solanaPay') {
+        try {
+          if (result.splToken && result.splToken !== USDC_MINT_ADDRESS) {
+            Alert.alert(
+              "Unsupported Solana Pay token",
+              "This Solana Pay request is not for USDC.",
+              [{ text: "OK", onPress: resetScanner }],
+            );
+            return;
+          }
+
+          router.push({
+            pathname: "/send-amount",
+            params: {
+              address: result.address,
+              amount: result.amount ?? "",
+            },
+          });
+        } catch {
+          resetScanner();
+        }
+        return;
+      }
+
       Alert.alert(
         'Invalid QR code',
         'This QR code isn’t a Cachin link or a Solana address.',
@@ -186,40 +158,10 @@ export default function ScannerScreen() {
     );
   }
 
-  const sheetContent = (
-    <View style={styles.sheetContainer}>
-      <Text style={[styles.sheetTitle, { color: palette.text }]}>My QR Code</Text>
-      <View style={styles.qrContainer}>
-        <View style={styles.qrCodeWrapper}>
-          <QRCode
-            value={`https://cachin.app/${username}`}
-            size={220}
-            color="#000000"
-            backgroundColor="#FFFFFF"
-            logo={require('../../assets/images/logomark.png')}
-            logoSize={50}
-            logoBackgroundColor="transparent"
-            logoBorderRadius={0}
-          />
-        </View>
-        <TouchableOpacity
-          style={[
-            styles.addressContainer,
-            { backgroundColor: palette.surfaceMuted }
-          ]}
-          onPress={handleCopyUsername}
-        >
-          <Text style={[styles.addressText, { color: palette.secondaryText }]}>
-            cachin.app/{username}
-          </Text>
-          <IconSymbol size={16} name="doc.on.doc" color={palette.secondaryText} />
-        </TouchableOpacity>
-      </View>
-      <Text style={[styles.sheetHint, { color: palette.secondaryText }]}>
-        Share this code to receive payments
-      </Text>
-    </View>
-  );
+  // Keep camera fully released while this tab/screen is not focused.
+  if (!isFocused) {
+    return <View style={styles.container} />;
+  }
 
   return (
     <GestureHandlerRootView style={{ flex: 1, backgroundColor: 'black' }}>
@@ -228,7 +170,7 @@ export default function ScannerScreen() {
         <CameraView
           style={StyleSheet.absoluteFill}
           facing="back"
-          onBarcodeScanned={scanEnabled ? handleBarCodeScanned : undefined}
+          onBarcodeScanned={isFocused && scanEnabled ? handleBarCodeScanned : undefined}
           barcodeScannerSettings={{
             barcodeTypes: ["qr"],
           }}
@@ -280,28 +222,6 @@ export default function ScannerScreen() {
             </View>
           </View>
         </CameraView>
-
-        <BottomSheet
-          ref={bottomSheetRef}
-          index={-1}
-          snapPoints={snapPoints}
-          enablePanDownToClose
-          backdropComponent={renderBackdrop}
-          onChange={handleSheetChange}
-          bottomInset={tabBarInset}
-          backgroundStyle={{ backgroundColor: "transparent" }}
-          handleIndicatorStyle={{ backgroundColor: palette.icon }}
-        >
-          <BottomSheetView style={styles.bottomSheetContent}>
-            <GlassView
-              style={styles.glassSheet}
-              intensity={28}
-              tint={colorScheme === "dark" ? "dark" : "light"}
-            >
-              {sheetContent}
-            </GlassView>
-          </BottomSheetView>
-        </BottomSheet>
       </View>
     </GestureHandlerRootView>
   );
@@ -430,58 +350,4 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
 
-  // Bottom Sheet
-  bottomSheetContent: {
-    flex: 1,
-  },
-  glassSheet: {
-    flex: 1,
-    paddingTop: 10,
-    borderTopLeftRadius: 24,
-    borderTopRightRadius: 24,
-    overflow: "hidden",
-  },
-  sheetContainer: {
-    width: '100%',
-    alignItems: 'center',
-    paddingHorizontal: 20,
-  },
-  sheetTitle: {
-    fontSize: 22,
-    fontWeight: "700",
-    marginBottom: 30,
-  },
-  qrContainer: {
-    alignItems: "center",
-    gap: 24,
-  },
-  qrCodeWrapper: {
-    padding: 24,
-    borderRadius: 32,
-    backgroundColor: '#FFF',
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 10 },
-    shadowOpacity: 0.08,
-    shadowRadius: 20,
-    elevation: 8,
-    borderWidth: 1,
-    borderColor: '#F1F5F9',
-  },
-  addressContainer: {
-    flexDirection: "row",
-    alignItems: "center",
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-    borderRadius: 20,
-    gap: 8,
-  },
-  addressText: {
-    fontSize: 14,
-    fontFamily: Platform.select({ ios: "Menlo", default: "monospace" }),
-  },
-  sheetHint: {
-    marginTop: 30,
-    fontSize: 14,
-    textAlign: 'center',
-  },
 });

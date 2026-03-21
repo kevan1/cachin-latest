@@ -1,5 +1,6 @@
 import { Connection, PublicKey, Transaction, TransactionInstruction } from '@solana/web3.js';
 import { Buffer } from 'buffer';
+import Constants from 'expo-constants';
 
 /**
  * Paymaster Service
@@ -31,16 +32,56 @@ export interface PaymasterTransaction {
   userSignature?: string;
 }
 
+function getExtraConfig(): Record<string, any> {
+  return (Constants.expoConfig?.extra as Record<string, any> | undefined) ?? {};
+}
+
+function parseEnabled(value: unknown): boolean {
+  if (typeof value === 'boolean') return value;
+  if (typeof value === 'number') return value === 1;
+  if (typeof value === 'string') {
+    const normalized = value.trim().toLowerCase();
+    return normalized === 'true' || normalized === '1' || normalized === 'yes';
+  }
+  return false;
+}
+
 /**
  * Get default paymaster configuration from environment
  */
 export function getPaymasterConfig(): PaymasterConfig {
+  const extra = getExtraConfig();
+  const enabledValue =
+    process.env.EXPO_PUBLIC_PAYMASTER_ENABLED ??
+    extra.paymasterEnabled ??
+    extra.paymaster?.enabled;
   return {
-    paymasterPublicKey: process.env.EXPO_PUBLIC_PAYMASTER_PUBLIC_KEY || '',
-    rpcEndpoint: process.env.EXPO_PUBLIC_SOLANA_RPC || 'https://api.devnet.solana.com',
-    enabled: !!process.env.EXPO_PUBLIC_PAYMASTER_ENABLED && 
-             process.env.EXPO_PUBLIC_PAYMASTER_ENABLED === 'true',
+    paymasterPublicKey:
+      process.env.EXPO_PUBLIC_PAYMASTER_PUBLIC_KEY ||
+      extra.paymasterPublicKey ||
+      extra.paymaster?.publicKey ||
+      '',
+    rpcEndpoint:
+      process.env.EXPO_PUBLIC_SOLANA_RPC ||
+      extra.solanaRpc ||
+      extra.paymaster?.rpcEndpoint ||
+      'https://api.devnet.solana.com',
+    enabled: parseEnabled(enabledValue),
   };
+}
+
+/**
+ * Get the base URL for the paymaster API route.
+ */
+export function getPaymasterApiUrl(): string {
+  const extra = getExtraConfig();
+  return (
+    process.env.EXPO_PUBLIC_PAYMASTER_API_URL ||
+    process.env.EXPO_PUBLIC_API_URL ||
+    extra.paymasterApiUrl ||
+    extra.paymaster?.apiUrl ||
+    ''
+  );
 }
 
 /**
@@ -180,7 +221,7 @@ export function formatPaymasterInfo(config: PaymasterConfig) {
 export async function sendToPaymaster(
   transaction: Transaction,
   backendUrl: string
-): Promise<Transaction> {
+): Promise<string> {
   try {
     console.log('[Paymaster] Sending transaction to backend for paymaster signature');
     console.log('[Paymaster] Backend URL:', backendUrl);
@@ -194,7 +235,8 @@ export async function sendToPaymaster(
     const base64Transaction = Buffer.from(serializedTransaction).toString('base64');
 
     // Send to backend
-    const response = await fetch(`${backendUrl}/paymaster`, {
+    const baseUrl = backendUrl.replace(/\/$/, '');
+    const response = await fetch(`${baseUrl}/api/solana-paymaster`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -209,20 +251,15 @@ export async function sendToPaymaster(
       throw new Error(`Paymaster backend error: ${errorData.error || response.statusText}`);
     }
 
-    const { signedTransaction } = await response.json();
+    const { signature } = await response.json();
 
-    if (!signedTransaction) {
-      throw new Error('No signed transaction returned from paymaster');
+    if (!signature) {
+      throw new Error('No signature returned from paymaster');
     }
 
     console.log('[Paymaster] Received fully signed transaction from backend');
 
-    // Deserialize the fully signed transaction
-    const finalTransaction = Transaction.from(
-      Buffer.from(signedTransaction, 'base64')
-    );
-
-    return finalTransaction;
+    return signature;
   } catch (error) {
     console.error('[Paymaster] Error communicating with backend:', error);
     throw error;

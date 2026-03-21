@@ -221,6 +221,24 @@ function AppNavigator() {
         }}
       />
       <Stack.Screen
+        name="satochip-connect"
+        options={{
+          headerShown: true,
+          title: "Satochip",
+          headerShadowVisible: false,
+          headerTransparent: false,
+          headerStyle: { backgroundColor: "transparent" },
+          headerBlurEffect,
+          headerRight: renderSheetCloseButton,
+          presentation: "formSheet",
+          sheetAllowedDetents: "fitToContents",
+          sheetLargestUndimmedDetentIndex: "last",
+          sheetGrabberVisible: false,
+          sheetCornerRadius: 28,
+          contentStyle: { backgroundColor: "transparent" },
+        }}
+      />
+      <Stack.Screen
         name="send-options"
         options={{
           headerShown: true,

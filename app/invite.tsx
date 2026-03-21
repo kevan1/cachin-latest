@@ -1,5 +1,4 @@
 import { StyleSheet, View, Text, TouchableOpacity, ScrollView, Alert, Share } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useEffect, useState, useMemo } from 'react';
 import * as Clipboard from 'expo-clipboard';
@@ -42,7 +41,12 @@ export default function InviteScreen() {
   const progress = Math.min(1, points / 10000);
 
   return (
-    <SafeAreaView style={styles.container}>
+    <ScrollView
+      contentInsetAdjustmentBehavior="automatic"
+      style={styles.container}
+      contentContainerStyle={styles.content}
+      showsVerticalScrollIndicator={false}
+    >
       {/* Header */}
       <View style={styles.header}>
         <TouchableOpacity style={styles.backButton} onPress={() => router.back()}>
@@ -52,55 +56,53 @@ export default function InviteScreen() {
         <View style={{ width: 50 }} />
       </View>
 
-      <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
-        {/* Points Card */}
-        <View style={styles.pointsCard}>
-          <Text style={styles.pointsLarge}>{points.toLocaleString()} Points</Text>
+      {/* Points Card */}
+      <View style={styles.pointsCard}>
+        <Text style={styles.pointsLarge}>{points.toLocaleString()} Points</Text>
 
-          <View style={styles.tierRow}>
-            <View style={styles.tierBadge}><Text style={styles.tierBadgeText}>1</Text></View>
-            <View style={styles.progressTrack}>
-              <View style={[styles.progressFill, { width: `${progress * 100}%` }]} />
-            </View>
-            <View style={[styles.tierBadge, styles.tierBadgeMuted]}><Text style={styles.tierBadgeText}>2</Text></View>
+        <View style={styles.tierRow}>
+          <View style={styles.tierBadge}><Text style={styles.tierBadgeText}>1</Text></View>
+          <View style={styles.progressTrack}>
+            <View style={[styles.progressFill, { width: `${progress * 100}%` }]} />
           </View>
-
-          <Text style={styles.tierText}>You&apos;re at tier 1.</Text>
-          <Text style={styles.subText}>{pointsToNextTier.toLocaleString()} points needed to level up</Text>
+          <View style={[styles.tierBadge, styles.tierBadgeMuted]}><Text style={styles.tierBadgeText}>2</Text></View>
         </View>
 
-        {/* Invite banner */}
-        <Text style={styles.bannerText}>
-          Invite friends and get 20% of their points.
-        </Text>
+        <Text style={styles.tierText}>You&apos;re at tier 1.</Text>
+        <Text style={styles.subText}>{pointsToNextTier.toLocaleString()} points needed to level up</Text>
+      </View>
 
-        {/* Invite code */}
-        <Text style={styles.sectionTitle}>Invite friends with your code</Text>
-        <TouchableOpacity style={styles.codeBox} onPress={handleCopyCode} activeOpacity={0.8}>
-          <Text style={styles.codeText}>{inviteCode}</Text>
-          <Text style={styles.copyIcon}>📋</Text>
-        </TouchableOpacity>
+      {/* Invite banner */}
+      <Text style={styles.bannerText}>
+        Invite friends and get 20% of their points.
+      </Text>
 
-        <TouchableOpacity style={styles.shareButton} onPress={handleShare}>
-          <Text style={styles.shareButtonIcon}>⬆</Text>
-          <Text style={styles.shareButtonText}>Share Invite link</Text>
-        </TouchableOpacity>
+      {/* Invite code */}
+      <Text style={styles.sectionTitle}>Invite friends with your code</Text>
+      <TouchableOpacity style={styles.codeBox} onPress={handleCopyCode} activeOpacity={0.8}>
+        <Text style={styles.codeText}>{inviteCode}</Text>
+        <Text style={styles.copyIcon}>📋</Text>
+      </TouchableOpacity>
 
-        {/* People invited */}
-        <Text style={styles.sectionTitle}>People you invited</Text>
-        <View style={styles.invitedList}>
-          {[{name:'pepe', pts:'+20 pts'}, {name:'lockfryer', pts:'+20 pts'}].map((p, i) => (
-            <View key={i} style={styles.invitedItem}>
-              <View style={[styles.invitedAvatar, { backgroundColor: i === 0 ? '#D8D5FF' : '#FFD0D0' }]}>
-                <Text style={styles.invitedAvatarText}>{p.name.slice(0,2).toUpperCase()}</Text>
-              </View>
-              <Text style={styles.invitedName}>{p.name} 💞</Text>
-              <Text style={styles.invitedPts}>{p.pts}</Text>
+      <TouchableOpacity style={styles.shareButton} onPress={handleShare}>
+        <Text style={styles.shareButtonIcon}>⬆</Text>
+        <Text style={styles.shareButtonText}>Share Invite link</Text>
+      </TouchableOpacity>
+
+      {/* People invited */}
+      <Text style={styles.sectionTitle}>People you invited</Text>
+      <View style={styles.invitedList}>
+        {[{name:'pepe', pts:'+20 pts'}, {name:'lockfryer', pts:'+20 pts'}].map((p, i) => (
+          <View key={i} style={styles.invitedItem}>
+            <View style={[styles.invitedAvatar, { backgroundColor: i === 0 ? '#D8D5FF' : '#FFD0D0' }]}>
+              <Text style={styles.invitedAvatarText}>{p.name.slice(0,2).toUpperCase()}</Text>
             </View>
-          ))}
-        </View>
-      </ScrollView>
-    </SafeAreaView>
+            <Text style={styles.invitedName}>{p.name} 💞</Text>
+            <Text style={styles.invitedPts}>{p.pts}</Text>
+          </View>
+        ))}
+      </View>
+    </ScrollView>
   );
 }
 
@@ -242,10 +244,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     gap: 10,
     marginBottom: 20,
-    shadowColor: '#000000',
-    shadowOffset: { width: 3, height: 3 },
-    shadowOpacity: 1,
-    shadowRadius: 0,
+    boxShadow: '3px 3px 0px rgba(0, 0, 0, 1)',
   },
   shareButtonIcon: {
     fontSize: 18,

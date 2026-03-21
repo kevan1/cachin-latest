@@ -1,0 +1,295 @@
+import { useEffect, useState } from "react";
+import {
+  ActivityIndicator,
+  Alert,
+  KeyboardAvoidingView,
+  Platform,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
+  useColorScheme,
+} from "react-native";
+import { useRouter } from "expo-router";
+
+import { Colors } from "@/constants/theme";
+import {
+  getSatochipErrorMessage,
+  readSatochipAvalancheAddress,
+} from "@/utils/satochip";
+import {
+  loadAvalancheWalletSource,
+  loadSatochipAvalancheAddress,
+  saveAvalancheWalletSource,
+  saveSatochipAvalancheAddress,
+} from "@/utils/satochipStorage";
+
+function formatAddress(address: string | null) {
+  if (!address) return "No card connected yet";
+  return `${address.slice(0, 6)}...${address.slice(-4)}`;
+}
+
+export default function SatochipConnectScreen() {
+  const router = useRouter();
+  const colorScheme = (useColorScheme() ?? "light") as "light" | "dark";
+  const palette = Colors[colorScheme];
+  const [pin, setPin] = useState("");
+  const [isConnecting, setIsConnecting] = useState(false);
+  const [currentAddress, setCurrentAddress] = useState<string | null>(null);
+  const [currentSource, setCurrentSource] = useState<"privy" | "satochip">("privy");
+
+  useEffect(() => {
+    Promise.all([loadAvalancheWalletSource(), loadSatochipAvalancheAddress()])
+      .then(([source, address]) => {
+        setCurrentSource(source);
+        setCurrentAddress(address);
+      })
+      .catch((error) => {
+        console.error("[SatochipConnect] Failed to load state", error);
+      });
+  }, []);
+
+  const handleConnect = async () => {
+    if (!pin.trim()) {
+      Alert.alert("PIN required", "Enter your Satochip PIN before you tap the card.");
+      return;
+    }
+
+    try {
+      setIsConnecting(true);
+      const result = await readSatochipAvalancheAddress(pin.trim());
+
+      await saveSatochipAvalancheAddress(result.address);
+      await saveAvalancheWalletSource("satochip");
+
+      setCurrentAddress(result.address);
+      setCurrentSource("satochip");
+      setPin("");
+
+      Alert.alert(
+        "Satochip connected",
+        `Avalanche address ${result.address} is now active for Avalanche balances and sends.`,
+        [{ text: "Done", onPress: () => router.back() }]
+      );
+    } catch (error) {
+      console.error("[SatochipConnect] Failed to connect card", error);
+      Alert.alert("Could not connect Satochip", getSatochipErrorMessage(error));
+    } finally {
+      setIsConnecting(false);
+    }
+  };
+
+  const handleUsePrivy = async () => {
+    await saveAvalancheWalletSource("privy");
+    router.back();
+  };
+
+  return (
+    <KeyboardAvoidingView
+      behavior={Platform.OS === "ios" ? "padding" : undefined}
+      style={[styles.container, { backgroundColor: palette.background }]}
+    >
+      <ScrollView
+        contentInsetAdjustmentBehavior="automatic"
+        contentContainerStyle={styles.content}
+        keyboardShouldPersistTaps="handled"
+      >
+        <View
+          style={[
+            styles.hero,
+            {
+              backgroundColor: palette.surface,
+              borderColor: palette.borderSubtle,
+            },
+          ]}
+        >
+          <Text style={[styles.eyebrow, { color: palette.secondaryText }]}>
+            Avalanche wallet source
+          </Text>
+          <Text style={[styles.title, { color: palette.primaryText }]}>
+            Connect a Satochip card
+          </Text>
+          <Text style={[styles.subtitle, { color: palette.secondaryText }]}>
+            Cachin keeps Privy passkeys for app sign-in. This screen only switches the
+            Avalanche wallet source to a Satochip card over NFC.
+          </Text>
+        </View>
+
+        <View
+          style={[
+            styles.card,
+            {
+              backgroundColor: palette.surface,
+              borderColor: palette.borderSubtle,
+            },
+          ]}
+        >
+          <Text style={[styles.sectionLabel, { color: palette.secondaryText }]}>
+            Current Avalanche source
+          </Text>
+          <Text style={[styles.sourceValue, { color: palette.primaryText }]}>
+            {currentSource === "satochip" ? "Satochip card" : "Privy embedded wallet"}
+          </Text>
+          <Text style={[styles.sectionLabel, { color: palette.secondaryText, marginTop: 16 }]}>
+            Last connected Satochip address
+          </Text>
+          <Text style={[styles.addressValue, { color: palette.primaryText }]}>
+            {formatAddress(currentAddress)}
+          </Text>
+        </View>
+
+        <View
+          style={[
+            styles.card,
+            {
+              backgroundColor: palette.surface,
+              borderColor: palette.borderSubtle,
+            },
+          ]}
+        >
+          <Text style={[styles.sectionLabel, { color: palette.secondaryText }]}>
+            Satochip PIN
+          </Text>
+          <TextInput
+            value={pin}
+            onChangeText={setPin}
+            placeholder="Enter PIN"
+            placeholderTextColor={palette.secondaryText}
+            keyboardType="number-pad"
+            secureTextEntry
+            style={[
+              styles.pinInput,
+              {
+                color: palette.primaryText,
+                backgroundColor: palette.surfaceMuted,
+                borderColor: palette.borderSubtle,
+              },
+            ]}
+          />
+          <Text style={[styles.helper, { color: palette.secondaryText }]}>
+            Hold the card near the phone after tapping connect. Android devices with NFC are
+            the primary target for this flow.
+          </Text>
+        </View>
+
+        <TouchableOpacity
+          accessibilityRole="button"
+          onPress={handleConnect}
+          disabled={isConnecting}
+          style={[
+            styles.primaryButton,
+            {
+              backgroundColor: palette.actionPrimary,
+              opacity: isConnecting ? 0.7 : 1,
+            },
+          ]}
+        >
+          {isConnecting ? (
+            <ActivityIndicator color={palette.actionPrimaryText} />
+          ) : (
+            <Text style={[styles.primaryButtonText, { color: palette.actionPrimaryText }]}>
+              Tap card to connect
+            </Text>
+          )}
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          accessibilityRole="button"
+          onPress={handleUsePrivy}
+          style={[
+            styles.secondaryButton,
+            { backgroundColor: palette.actionSecondary },
+          ]}
+        >
+          <Text style={[styles.secondaryButtonText, { color: palette.actionSecondaryText }]}>
+            Use Privy wallet instead
+          </Text>
+        </TouchableOpacity>
+      </ScrollView>
+    </KeyboardAvoidingView>
+  );
+}
+
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+  },
+  content: {
+    padding: 20,
+    gap: 16,
+  },
+  hero: {
+    borderWidth: 1,
+    borderRadius: 24,
+    padding: 20,
+    gap: 10,
+  },
+  eyebrow: {
+    fontSize: 12,
+    fontWeight: "600",
+    textTransform: "uppercase",
+    letterSpacing: 0.8,
+  },
+  title: {
+    fontSize: 28,
+    fontWeight: "700",
+  },
+  subtitle: {
+    fontSize: 15,
+    lineHeight: 22,
+  },
+  card: {
+    borderWidth: 1,
+    borderRadius: 20,
+    padding: 18,
+  },
+  sectionLabel: {
+    fontSize: 13,
+    fontWeight: "600",
+  },
+  sourceValue: {
+    fontSize: 18,
+    fontWeight: "700",
+    marginTop: 6,
+  },
+  addressValue: {
+    fontSize: 16,
+    fontWeight: "600",
+    marginTop: 6,
+  },
+  pinInput: {
+    borderWidth: 1,
+    borderRadius: 14,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    marginTop: 8,
+    fontSize: 16,
+  },
+  helper: {
+    fontSize: 13,
+    lineHeight: 19,
+    marginTop: 10,
+  },
+  primaryButton: {
+    borderRadius: 18,
+    paddingVertical: 16,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  primaryButtonText: {
+    fontSize: 16,
+    fontWeight: "700",
+  },
+  secondaryButton: {
+    borderRadius: 18,
+    paddingVertical: 16,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  secondaryButtonText: {
+    fontSize: 15,
+    fontWeight: "600",
+  },
+});

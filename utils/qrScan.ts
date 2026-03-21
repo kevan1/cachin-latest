@@ -2,6 +2,15 @@ import { PublicKey } from '@solana/web3.js';
 
 export type QrScanResult =
   | { kind: 'cachinUser'; username: string; url: string }
+  | {
+      kind: 'solanaPay';
+      address: string;
+      amount?: string;
+      splToken?: string;
+      label?: string;
+      message?: string;
+      memo?: string;
+    }
   | { kind: 'solanaAddress'; address: string }
   | { kind: 'unknown'; raw: string; reason: 'empty' | 'not_supported' };
 
@@ -75,6 +84,32 @@ function tryParseSolanaAddress(raw: string) {
   return isValidSolanaAddress(text) ? text : null;
 }
 
+function tryParseSolanaPay(raw: string) {
+  const text = raw.trim();
+  if (!text) return null;
+  if (!text.toLowerCase().startsWith('solana:')) return null;
+
+  const withoutScheme = text.slice('solana:'.length).replace(/^\/+/, '');
+  const [addressPart, queryPartRaw] = withoutScheme.split('?', 2);
+  const address = (addressPart ?? '').trim();
+  if (!isValidSolanaAddress(address)) return null;
+
+  const queryPart = (queryPartRaw ?? '').trim();
+  if (!queryPart) return null;
+
+  const params = new URLSearchParams(queryPart);
+  const amount = params.get('amount')?.trim() || undefined;
+  const splToken = params.get('spl-token')?.trim() || undefined;
+  const label = params.get('label')?.trim() || undefined;
+  const message = params.get('message')?.trim() || undefined;
+  const memo = params.get('memo')?.trim() || undefined;
+
+  // If it doesn't look like a Solana Pay request, don't treat it as one.
+  if (!amount && !splToken && !label && !message && !memo) return null;
+
+  return { address, amount, splToken, label, message, memo };
+}
+
 export function parseQrScanData(raw: string): QrScanResult {
   const text = raw.trim();
   if (!text) return { kind: 'unknown', raw, reason: 'empty' };
@@ -87,6 +122,9 @@ export function parseQrScanData(raw: string): QrScanResult {
       url: `https://${CACHIN_HOST}/${cachinUsername}`,
     };
   }
+
+  const solanaPay = tryParseSolanaPay(text);
+  if (solanaPay) return { kind: 'solanaPay', ...solanaPay };
 
   const solanaAddress = tryParseSolanaAddress(text);
   if (solanaAddress) return { kind: 'solanaAddress', address: solanaAddress };

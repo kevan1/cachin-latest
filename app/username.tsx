@@ -1,12 +1,14 @@
 import { useState, useEffect, useRef } from 'react';
-import { StyleSheet, View, Text, TextInput, TouchableOpacity, Alert, Animated, ActivityIndicator, Dimensions } from 'react-native';
+import { StyleSheet, View, Text, TextInput, TouchableOpacity, Alert, Animated, ActivityIndicator, ScrollView, useWindowDimensions } from 'react-native';
 import { useRouter } from 'expo-router';
-import { SafeAreaView } from 'react-native-safe-area-context';
 import { useSignupWithPasskey } from '@privy-io/expo/passkey';
-import { useEmbeddedSolanaWallet, useEmbeddedEthereumWallet } from '@privy-io/expo';
 import Svg, { Path } from 'react-native-svg';
-
-const { width: SCREEN_WIDTH } = Dimensions.get('window');
+import {
+  checkPasskeySupport,
+  formatPasskeyError,
+  isPasskeySupportedByOs,
+  shouldFallbackToEmail,
+} from '@/utils/passkeySupport';
 
 // Icon components
 function CheckmarkIcon({ size = 28, color = '#10B981' }: { size?: number; color?: string }) {
@@ -32,14 +34,6 @@ function PeopleIcon({ size = 28, color = '#3B82F6' }: { size?: number; color?: s
     </Svg>
   );
 }
-
-const formatPasskeyError = (err: any) => {
-  const message = err?.message || 'Unable to complete passkey setup.';
-  if (typeof message === 'string' && message.toLowerCase().includes('biometric')) {
-    return 'Enable Face ID/Touch ID or a device passcode to set up passkeys.';
-  }
-  return message;
-};
 
 // Animated progress bar component
 function ProgressBar({ isActive, isComplete, delay = 0 }: { isActive: boolean; isComplete?: boolean; delay?: number }) {
@@ -80,33 +74,40 @@ function ProgressBar({ isActive, isComplete, delay = 0 }: { isActive: boolean; i
 
 export default function UsernameScreen() {
   const router = useRouter();
+  const { width: screenWidth, height: screenHeight } = useWindowDimensions();
   const [currentStep, setCurrentStep] = useState(0);
   const slideAnim = useRef(new Animated.Value(0)).current;
-  const [username, setUsername] = useState('');
-  const [isValid, setIsValid] = useState(false);
-  const [validationMessage, setValidationMessage] = useState('');
+  const [form, setForm] = useState({ username: '', isValid: false, validationMessage: '' });
+  const [useEmailFallback, setUseEmailFallback] = useState(
+    () => !isPasskeySupportedByOs()
+  );
+  const didRedirectRef = useRef(false);
   
   // Passkey setup state
   const [loading, setLoading] = useState(false);
-  const { create: createSolanaWallet } = useEmbeddedSolanaWallet();
-  const { create: createEthereumWallet } = useEmbeddedEthereumWallet();
+
+  useEffect(() => {
+    let isMounted = true;
+    checkPasskeySupport().then((supported) => {
+      if (!isMounted) return;
+      if (!supported) {
+        setUseEmailFallback(true);
+      }
+    });
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!useEmailFallback || didRedirectRef.current) return;
+    didRedirectRef.current = true;
+    router.replace({ pathname: '/email', params: { mode: 'signup' } });
+  }, [router, useEmailFallback]);
 
   const { signupWithPasskey } = useSignupWithPasskey({
     onSuccess: async () => {
       console.log("Passkey registered and logged in successfully");
-      try {
-        // Create both Solana and Ethereum (for Monad) wallets with Privy
-        console.log('Creating Solana wallet...');
-        await createSolanaWallet?.({ recoveryMethod: 'privy' });
-        console.log('Solana wallet created successfully');
-        
-        console.log('Creating Ethereum wallet for Monad...');
-        await createEthereumWallet?.({ recoveryMethod: 'privy' });
-        console.log('Ethereum wallet created successfully');
-      } catch (error) {
-        console.error('Error creating wallets:', error);
-        // Don't block navigation if wallet creation fails
-      }
       setLoading(false);
       // Navigate to main app
       router.replace('/(main)/home');
@@ -114,7 +115,16 @@ export default function UsernameScreen() {
     onError: (err) => {
       console.log('Signup error:', JSON.stringify(err, null, 2));
       setLoading(false);
-      const message = formatPasskeyError(err);
+      if (shouldFallbackToEmail(err)) {
+        setUseEmailFallback(true);
+        router.replace({ pathname: '/email', params: { mode: 'signup' } });
+        return;
+      }
+      const message = formatPasskeyError(
+        err,
+        'Unable to complete passkey setup.',
+        'Enable Face ID/Touch ID or a device passcode to set up passkeys.'
+      );
       Alert.alert(
         "Registration Error",
         `Failed to register passkey: ${message}`
@@ -123,43 +133,37 @@ export default function UsernameScreen() {
   });
 
   const handleUsernameChange = (text: string) => {
-    setUsername(text);
-    setValidationMessage('');
-    
-    // Basic validation: length and characters
     if (text.length < 3) {
-      setIsValid(false);
-      if (text.length > 0) {
-        setValidationMessage('Username must be at least 3 characters');
-      }
+      setForm({
+        username: text,
+        isValid: false,
+        validationMessage: text.length > 0 ? 'Username must be at least 3 characters' : '',
+      });
       return;
     }
-    
+
     if (text.length > 20) {
-      setIsValid(false);
-      setValidationMessage('Username must be less than 20 characters');
+      setForm({ username: text, isValid: false, validationMessage: 'Username must be less than 20 characters' });
       return;
     }
-    
+
     if (!/^[a-zA-Z0-9_]+$/.test(text)) {
-      setIsValid(false);
-      setValidationMessage('Only letters, numbers, and underscores allowed');
+      setForm({ username: text, isValid: false, validationMessage: 'Only letters, numbers, and underscores allowed' });
       return;
     }
-    
-    setIsValid(true);
-    setValidationMessage('Username looks good');
+
+    setForm({ username: text, isValid: true, validationMessage: 'Username looks good' });
   };
 
   const handleNext = () => {
-    if (!isValid) {
+    if (!form.isValid) {
       Alert.alert('Invalid Username', 'Username must be at least 3 characters and contain only letters, numbers, and underscores.');
       return;
     }
     // Animate to next step (passkey setup)
     setCurrentStep(1);
     Animated.spring(slideAnim, {
-      toValue: -SCREEN_WIDTH,
+      toValue: -screenWidth,
       useNativeDriver: true,
       tension: 65,
       friction: 11,
@@ -167,17 +171,31 @@ export default function UsernameScreen() {
   };
   
   const handleSetupPasskey = async () => {
+    if (useEmailFallback) {
+      router.replace({ pathname: '/email', params: { mode: 'signup' } });
+      return;
+    }
+
     try {
       setLoading(true);
       
       await signupWithPasskey({
         relyingParty: "https://auth.kevan.ar",
-        username: username,
+        username: form.username,
       });
     } catch (error: any) {
       console.error("Error setting up passkey", error);
       setLoading(false);
-      const message = formatPasskeyError(error);
+      if (shouldFallbackToEmail(error)) {
+        setUseEmailFallback(true);
+        router.replace({ pathname: '/email', params: { mode: 'signup' } });
+        return;
+      }
+      const message = formatPasskeyError(
+        error,
+        'Unable to complete passkey setup.',
+        'Enable Face ID/Touch ID or a device passcode to set up passkeys.'
+      );
       Alert.alert(
         "Registration Error",
         `Failed to setup passkey: ${message}`
@@ -201,152 +219,167 @@ export default function UsernameScreen() {
   };
 
   return (
-    <SafeAreaView style={styles.container}>
-      {/* Header with progress and close */}
-      <View style={styles.header}>
-        <TouchableOpacity style={styles.closeButton} onPress={handleBack}>
-          <Text style={styles.closeIcon}>{currentStep === 0 ? '✕' : '‹'}</Text>
-        </TouchableOpacity>
-        
-        {/* Progress indicator */}
-        <View style={styles.progressContainer}>
-          <ProgressBar isActive={currentStep === 0} isComplete={currentStep > 0} delay={0} />
-          <ProgressBar isActive={currentStep === 1} delay={0} />
-          <View style={styles.verificationCircle}>
-            <Text style={styles.verificationMark}>✓</Text>
+    <ScrollView
+      contentInsetAdjustmentBehavior="automatic"
+      style={styles.container}
+      contentContainerStyle={styles.containerContent}
+      showsVerticalScrollIndicator={false}
+      keyboardShouldPersistTaps="handled"
+    >
+      <View style={[styles.screen, { minHeight: screenHeight }]}>
+        {/* Header with progress and close */}
+        <View style={styles.header}>
+          <TouchableOpacity style={styles.closeButton} onPress={handleBack}>
+            <Text style={styles.closeIcon}>{currentStep === 0 ? '✕' : '‹'}</Text>
+          </TouchableOpacity>
+          
+          {/* Progress indicator */}
+          <View style={styles.progressContainer}>
+            <ProgressBar isActive={currentStep === 0} isComplete={currentStep > 0} delay={0} />
+            <ProgressBar isActive={currentStep === 1} delay={0} />
+            <View style={styles.verificationCircle}>
+              <Text style={styles.verificationMark}>✓</Text>
+            </View>
           </View>
+          
+          <TouchableOpacity style={styles.helpButton}>
+            <Text style={styles.helpIcon}>?</Text>
+          </TouchableOpacity>
         </View>
-        
-        <TouchableOpacity style={styles.helpButton}>
-          <Text style={styles.helpIcon}>?</Text>
-        </TouchableOpacity>
-      </View>
 
-      {/* Carousel Content */}
-      <View style={styles.carouselWrapper}>
-        <Animated.View style={[styles.carouselContainer, { transform: [{ translateX: slideAnim }] }]}>
-          {/* Step 1: Username */}
-          <View style={[styles.carouselSlide, { width: SCREEN_WIDTH }]}>
-            <View style={styles.content}>
-              <Text style={styles.title}>How should we call you?</Text>
-              <Text style={styles.subtitle}>
-                Choose your username. It&apos;ll be your ID to send and receive money.
-              </Text>
-
-              {/* Username Input */}
-              <View style={styles.inputContainer}>
-                <TextInput
-                  style={styles.input}
-                  placeholder=""
-                  placeholderTextColor="#C7C7C7"
-                  value={username}
-                  onChangeText={handleUsernameChange}
-                  autoCapitalize="none"
-                  autoCorrect={false}
-                  autoFocus={currentStep === 0}
-                />
-                {isValid && username.length > 0 && (
-                  <Text style={styles.checkmark}>✓</Text>
-                )}
-              </View>
-              
-              {validationMessage && (
-                <Text style={[styles.validationMessage, isValid && styles.validationSuccess]}>
-                  {validationMessage}
+        {/* Carousel Content */}
+        <View style={styles.carouselWrapper}>
+          <Animated.View style={[styles.carouselContainer, { transform: [{ translateX: slideAnim }] }]}>
+            {/* Step 1: Username */}
+            <View style={[styles.carouselSlide, { width: screenWidth }]}>
+              <View style={styles.content}>
+                <Text style={styles.title}>How should we call you?</Text>
+                <Text style={styles.subtitle}>
+                  Choose your username. It&apos;ll be your ID to send and receive money.
                 </Text>
-              )}
 
-              <View style={styles.spacer} />
-
-              {/* Continue Button */}
-              <TouchableOpacity
-                style={[styles.continueButton, !isValid && styles.continueButtonDisabled]}
-                onPress={handleNext}
-                activeOpacity={0.8}
-                disabled={!isValid}
-              >
-                <Text style={styles.continueButtonText}>Continue</Text>
-              </TouchableOpacity>
-            </View>
-          </View>
-
-          {/* Step 2: Passkey Setup */}
-          <View style={[styles.carouselSlide, { width: SCREEN_WIDTH }]}>
-            <View style={styles.content}>
-              <Text style={styles.title}>Save Passkey</Text>
-              <Text style={styles.subtitle}>
-                Passkeys are a secure alternative to passwords saved on your device.
-              </Text>
-
-              {/* Features List */}
-              <View style={styles.featuresList}>
-                <View style={styles.featureItem}>
-                  <View style={[styles.iconCircle, { backgroundColor: '#E0F2FE' }]}>
-                    <CheckmarkIcon size={28} color="#10B981" />
-                  </View>
-                  <View style={styles.featureText}>
-                    <Text style={styles.featureTitle}>Streamlined Login</Text>
-                    <Text style={styles.featureDescription}>
-                      Passkeys make authentication faster. You don&apos;t need to remember any password.
-                    </Text>
-                  </View>
+                {/* Username Input */}
+                <View style={styles.inputContainer}>
+                  <TextInput
+                    style={styles.input}
+                    placeholder=""
+                    placeholderTextColor="#C7C7C7"
+                    value={form.username}
+                    onChangeText={handleUsernameChange}
+                    autoCapitalize="none"
+                    autoCorrect={false}
+                    autoFocus={currentStep === 0}
+                  />
+                  {form.isValid && form.username.length > 0 && (
+                    <Text style={styles.checkmark}>✓</Text>
+                  )}
                 </View>
-
-                <View style={styles.featureItem}>
-                  <View style={[styles.iconCircle, { backgroundColor: '#DBEAFE' }]}>
-                    <LockIcon size={28} color="#3B82F6" />
-                  </View>
-                  <View style={styles.featureText}>
-                    <Text style={styles.featureTitle}>Powerful Security</Text>
-                    <Text style={styles.featureDescription}>
-                      Passkeys provide the strongest protection against attacks and threats like phishing.
-                    </Text>
-                  </View>
-                </View>
-
-                <View style={styles.featureItem}>
-                  <View style={[styles.iconCircle, { backgroundColor: '#DBEAFE' }]}>
-                    <PeopleIcon size={28} color="#3B82F6" />
-                  </View>
-                  <View style={styles.featureText}>
-                    <Text style={styles.featureTitle}>Works with Passwords</Text>
-                    <Text style={styles.featureDescription}>
-                      Passkeys work alongside traditional passwords, allowing you to use your preferred option.
-                    </Text>
-                  </View>
-                </View>
-              </View>
-
-              <View style={styles.spacer} />
-
-              <Text style={styles.footerText}>
-                You can manage your passkeys in settings.
-              </Text>
-
-              {/* Setup Button */}
-              <TouchableOpacity
-                style={[styles.continueButton, loading && styles.continueButtonDisabled]}
-                onPress={handleSetupPasskey}
-                activeOpacity={0.8}
-                disabled={loading}
-              >
-                {loading ? (
-                  <ActivityIndicator color="#FFFFFF" />
-                ) : (
-                  <Text style={styles.continueButtonText}>Setup Passkey</Text>
+                
+                {form.validationMessage && (
+                  <Text style={[styles.validationMessage, form.isValid && styles.validationSuccess]}>
+                    {form.validationMessage}
+                  </Text>
                 )}
-              </TouchableOpacity>
+
+                <View style={styles.spacer} />
+
+                {/* Continue Button */}
+                <TouchableOpacity
+                  style={[styles.continueButton, !form.isValid && styles.continueButtonDisabled]}
+                  onPress={handleNext}
+                  activeOpacity={0.8}
+                  disabled={!form.isValid}
+                >
+                  <Text style={styles.continueButtonText}>Continue</Text>
+                </TouchableOpacity>
+              </View>
             </View>
-          </View>
-        </Animated.View>
+
+            {/* Step 2: Passkey Setup */}
+            <View style={[styles.carouselSlide, { width: screenWidth }]}>
+              <View style={styles.content}>
+                <Text style={styles.title}>Save Passkey</Text>
+                <Text style={styles.subtitle}>
+                  Passkeys are a secure alternative to passwords saved on your device.
+                </Text>
+
+                {/* Features List */}
+                <View style={styles.featuresList}>
+                  <View style={styles.featureItem}>
+                    <View style={[styles.iconCircle, { backgroundColor: '#E0F2FE' }]}>
+                      <CheckmarkIcon size={28} color="#10B981" />
+                    </View>
+                    <View style={styles.featureText}>
+                      <Text style={styles.featureTitle}>Streamlined Login</Text>
+                      <Text style={styles.featureDescription}>
+                        Passkeys make authentication faster. You don&apos;t need to remember any password.
+                      </Text>
+                    </View>
+                  </View>
+
+                  <View style={styles.featureItem}>
+                    <View style={[styles.iconCircle, { backgroundColor: '#DBEAFE' }]}>
+                      <LockIcon size={28} color="#3B82F6" />
+                    </View>
+                    <View style={styles.featureText}>
+                      <Text style={styles.featureTitle}>Powerful Security</Text>
+                      <Text style={styles.featureDescription}>
+                        Passkeys provide the strongest protection against attacks and threats like phishing.
+                      </Text>
+                    </View>
+                  </View>
+
+                  <View style={styles.featureItem}>
+                    <View style={[styles.iconCircle, { backgroundColor: '#DBEAFE' }]}>
+                      <PeopleIcon size={28} color="#3B82F6" />
+                    </View>
+                    <View style={styles.featureText}>
+                      <Text style={styles.featureTitle}>Works with Passwords</Text>
+                      <Text style={styles.featureDescription}>
+                        Passkeys work alongside traditional passwords, allowing you to use your preferred option.
+                      </Text>
+                    </View>
+                  </View>
+                </View>
+
+                <View style={styles.spacer} />
+
+                <Text style={styles.footerText}>
+                  You can manage your passkeys in settings.
+                </Text>
+
+                {/* Setup Button */}
+                <TouchableOpacity
+                  style={[styles.continueButton, loading && styles.continueButtonDisabled]}
+                  onPress={handleSetupPasskey}
+                  activeOpacity={0.8}
+                  disabled={loading}
+                >
+                  {loading ? (
+                    <ActivityIndicator color="#FFFFFF" />
+                  ) : (
+                    <Text style={styles.continueButtonText}>Setup Passkey</Text>
+                  )}
+                </TouchableOpacity>
+              </View>
+            </View>
+          </Animated.View>
+        </View>
       </View>
-    </SafeAreaView>
+    </ScrollView>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
+    backgroundColor: '#FFFFFF',
+  },
+  containerContent: {
+    flexGrow: 1,
+  },
+  screen: {
+    flexGrow: 1,
     backgroundColor: '#FFFFFF',
   },
   header: {
@@ -400,12 +433,12 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
   },
   carouselWrapper: {
-    flex: 1,
+    flexGrow: 1,
     overflow: 'hidden',
   },
   carouselContainer: {
     flexDirection: 'row',
-    flex: 1,
+    flexGrow: 1,
   },
   carouselSlide: {
     // Width set inline to SCREEN_WIDTH
@@ -425,9 +458,10 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   content: {
-    flex: 1,
+    flexGrow: 1,
     paddingHorizontal: 24,
     paddingTop: 40,
+    paddingBottom: 32,
   },
   title: {
     fontSize: 36,
@@ -481,7 +515,6 @@ const styles = StyleSheet.create({
     backgroundColor: '#10A5F5',
     alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: 40,
   },
   continueButtonDisabled: {
     opacity: 0.5,

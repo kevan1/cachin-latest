@@ -1,7 +1,19 @@
-import { StyleSheet, View, Text, TouchableOpacity, TextInput } from 'react-native';
+import {
+  StyleSheet,
+  View,
+  Text,
+  TouchableOpacity,
+  TextInput,
+  TouchableWithoutFeedback,
+  Keyboard,
+  useColorScheme,
+  ScrollView,
+} from 'react-native';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { useState } from 'react';
+import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 import Svg, { Path, Circle } from 'react-native-svg';
+import { Colors } from '@/constants/theme';
 
 // Icon components
 function ArgentinaFlagIcon({ size = 32 }: { size?: number }) {
@@ -15,27 +27,12 @@ function ArgentinaFlagIcon({ size = 32 }: { size?: number }) {
   );
 }
 
-function BankIcon({ size = 24, color = '#000' }: { size?: number; color?: string }) {
-  return (
-    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
-      <Path d="M3 21h18M3 10h18M5 6l7-3 7 3M4 10v11M8 10v11M12 10v11M16 10v11M20 10v11" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-    </Svg>
-  );
-}
-
-function InfoIcon({ size = 18, color = '#666' }: { size?: number; color?: string }) {
-  return (
-    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
-      <Circle cx="12" cy="12" r="10" stroke={color} strokeWidth="2" />
-      <Path d="M12 16v-4M12 8h.01" stroke={color} strokeWidth="2" strokeLinecap="round" />
-    </Svg>
-  );
-}
-
 export default function WithdrawBankScreen() {
   const router = useRouter();
   const params = useLocalSearchParams();
   const { amount, currency } = params; // amount in the selected currency
+  const colorScheme = useColorScheme() ?? 'light';
+  const palette = Colors[colorScheme];
   
   const [cbu, setCbu] = useState('');
   
@@ -68,204 +65,212 @@ export default function WithdrawBankScreen() {
 
   const handleReview = () => {
     console.log('Reviewing withdrawal:', { cbu, amount, currency });
-    // Navigate to review/confirmation screen
+    // Navigate to review/confirmation screen or show alert
   };
 
   return (
-    <View style={styles.container}>
-      {/* Header */}
-      <View style={styles.header}>
-        <TouchableOpacity style={styles.backButton} onPress={handleBack}>
-          <Text style={styles.backIcon}>‹</Text>
-        </TouchableOpacity>
-        <Text style={styles.title}>Withdraw</Text>
-        <View style={styles.placeholder} />
-      </View>
+    <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
+      <ScrollView
+        contentInsetAdjustmentBehavior="automatic"
+        style={[styles.container, { backgroundColor: palette.background }]}
+        contentContainerStyle={styles.containerContent}
+        showsVerticalScrollIndicator={false}
+      >
+        {/* Header */}
+        <View style={styles.header}>
+          <TouchableOpacity 
+            style={[styles.iconButton, { backgroundColor: palette.surfaceMuted, borderColor: palette.borderSubtle }]} 
+            onPress={handleBack}
+          >
+            <MaterialIcons name="arrow-back" size={20} color={palette.primaryText} />
+          </TouchableOpacity>
+          <Text style={[styles.headerTitle, { color: palette.primaryText }]}>Withdraw</Text>
+          <View style={styles.headerSpacer} />
+        </View>
 
-      {/* Withdrawal Summary Card */}
-      <View style={styles.summaryCard}>
-        <View style={styles.flagContainer}>
-          <View style={styles.flagCircle}>
-            <ArgentinaFlagIcon size={32} />
+        <View style={styles.content}>
+          {/* Withdrawal Summary Card */}
+          <View style={[styles.summaryCard, { backgroundColor: palette.surface, borderColor: palette.borderSubtle }]}>
+            <View style={styles.flagContainer}>
+              <View style={styles.flagCircle}>
+                <ArgentinaFlagIcon size={40} />
+              </View>
+              <View style={[styles.bankIconCircle, { backgroundColor: palette.surface, borderColor: palette.borderSubtle }]}>
+                <MaterialIcons name="account-balance" size={20} color={palette.primaryText} />
+              </View>
+            </View>
+            
+            <Text style={[styles.summaryLabel, { color: palette.secondaryText }]}>You&apos;re withdrawing</Text>
+            <Text style={[styles.summaryAmount, { color: palette.primaryText }]}>
+              ARS$ {amounts.ars.replace(/\B(?=(\d{3})+(?!\d))/g, ',')}
+            </Text>
+            <Text style={[styles.summaryEquivalent, { color: palette.secondaryText }]}>
+              ≈ ${amounts.usd} USD
+            </Text>
           </View>
-          <View style={styles.bankIconCircle}>
-            <BankIcon size={24} color="#000" />
+
+          {/* Bank Details Section */}
+          <Text style={[styles.sectionTitle, { color: palette.primaryText }]}>Enter Bank Transfer details</Text>
+
+          <View style={[styles.inputContainer, { backgroundColor: palette.surface, borderColor: palette.borderSubtle }]}>
+             <MaterialIcons name="account-balance-wallet" size={24} color={palette.secondaryText} style={styles.inputIcon} />
+            <TextInput
+              style={[styles.input, { color: palette.primaryText }]}
+              value={cbu}
+              onChangeText={setCbu}
+              placeholder="CBU/CVU"
+              placeholderTextColor={palette.secondaryText}
+              keyboardType="number-pad"
+            />
+          </View>
+
+          {/* Info Message */}
+          <View style={styles.infoContainer}>
+            <MaterialIcons name="info-outline" size={18} color={palette.secondaryText} />
+            <Text style={[styles.infoText, { color: palette.secondaryText }]}>
+              You can only withdraw to accounts under your name.
+            </Text>
           </View>
         </View>
-        
-        <Text style={styles.summaryLabel}>↑ You&apos;re withdrawing</Text>
-        <Text style={styles.summaryAmount}>ARS {amounts.ars.replace(/\B(?=(\d{3})+(?!\d))/g, ',')}</Text>
-        <Text style={styles.summaryEquivalent}>≈ {amounts.usd} USD</Text>
-      </View>
 
-      {/* Bank Details Section */}
-      <Text style={styles.sectionTitle}>Enter Bank Transfer details</Text>
-
-      <View style={styles.inputContainer}>
-        <TextInput
-          style={styles.input}
-          value={cbu}
-          onChangeText={setCbu}
-          placeholder="CBU/CVU"
-          placeholderTextColor="#999999"
-          keyboardType="number-pad"
-        />
-      </View>
-
-      {/* Info Message */}
-      <View style={styles.infoContainer}>
-        <InfoIcon size={18} color="#666666" />
-        <Text style={styles.infoText}>You can only withdraw to accounts under your name.</Text>
-      </View>
-
-      {/* Review Button */}
-      <TouchableOpacity 
-        style={[
-          styles.reviewButton,
-          !cbu && styles.reviewButtonDisabled
-        ]} 
-        onPress={handleReview}
-        disabled={!cbu}
-      >
-        <Text style={styles.reviewButtonText}>Review</Text>
-      </TouchableOpacity>
-    </View>
+        {/* Review Button */}
+        <View style={styles.footer}>
+          <TouchableOpacity 
+            style={[
+              styles.primaryButton,
+              { backgroundColor: palette.actionPrimary, opacity: cbu ? 1 : 0.5 }
+            ]} 
+            onPress={handleReview}
+            disabled={!cbu}
+          >
+            <Text style={[styles.primaryButtonText, { color: palette.actionPrimaryText }]}>Review</Text>
+          </TouchableOpacity>
+        </View>
+      </ScrollView>
+    </TouchableWithoutFeedback>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#F5E6D3',
-    padding: 20,
+  },
+  containerContent: {
+    flexGrow: 1,
+    paddingHorizontal: 20,
   },
   header: {
     flexDirection: 'row',
+    alignItems: 'center',
     justifyContent: 'space-between',
-    alignItems: 'center',
-    marginTop: 50,
-    marginBottom: 30,
+    marginBottom: 24,
+    marginTop: 12,
   },
-  backButton: {
-    width: 50,
-    height: 50,
-    borderRadius: 10,
-    borderWidth: 3,
-    borderColor: '#000000',
-    backgroundColor: '#FFFFFF',
+  iconButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    alignItems: 'center',
     justifyContent: 'center',
-    alignItems: 'center',
+    borderWidth: 1,
   },
-  backIcon: {
-    fontSize: 32,
-    fontWeight: 'bold',
-    color: '#000000',
+  headerTitle: {
+    fontSize: 18,
+    fontWeight: '600',
   },
-  title: {
-    fontSize: 28,
-    fontWeight: 'bold',
-    color: '#000000',
+  headerSpacer: {
+    width: 40,
   },
-  placeholder: {
-    width: 50,
+  content: {
+    flex: 1,
   },
   summaryCard: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 12,
-    borderWidth: 3,
-    borderColor: '#000000',
-    padding: 30,
+    borderRadius: 20,
+    borderWidth: 1,
+    padding: 24,
     marginBottom: 30,
-    alignItems: 'flex-start',
+    alignItems: 'center',
   },
   flagContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 20,
-    height: 60,
+    justifyContent: 'center',
+    marginBottom: 16,
+    height: 50,
+    width: 60,
   },
   flagCircle: {
-    width: 60,
-    height: 60,
-    borderRadius: 30,
-    backgroundColor: '#60A5FA',
-    justifyContent: 'center',
-    alignItems: 'center',
+    zIndex: 1,
   },
   bankIconCircle: {
-    width: 50,
-    height: 50,
-    borderRadius: 25,
-    backgroundColor: '#FFD700',
+    width: 32,
+    height: 32,
+    borderRadius: 16,
     justifyContent: 'center',
     alignItems: 'center',
-    marginLeft: -15,
+    marginLeft: -10,
+    zIndex: 2,
+    borderWidth: 2,
   },
   summaryLabel: {
     fontSize: 14,
-    color: '#666666',
     marginBottom: 8,
   },
   summaryAmount: {
-    fontSize: 36,
-    fontWeight: 'bold',
-    color: '#000000',
+    fontSize: 32,
+    fontWeight: '700',
     marginBottom: 4,
+    textAlign: 'center',
   },
   summaryEquivalent: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    color: '#000000',
+    fontSize: 16,
+    fontWeight: '500',
   },
   sectionTitle: {
-    fontSize: 22,
-    fontWeight: 'bold',
-    color: '#000000',
-    marginBottom: 20,
+    fontSize: 16,
+    fontWeight: '600',
+    marginBottom: 12,
   },
   inputContainer: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 12,
-    borderWidth: 3,
-    borderColor: '#000000',
-    marginBottom: 15,
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderRadius: 16,
+    borderWidth: 1,
+    paddingHorizontal: 16,
+    height: 56,
+    marginBottom: 16,
+  },
+  inputIcon: {
+    marginRight: 12,
   },
   input: {
-    fontSize: 18,
-    color: '#000000',
-    padding: 20,
+    flex: 1,
+    fontSize: 16,
+    height: '100%',
   },
   infoContainer: {
     flexDirection: 'row',
     alignItems: 'flex-start',
     marginBottom: 30,
-    paddingHorizontal: 5,
+    paddingHorizontal: 4,
     gap: 8,
   },
   infoText: {
     flex: 1,
-    fontSize: 14,
-    color: '#666666',
-    lineHeight: 20,
+    fontSize: 13,
+    lineHeight: 18,
   },
-  reviewButton: {
-    backgroundColor: '#60A5FA',
-    borderRadius: 12,
-    borderWidth: 3,
-    borderColor: '#000000',
-    paddingVertical: 20,
+  footer: {
+    marginBottom: 16,
+  },
+  primaryButton: {
+    width: '100%',
+    borderRadius: 999,
+    paddingVertical: 16,
     alignItems: 'center',
-    shadowColor: '#000000',
-    shadowOffset: { width: 4, height: 4 },
-    shadowOpacity: 1,
-    shadowRadius: 0,
   },
-  reviewButtonDisabled: {
-    backgroundColor: '#E0E0E0',
-  },
-  reviewButtonText: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    color: '#000000',
+  primaryButtonText: {
+    fontSize: 16,
+    fontWeight: '600',
   },
 });

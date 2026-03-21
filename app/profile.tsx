@@ -1,9 +1,10 @@
-import { StyleSheet, View, Text, TouchableOpacity, Alert, Switch, Share, ActionSheetIOS, Platform } from 'react-native';
+import { StyleSheet, View, Text, TouchableOpacity, Alert, Switch, Share, ActionSheetIOS, ScrollView } from 'react-native';
+import { Image } from 'expo-image';
 import * as Clipboard from 'expo-clipboard';
 import { useRouter } from 'expo-router';
-import { SafeAreaView } from 'react-native-safe-area-context';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { getUsername, clearUsername, Currency, getSelectedCurrency, saveSelectedCurrency } from '@/utils/userStorage';
+import { buildAvatarUrl, resolveAvatarSeed } from '@/utils/avatar';
 import { usePrivy } from '@privy-io/expo';
 import Svg, { Path } from 'react-native-svg';
 
@@ -85,8 +86,19 @@ export default function ProfileScreen() {
   const router = useRouter();
   const { logout, user } = usePrivy();
   const [username, setUsername] = useState<string>('User');
+  const [avatarError, setAvatarError] = useState(false);
   const [showFullName, setShowFullName] = useState(true);
   const [currency, setCurrency] = useState<Currency>('USD');
+
+  const avatarSeed = useMemo(
+    () => resolveAvatarSeed({ username, userId: user?.id }),
+    [username, user?.id]
+  );
+  const avatarUri = useMemo(() => buildAvatarUrl(avatarSeed, 120), [avatarSeed]);
+
+  useEffect(() => {
+    setAvatarError(false);
+  }, [avatarUri]);
 
   useEffect(() => {
     const loadUsername = async () => {
@@ -178,7 +190,7 @@ export default function ProfileScreen() {
   const handleCurrencyChange = () => {
     const options: Currency[] = ['USD', 'ARS', 'EUR'];
     
-    if (Platform.OS === 'ios') {
+    if (process.env.EXPO_OS === 'ios') {
       ActionSheetIOS.showActionSheetWithOptions(
         {
           options: [...options, 'Cancel'],
@@ -226,17 +238,30 @@ export default function ProfileScreen() {
   };
 
   return (
-    <SafeAreaView style={styles.container}>
-      <View style={styles.scrollView}>
-        {/* Top Row with Back Button and Avatar */}
-        <View style={styles.topRow}>
-          <TouchableOpacity style={styles.backButton} onPress={handleBack}>
-            <Text style={styles.backIcon}>‹</Text>
-          </TouchableOpacity>
-          <View style={styles.avatar}>
+    <ScrollView
+      contentInsetAdjustmentBehavior="automatic"
+      style={styles.container}
+      contentContainerStyle={styles.containerContent}
+      showsVerticalScrollIndicator={false}
+    >
+      {/* Top Row with Back Button and Avatar */}
+      <View style={styles.topRow}>
+        <TouchableOpacity style={styles.backButton} onPress={handleBack}>
+          <Text style={styles.backIcon}>‹</Text>
+        </TouchableOpacity>
+        <View style={styles.avatar}>
+          {avatarError ? (
             <Text style={styles.avatarText}>{username.slice(0, 2).toUpperCase()}</Text>
-          </View>
+          ) : (
+            <Image
+              source={{ uri: avatarUri }}
+              style={styles.avatarImage}
+              contentFit="cover"
+              onError={() => setAvatarError(true)}
+            />
+          )}
         </View>
+      </View>
 
         {/* Profile Header */}
         <View style={styles.profileHeader}>
@@ -328,8 +353,7 @@ export default function ProfileScreen() {
           <Text style={styles.logoutText}>Log out</Text>
         </TouchableOpacity>
 
-      </View>
-    </SafeAreaView>
+    </ScrollView>
   );
 }
 
@@ -338,10 +362,8 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: '#FFFFFF',
   },
-  scrollView: {
-    flex: 1,
-  },
-  contentContainer: {
+  containerContent: {
+    flexGrow: 1,
     paddingBottom: 24,
   },
   topRow: {
@@ -381,6 +403,11 @@ const styles = StyleSheet.create({
     backgroundColor: '#B8A5E8',
     justifyContent: 'center',
     alignItems: 'center',
+    overflow: 'hidden',
+  },
+  avatarImage: {
+    width: '100%',
+    height: '100%',
   },
   avatarText: {
     fontSize: 20,
@@ -475,10 +502,7 @@ const styles = StyleSheet.create({
     marginHorizontal: 20,
     marginTop: 8,
     gap: 10,
-    shadowColor: '#000000',
-    shadowOffset: { width: 3, height: 3 },
-    shadowOpacity: 1,
-    shadowRadius: 0,
+    boxShadow: '3px 3px 0px rgba(0, 0, 0, 1)',
   },
   logoutText: {
     fontSize: 18,

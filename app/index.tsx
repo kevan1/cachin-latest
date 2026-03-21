@@ -1,9 +1,26 @@
-import { useState, useEffect, useRef } from "react";
-import { View, Text, StyleSheet, TouchableOpacity, Animated, Image, Alert, Platform, ToastAndroid } from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
+import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  View,
+  Text,
+  StyleSheet,
+  TouchableOpacity,
+  Animated,
+  Alert,
+  ToastAndroid,
+  ScrollView,
+  useWindowDimensions,
+} from "react-native";
+import { Image } from "expo-image";
 import { Redirect, useRouter } from "expo-router";
 import { useLoginWithPasskey } from "@privy-io/expo/passkey";
 import { usePrivy } from "@privy-io/expo";
+import {
+  checkPasskeySupport,
+  formatPasskeyError,
+  isPasskeySupportedByOs,
+  shouldFallbackToEmail,
+} from "@/utils/passkeySupport";
+import { AlertSheet } from "@/components/AlertSheet";
 
 // Decorative element configuration
 const decorations = [
@@ -116,7 +133,7 @@ function AnimatedDecoration({ item }: { item: any }) {
         <Image
           source={require('../assets/images/coin.gif')}
           style={{ width: item.size, height: item.size }}
-          resizeMode="contain"
+          contentFit="contain"
         />
       </Animated.View>
     );
@@ -145,25 +162,53 @@ function AnimatedDecoration({ item }: { item: any }) {
 
 export default function Index() {
   const router = useRouter();
+  const { height: screenHeight } = useWindowDimensions();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [useEmailFallback, setUseEmailFallback] = useState(
+    () => !isPasskeySupportedByOs()
+  );
+  const [passkeyAlert, setPasskeyAlert] = useState({
+    visible: false,
+    title: "Face ID required",
+    message: "Enable Face ID/Touch ID or a device passcode to use passkeys.",
+    mode: "login" as "login" | "signup",
+  });
   const { user, isReady } = usePrivy();
+  const isAndroid = process.env.EXPO_OS === "android";
 
   const showToast = (message: string) => {
-    if (Platform.OS === 'android') {
+    if (isAndroid) {
       ToastAndroid.show(message, ToastAndroid.SHORT);
     } else {
       Alert.alert('', message);
     }
   };
 
-  const formatPasskeyError = (err: any) => {
-    const message = err?.message || 'Unable to log in with a passkey.';
-    if (typeof message === 'string' && message.toLowerCase().includes('biometric')) {
-      return 'Enable Face ID/Touch ID or a device passcode to use passkey login.';
-    }
-    return message;
-  };
+  useEffect(() => {
+    let isMounted = true;
+    checkPasskeySupport().then((supported) => {
+      if (!isMounted) return;
+      if (!supported) {
+        setUseEmailFallback(true);
+      }
+    });
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
+  const openPasskeyAlert = useCallback(
+    (mode: "login" | "signup", title: string, message: string) => {
+      setPasskeyAlert({ visible: true, mode, title, message });
+    },
+    []
+  );
+
+  const handlePasskeyAlertPrimary = useCallback(() => {
+    setPasskeyAlert(prev => ({ ...prev, visible: false }));
+    router.push({ pathname: "/email", params: { mode: passkeyAlert.mode } });
+  }, [passkeyAlert.mode, router]);
   
   const { loginWithPasskey } = useLoginWithPasskey({
     onSuccess: () => {
@@ -183,12 +228,29 @@ export default function Index() {
 
   const handleRegister = () => {
     setError(null);
+    if (useEmailFallback) {
+      openPasskeyAlert(
+        "signup",
+        "Passkeys unavailable",
+        "Passkeys aren't available on this device. Continue with email instead."
+      );
+      return;
+    }
     router.push("/username");
   };
 
   const handleLogin = async () => {
     if (user) {
       router.replace("/(main)/home");
+      return;
+    }
+
+    if (useEmailFallback) {
+      openPasskeyAlert(
+        "login",
+        "Passkeys unavailable",
+        "Passkeys aren't available on this device. Continue with email instead."
+      );
       return;
     }
 
@@ -200,9 +262,19 @@ export default function Index() {
       });
     } catch (err: any) {
       console.error('Login error:', err);
-      const message = formatPasskeyError(err);
+      const message = formatPasskeyError(
+        err,
+        "Unable to log in with a passkey.",
+        "Enable Face ID/Touch ID or a device passcode to use passkey login."
+      );
       if (err?.code === 'attempted_login_with_passkey_while_already_logged_in') {
         router.replace('/(main)/home');
+        setLoading(false);
+        return;
+      }
+      if (shouldFallbackToEmail(err)) {
+        setUseEmailFallback(true);
+        openPasskeyAlert("login", "Passkey unavailable", message);
         setLoading(false);
         return;
       }
@@ -213,57 +285,83 @@ export default function Index() {
   };
 
   return (
-    <SafeAreaView style={styles.container}>
-      {/* Animated background decorations */}
-      <View style={styles.bg} pointerEvents="none">
-        {decorations.map((item) => (
-          <AnimatedDecoration key={item.key} item={item} />
-        ))}
-      </View>
+    <>
+      <ScrollView
+        contentInsetAdjustmentBehavior="automatic"
+        style={styles.container}
+        contentContainerStyle={styles.containerContent}
+        showsVerticalScrollIndicator={false}
+      >
+        <View style={[styles.screen, { minHeight: screenHeight }]}>
+          {/* Animated background decorations */}
+          <View style={styles.bg} pointerEvents="none">
+            {decorations.map((item) => (
+              <AnimatedDecoration key={item.key} item={item} />
+            ))}
+          </View>
 
-      <View style={styles.content}>
-        <View style={styles.mascot}>
-          <Image 
-            source={require('../assets/images/logomark.png')} 
-            style={styles.logomark}
-            resizeMode="contain"
-          />
+          <View style={styles.content}>
+            <View style={styles.mascot}>
+              <Image
+                source={require("../assets/images/logomark.png")}
+                style={styles.logomark}
+                contentFit="contain"
+              />
+            </View>
+
+            <Text style={styles.title}>Spend, more{"\n"}effortlessly</Text>
+            <Text style={styles.subtitle}>
+              Create a brand new wallet or add an existing one to get started easily.
+            </Text>
+
+            <View style={styles.buttons}>
+              <TouchableOpacity
+                accessibilityRole="button"
+                activeOpacity={0.9}
+                style={styles.primary}
+                onPress={handleRegister}
+                disabled={loading}
+              >
+                <Text style={styles.primaryText}>Register</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                accessibilityRole="button"
+                activeOpacity={0.9}
+                style={styles.secondary}
+                onPress={handleLogin}
+                disabled={loading}
+              >
+                <Text style={styles.secondaryText}>Log In</Text>
+              </TouchableOpacity>
+            </View>
+
+            {error ? <Text selectable style={styles.errorText}>{error}</Text> : null}
+            {useEmailFallback ? (
+              <Text style={styles.fallbackText}>
+                Passkeys aren&apos;t supported on this device. Continue with email instead.
+              </Text>
+            ) : null}
+
+            <Text style={styles.legal}>
+              By using Family, you agree to accept our{" "}
+              <Text style={styles.link}>Terms of Use</Text> and{" "}
+              <Text style={styles.link}>Privacy Policy</Text>.
+            </Text>
+          </View>
         </View>
+      </ScrollView>
 
-        <Text style={styles.title}>Spend, more{"\n"}effortlessly</Text>
-        <Text style={styles.subtitle}>
-          Create a brand new wallet or add an existing one to get started easily.
-        </Text>
-
-        <View style={styles.buttons}>
-          <TouchableOpacity
-            accessibilityRole="button"
-            activeOpacity={0.9}
-            style={styles.primary}
-            onPress={handleRegister}
-            disabled={loading}
-          >
-            <Text style={styles.primaryText}>Register</Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            accessibilityRole="button"
-            activeOpacity={0.9}
-            style={styles.secondary}
-            onPress={handleLogin}
-            disabled={loading}
-          >
-            <Text style={styles.secondaryText}>Log In</Text>
-          </TouchableOpacity>
-        </View>
-
-        {error ? <Text style={styles.errorText}>{error}</Text> : null}
-
-        <Text style={styles.legal}>
-          By using Family, you agree to accept our <Text style={styles.link}>Terms of Use</Text> and <Text style={styles.link}>Privacy Policy</Text>.
-        </Text>
-      </View>
-</SafeAreaView>
+      <AlertSheet
+        isVisible={passkeyAlert.visible}
+        title={passkeyAlert.title}
+        message={passkeyAlert.message}
+        primaryLabel="Continue with email"
+        onPrimaryPress={handlePasskeyAlertPrimary}
+        onClose={() => setPasskeyAlert(prev => ({ ...prev, visible: false }))}
+        showClose={false}
+      />
+    </>
   );
 }
 
@@ -272,12 +370,21 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: "#FFFFFF",
   },
+  containerContent: {
+    flexGrow: 1,
+  },
+  screen: {
+    flexGrow: 1,
+    backgroundColor: "#FFFFFF",
+  },
   bg: {
     ...StyleSheet.absoluteFillObject,
   },
   content: {
-    flex: 1,
+    flexGrow: 1,
     paddingHorizontal: 24,
+    paddingTop: 40,
+    paddingBottom: 32,
     alignItems: "center",
     justifyContent: "flex-end",
   },
@@ -343,9 +450,14 @@ const styles = StyleSheet.create({
     textAlign: "center",
     fontWeight: "600",
   },
+  fallbackText: {
+    marginTop: 10,
+    color: "#6B7280",
+    textAlign: "center",
+    fontSize: 12,
+  },
   legal: {
     marginTop: 18,
-    marginBottom: 24,
     textAlign: "center",
     color: "#9CA3AF",
     fontSize: 12,

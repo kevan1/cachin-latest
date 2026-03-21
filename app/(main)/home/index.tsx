@@ -14,6 +14,12 @@ import { fetchMultiChainBalances } from '@/utils/multiChainBalanceService';
 import { fetchArsPrice } from '@/utils/priceService';
 import { ChainType, getExplorerUrl, getChainSymbol } from '@/constants/chains';
 import { ChainFilter, loadSelectedChain, saveSelectedChain } from '@/utils/chainStorage';
+import {
+  loadAvalancheWalletSource,
+  loadSatochipAvalancheAddress,
+  saveAvalancheWalletSource,
+  type AvalancheWalletSource,
+} from "@/utils/satochipStorage";
 import { THEMES, MESH_POINTS } from '@/constants/themes';
 import { ThemeSelectorSheet } from '@/components/ThemeSelectorSheet';
 import Svg, { Path } from 'react-native-svg';
@@ -185,6 +191,9 @@ export default function HomeScreen() {
   const [, setSponsoredWalletId] = useState<string | null>(null);
   const [sponsoredWalletAddress, setSponsoredWalletAddress] = useState<string | null>(null);
   const [sponsoredWalletLoaded, setSponsoredWalletLoaded] = useState(false);
+  const [avalancheWalletSource, setAvalancheWalletSource] =
+    useState<AvalancheWalletSource>("privy");
+  const [satochipAvalancheAddress, setSatochipAvalancheAddress] = useState<string | null>(null);
 
   const keyQuorumId = process.env.EXPO_PUBLIC_PRIVY_KEY_QUORUM_ID;
   const sessionSignerPolicyIds = useMemo(() => {
@@ -243,6 +252,10 @@ export default function HomeScreen() {
   const embeddedAvalancheAddress = useMemo(() => {
     return ethereumWallets[0]?.address ?? null;
   }, [ethereumWallets]);
+  const activeAvalancheAddress =
+    avalancheWalletSource === "satochip"
+      ? satochipAvalancheAddress
+      : embeddedAvalancheAddress;
 
   const authorizeGaslessForAddress = useCallback(
     async (address: string, options?: { silent?: boolean }) => {
@@ -342,6 +355,26 @@ export default function HomeScreen() {
   useEffect(() => {
     loadSelectedChain().then(setSelectedChain);
   }, []);
+
+  useFocusEffect(
+    useCallback(() => {
+      let isActive = true;
+
+      Promise.all([loadAvalancheWalletSource(), loadSatochipAvalancheAddress()])
+        .then(([source, address]) => {
+          if (!isActive) return;
+          setAvalancheWalletSource(source);
+          setSatochipAvalancheAddress(address);
+        })
+        .catch((error) => {
+          console.error("[Home] Failed to load Avalanche wallet source", error);
+        });
+
+      return () => {
+        isActive = false;
+      };
+    }, [])
+  );
 
   useEffect(() => {
     getSponsoredSolanaWallet()
@@ -582,7 +615,7 @@ export default function HomeScreen() {
   };
 
   const getFullAvalancheAddress = () => {
-    return embeddedAvalancheAddress;
+    return activeAvalancheAddress;
   };
 
   const getSolanaAddress = () => {
@@ -597,6 +630,8 @@ export default function HomeScreen() {
   const fullAvalancheAddress = getFullAvalancheAddress();
   const solanaAddress = getSolanaAddress();
   const avalancheAddress = getAvalancheAddress();
+  const avalancheWalletSourceLabel =
+    avalancheWalletSource === "satochip" ? "Satochip card" : "Privy wallet";
 
   console.log('Solana address to display:', solanaAddress);
   console.log('Avalanche address to display:', avalancheAddress);
@@ -776,7 +811,7 @@ export default function HomeScreen() {
       stopPolling();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [embeddedAvalancheAddress, solanaWallets, selectedChain, sponsoredWalletAddress]);
+  }, [fullAvalancheAddress, solanaWallets, selectedChain, sponsoredWalletAddress]);
   
   // Format transaction for display
   const formatTransaction = (tx: Transaction) => {
@@ -862,7 +897,10 @@ export default function HomeScreen() {
     if (selectedChain === ChainType.AVALANCHE) {
       router.push({
         pathname: "/send-amount",
-        params: { chain: ChainType.AVALANCHE },
+        params: {
+          chain: ChainType.AVALANCHE,
+          walletSource: avalancheWalletSource,
+        },
       });
       return;
     }
@@ -888,6 +926,27 @@ export default function HomeScreen() {
     },
     [toast]
   );
+
+  const handleUsePrivyAvalancheWallet = useCallback(async () => {
+    await saveAvalancheWalletSource("privy");
+    setAvalancheWalletSource("privy");
+    showToast("Using the embedded Privy wallet for Avalanche.");
+  }, [showToast]);
+
+  const handleUseSatochipAvalancheWallet = useCallback(async () => {
+    if (!satochipAvalancheAddress) {
+      router.push("/satochip-connect");
+      return;
+    }
+
+    await saveAvalancheWalletSource("satochip");
+    setAvalancheWalletSource("satochip");
+    showToast("Using the connected Satochip card for Avalanche.");
+  }, [router, satochipAvalancheAddress, showToast]);
+
+  const handleManageSatochip = useCallback(() => {
+    router.push("/satochip-connect");
+  }, [router]);
 
   const handleCopyAddress = async () => {
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
@@ -1301,6 +1360,73 @@ export default function HomeScreen() {
               </TouchableOpacity>
 
             </View>
+
+            {selectedChain === ChainType.AVALANCHE ? (
+              <GlassView style={styles.avalancheSourceCard} intensity={18}>
+                <View style={styles.avalancheSourceHeader}>
+                  <View>
+                    <Text style={styles.avalancheSourceEyebrow}>Wallet source</Text>
+                    <Text style={styles.avalancheSourceTitle}>
+                      {avalancheWalletSourceLabel}
+                    </Text>
+                  </View>
+                  <TouchableOpacity
+                    onPress={handleManageSatochip}
+                    activeOpacity={0.85}
+                    style={styles.avalancheSourceManageButton}
+                  >
+                    <Text style={styles.avalancheSourceManageText}>
+                      {satochipAvalancheAddress ? "Refresh card" : "Connect card"}
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+                <Text style={styles.avalancheSourceBody}>
+                  {avalancheWalletSource === "satochip"
+                    ? satochipAvalancheAddress
+                      ? `Using ${formatCompactAddress(satochipAvalancheAddress, 6, 4)} for Avalanche balance, receive, and send.`
+                      : "Connect a Satochip card to derive its Avalanche address over NFC."
+                    : "Using the embedded Privy wallet for Avalanche. Switch to Satochip any time."}
+                </Text>
+                <View style={styles.avalancheSourceToggleRow}>
+                  <TouchableOpacity
+                    onPress={handleUsePrivyAvalancheWallet}
+                    activeOpacity={0.85}
+                    style={[
+                      styles.avalancheSourceToggle,
+                      avalancheWalletSource === "privy" && styles.avalancheSourceToggleActive,
+                    ]}
+                  >
+                    <Text
+                      style={[
+                        styles.avalancheSourceToggleText,
+                        avalancheWalletSource === "privy" && styles.avalancheSourceToggleTextActive,
+                      ]}
+                    >
+                      Privy
+                    </Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    onPress={handleUseSatochipAvalancheWallet}
+                    activeOpacity={0.85}
+                    style={[
+                      styles.avalancheSourceToggle,
+                      avalancheWalletSource === "satochip" &&
+                        styles.avalancheSourceToggleActive,
+                    ]}
+                  >
+                    <Text
+                      style={[
+                        styles.avalancheSourceToggleText,
+                        avalancheWalletSource === "satochip" &&
+                          styles.avalancheSourceToggleTextActive,
+                      ]}
+                    >
+                      Satochip
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+              </GlassView>
+            ) : null}
           </View>
 
           <View style={styles.actionsRowLiquid}>
@@ -2113,6 +2239,73 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: "700",
     color: "rgba(0,0,0,0.60)",
+  },
+  avalancheSourceCard: {
+    marginTop: 14,
+    borderRadius: 22,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.26)",
+    backgroundColor: "rgba(255,255,255,0.12)",
+    gap: 12,
+  },
+  avalancheSourceHeader: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    justifyContent: "space-between",
+    gap: 12,
+  },
+  avalancheSourceEyebrow: {
+    fontSize: 11,
+    fontWeight: "700",
+    textTransform: "uppercase",
+    letterSpacing: 0.8,
+    color: "rgba(0,0,0,0.46)",
+  },
+  avalancheSourceTitle: {
+    marginTop: 4,
+    fontSize: 18,
+    fontWeight: "800",
+    color: "rgba(0,0,0,0.72)",
+  },
+  avalancheSourceManageButton: {
+    paddingHorizontal: 12,
+    paddingVertical: 9,
+    borderRadius: 999,
+    backgroundColor: "rgba(255,255,255,0.75)",
+  },
+  avalancheSourceManageText: {
+    fontSize: 12,
+    fontWeight: "700",
+    color: "rgba(0,0,0,0.62)",
+  },
+  avalancheSourceBody: {
+    fontSize: 13,
+    lineHeight: 18,
+    color: "rgba(0,0,0,0.58)",
+  },
+  avalancheSourceToggleRow: {
+    flexDirection: "row",
+    gap: 10,
+  },
+  avalancheSourceToggle: {
+    flex: 1,
+    borderRadius: 14,
+    paddingVertical: 12,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(255,255,255,0.55)",
+  },
+  avalancheSourceToggleActive: {
+    backgroundColor: "rgba(17,24,39,0.92)",
+  },
+  avalancheSourceToggleText: {
+    fontSize: 13,
+    fontWeight: "700",
+    color: "rgba(0,0,0,0.62)",
+  },
+  avalancheSourceToggleTextActive: {
+    color: "#FFFFFF",
   },
   ctaWrap: {
     marginTop: 10,

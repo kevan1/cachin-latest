@@ -1,6 +1,5 @@
 import { StyleSheet, View, Text, TouchableOpacity, Alert, Linking, ScrollView } from 'react-native';
 import { useRouter } from 'expo-router';
-import { SafeAreaView } from 'react-native-safe-area-context';
 import { useState, useMemo } from 'react';
 import { useEmbeddedSolanaWallet } from '@privy-io/expo';
 import Svg, { Path } from 'react-native-svg';
@@ -68,67 +67,70 @@ export default function ExportPrivateKeyScreen() {
   };
 
   return (
-    <SafeAreaView style={styles.container}>
-      <ScrollView style={styles.scrollView}>
-        {/* Back Button */}
-        <TouchableOpacity style={styles.backButton} onPress={handleBack}>
-          <Text style={styles.backIcon}>‹</Text>
-        </TouchableOpacity>
+    <ScrollView
+      contentInsetAdjustmentBehavior="automatic"
+      style={styles.container}
+      contentContainerStyle={styles.content}
+      showsVerticalScrollIndicator={false}
+    >
+      {/* Back Button */}
+      <TouchableOpacity style={styles.backButton} onPress={handleBack}>
+        <Text style={styles.backIcon}>‹</Text>
+      </TouchableOpacity>
 
-        {/* Header */}
-        <View style={styles.header}>
-          <View style={styles.headerIconContainer}>
-            <LockIcon size={60} color="#000" />
+      {/* Header */}
+      <View style={styles.header}>
+        <View style={styles.headerIconContainer}>
+          <LockIcon size={60} color="#000" />
+        </View>
+        <Text style={styles.headerTitle}>Export Private Key</Text>
+        <Text style={styles.headerSubtitle}>
+          Securely export your wallet&apos;s private key to use with other wallet clients
+        </Text>
+      </View>
+
+      {/* Info Sections */}
+      <View style={styles.infoSection}>
+        <View style={styles.warningCard}>
+          <View style={styles.warningTitleContainer}>
+            <WarningIcon size={20} color="#D97706" />
+            <Text style={styles.warningTitle}>Important Security Notes</Text>
           </View>
-          <Text style={styles.headerTitle}>Export Private Key</Text>
-          <Text style={styles.headerSubtitle}>
-            Securely export your wallet&apos;s private key to use with other wallet clients
+          <Text style={styles.warningText}>
+            • Private key export is only available via web for security reasons{'\n'}
+            • Never share your private key with anyone{'\n'}
+            • Anyone with your private key has complete control of your wallet{'\n'}
+            • Store exported keys securely (written down, not digitally){'\n'}
+            • Use a secure, private device when exporting
           </Text>
         </View>
-
-        {/* Info Sections */}
-        <View style={styles.infoSection}>
-          <View style={styles.warningCard}>
-            <View style={styles.warningTitleContainer}>
-              <WarningIcon size={20} color="#D97706" />
-              <Text style={styles.warningTitle}>Important Security Notes</Text>
-            </View>
-            <Text style={styles.warningText}>
-              • Private key export is only available via web for security reasons{'\n'}
-              • Never share your private key with anyone{'\n'}
-              • Anyone with your private key has complete control of your wallet{'\n'}
-              • Store exported keys securely (written down, not digitally){'\n'}
-              • Use a secure, private device when exporting
-            </Text>
-          </View>
-          
-          <View style={styles.infoCard}>
-            <Text style={styles.infoTitle}>Export via Web Only</Text>
-            <Text style={styles.infoText}>
-              Private key export runs only in your web browser for maximum safety:{'\n'}
-              • The key is assembled on a separate domain{'\n'}
-              • Neither Privy nor this app can access your key{'\n'}{'\n'}
-              To export:{'\n'}
-              1) Open https://auth.kevan.ar/export{'\n'}
-              2) Log in with this account{'\n'}
-              3) Use the export feature
-            </Text>
-          </View>
-        </View>
-
-        {/* Export Button */}
-        <TouchableOpacity 
-          style={[styles.exportButton, isExporting && styles.exportButtonDisabled]} 
-          onPress={handleExport}
-          disabled={isExporting}
-        >
-          <LockIcon size={20} color="#000" />
-          <Text style={styles.exportButtonText}>
-            {exportUrl ? 'Open Web Export' : 'View Export Instructions'}
+        
+        <View style={styles.infoCard}>
+          <Text style={styles.infoTitle}>Export via Web Only</Text>
+          <Text style={styles.infoText}>
+            Private key export runs only in your web browser for maximum safety:{'\n'}
+            • The key is assembled on a separate domain{'\n'}
+            • Neither Privy nor this app can access your key{'\n'}{'\n'}
+            To export:{'\n'}
+            1) Open https://auth.kevan.ar/export{'\n'}
+            2) Log in with this account{'\n'}
+            3) Use the export feature
           </Text>
-        </TouchableOpacity>
-      </ScrollView>
-    </SafeAreaView>
+        </View>
+      </View>
+
+      {/* Export Button */}
+      <TouchableOpacity 
+        style={[styles.exportButton, isExporting && styles.exportButtonDisabled]} 
+        onPress={handleExport}
+        disabled={isExporting}
+      >
+        <LockIcon size={20} color="#000" />
+        <Text style={styles.exportButtonText}>
+          {exportUrl ? 'Open Web Export' : 'View Export Instructions'}
+        </Text>
+      </TouchableOpacity>
+    </ScrollView>
   );
 }
 
@@ -136,9 +138,6 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#FFFFFF',
-  },
-  scrollView: {
-    flex: 1,
   },
   content: {
     paddingBottom: 40,
@@ -249,10 +248,7 @@ const styles = StyleSheet.create({
     gap: 8,
     marginHorizontal: 20,
     marginTop: 30,
-    shadowColor: '#000000',
-    shadowOffset: { width: 4, height: 4 },
-    shadowOpacity: 1,
-    shadowRadius: 0,
+    boxShadow: '4px 4px 0px rgba(0, 0, 0, 1)',
   },
   exportButtonDisabled: {
     backgroundColor: '#E5E5E5',

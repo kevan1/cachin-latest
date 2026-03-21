@@ -1,23 +1,33 @@
 import { PropsWithChildren } from "react";
 import { Platform, StyleProp, StyleSheet, View, ViewStyle } from "react-native";
-import { BlurView } from "expo-blur";
+import { BlurView, type BlurTint } from "expo-blur";
 import { LinearGradient } from "expo-linear-gradient";
 
 type GlassViewProps = PropsWithChildren<{
   style?: StyleProp<ViewStyle>;
   intensity?: number;
-  tint?: "light" | "dark" | "default";
+  tint?: BlurTint;
 }>;
 
 export function GlassView({
   children,
   style,
-  intensity = 35,
-  tint = "light",
+  intensity,
+  tint,
 }: GlassViewProps) {
+  const resolvedTint: BlurTint =
+    tint ?? (Platform.OS === "ios" ? "systemMaterial" : "default");
+  const resolvedIntensity =
+    intensity ?? (Platform.OS === "ios" ? 55 : 35);
+
   return (
     <View style={[styles.outer, style]}>
-      <BlurView intensity={intensity} tint={tint} style={StyleSheet.absoluteFill} />
+      <BlurView
+        intensity={resolvedIntensity}
+        tint={resolvedTint}
+        style={StyleSheet.absoluteFill}
+        pointerEvents="none"
+      />
       <View style={StyleSheet.absoluteFill} pointerEvents="none">
         <LinearGradient
           colors={[
@@ -42,18 +52,7 @@ const styles = StyleSheet.create({
     backgroundColor: "rgba(255,255,255,0.18)",
     borderWidth: 1,
     borderColor: "rgba(255,255,255,0.38)",
-    ...Platform.select({
-      ios: {
-        shadowColor: "#0B1A33",
-        shadowOpacity: 0.18,
-        shadowRadius: 18,
-        shadowOffset: { width: 0, height: 8 },
-      },
-      android: {
-        elevation: 6,
-      },
-      default: {},
-    }),
+    borderCurve: "continuous",
+    boxShadow: "0 8px 18px rgba(11, 26, 51, 0.18)",
   },
 });
-

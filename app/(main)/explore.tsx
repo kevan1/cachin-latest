@@ -1,5 +1,5 @@
 import { Image } from "expo-image";
-import { Platform, StyleSheet } from "react-native";
+import { StyleSheet } from "react-native";
 
 import { Collapsible } from "@/components/ui/collapsible";
 import { ExternalLink } from "@/components/external-link";
@@ -96,17 +96,15 @@ export default function TabTwoScreen() {
           </ThemedText>{" "}
           library to create a waving hand animation.
         </ThemedText>
-        {Platform.select({
-          ios: (
-            <ThemedText>
-              The{" "}
-              <ThemedText type="defaultSemiBold">
-                components/ParallaxScrollView.tsx
-              </ThemedText>{" "}
-              component provides a parallax effect for the header image.
-            </ThemedText>
-          ),
-        })}
+        {process.env.EXPO_OS === "ios" ? (
+          <ThemedText>
+            The{" "}
+            <ThemedText type="defaultSemiBold">
+              components/ParallaxScrollView.tsx
+            </ThemedText>{" "}
+            component provides a parallax effect for the header image.
+          </ThemedText>
+        ) : null}
       </Collapsible>
     </ParallaxScrollView>
   );

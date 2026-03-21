@@ -1,6 +1,6 @@
 
 import React, { useEffect, useState, useMemo } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, useColorScheme, Dimensions, Platform, ScrollView, Modal } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, useColorScheme, useWindowDimensions, ScrollView, Modal, Platform } from 'react-native';
 import { BlurView } from 'expo-blur';
 import { IconSymbol } from '@/components/ui/icon-symbol';
 import { THEMES, MESH_POINTS } from '@/constants/themes';
@@ -9,9 +9,6 @@ import Animated, { useSharedValue, useAnimatedStyle, withSpring, withTiming } fr
 import * as Haptics from 'expo-haptics';
 import { LinearGradient } from 'expo-linear-gradient';
 
-const SCREEN_WIDTH = Dimensions.get('window').width;
-const CARD_WIDTH = SCREEN_WIDTH * 0.55;
-const CARD_HEIGHT = CARD_WIDTH * 1.8;
 const SPACING = 20;
 
 interface ThemeSelectorSheetProps {
@@ -37,6 +34,11 @@ export function ThemeSelectorSheet({
   const [activeCategory, setActiveCategory] = useState<ThemeCategory>('glow');
   const [appearanceMode, setAppearanceMode] = useState<AppearanceMode>('system');
   const [editMode, setEditMode] = useState<EditMode>('style'); // 'style' or 'mode'
+  const { width: screenWidth } = useWindowDimensions();
+  const cardWidth = screenWidth * 0.55;
+  const cardHeight = cardWidth * 1.8;
+  const scrollSidePadding = screenWidth * 0.225;
+  const supportsMeshGradient = Platform.OS === 'ios' && Number(Platform.Version) >= 16;
   
   const opacity = useSharedValue(0);
   const translateY = useSharedValue(100);
@@ -114,11 +116,12 @@ export function ThemeSelectorSheet({
           </View>
 
           {/* Cards Area */}
-          <ScrollView 
-            horizontal 
+          <ScrollView
+            horizontal
             showsHorizontalScrollIndicator={false}
-            contentContainerStyle={styles.scrollContent}
-            snapToInterval={CARD_WIDTH + SPACING}
+            contentInsetAdjustmentBehavior="automatic"
+            contentContainerStyle={[styles.scrollContent, { paddingHorizontal: scrollSidePadding }]}
+            snapToInterval={cardWidth + SPACING}
             decelerationRate="fast"
           >
             {filteredThemes.map((theme) => {
@@ -136,11 +139,12 @@ export function ThemeSelectorSheet({
                   activeOpacity={0.9}
                   style={[
                     styles.cardContainer,
+                    { width: cardWidth, height: cardHeight },
                     isActive && styles.activeCardContainer
                   ]}
                 >
                   <View style={styles.card}>
-                    {Platform.OS === 'ios' ? (
+                    {supportsMeshGradient ? (
                        <MeshGradientView
                          meshWidth={3}
                          meshHeight={3}
@@ -364,6 +368,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#F2F2F7',
     borderTopLeftRadius: 30,
     borderTopRightRadius: 30,
+    borderCurve: 'continuous',
     zIndex: 101,
     overflow: 'hidden',
   },
@@ -379,14 +384,11 @@ const styles = StyleSheet.create({
     width: 40,
     height: 40,
     borderRadius: 20,
+    borderCurve: 'continuous',
     backgroundColor: '#FFF',
     alignItems: 'center',
     justifyContent: 'center',
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 2,
+    boxShadow: '0 2px 6px rgba(0, 0, 0, 0.12)',
   },
   title: {
     fontSize: 18,
@@ -394,13 +396,10 @@ const styles = StyleSheet.create({
     color: '#000',
   },
   scrollContent: {
-    paddingHorizontal: SCREEN_WIDTH * 0.225, // Center the first card
     paddingVertical: 20,
     alignItems: 'center',
   },
   cardContainer: {
-    width: CARD_WIDTH,
-    height: CARD_HEIGHT,
     marginHorizontal: SPACING / 2,
     alignItems: 'center',
   },
@@ -411,6 +410,7 @@ const styles = StyleSheet.create({
     width: '100%',
     height: '100%',
     borderRadius: 24,
+    borderCurve: 'continuous',
     overflow: 'hidden',
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.2)',

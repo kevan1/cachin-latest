@@ -1,32 +1,26 @@
 import type { RecentCardProps, SearchBarProps } from "@/typings/index";
-import { Entypo } from "@expo/vector-icons";
 import BottomSheet, {
   BottomSheetScrollView,
-  BottomSheetView,
 } from "@gorhom/bottom-sheet";
-import { GlassView } from "expo-glass-effect";
 import { Image } from "expo-image";
-import { useRouter } from "expo-router";
-import { SFSymbol, SymbolView } from "expo-symbols";
-import React, { useCallback, useMemo, useRef, useState } from "react";
+import React, { useMemo, useRef, useState } from "react";
 import {
   Platform,
   Pressable,
-  ScrollView,
   StyleSheet,
   Text,
   TextInput,
   View,
   Linking,
-  Dimensions,
 } from "react-native";
-import MapView, { Marker, Callout } from "react-native-maps";
-import { GestureHandlerRootView } from "react-native-gesture-handler";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
+import MapView, { Marker, PROVIDER_GOOGLE, UrlTile } from "react-native-maps";
 import { MapFilterChips } from "@/components/MapFilterChips";
 import { IconSymbol } from "@/components/ui/icon-symbol";
+import { GlassView } from "@/components/ui/GlassView";
 
 // Mock Data for Buenos Aires Locations
+const JEVI_LOGO = require("../../assets/images/jevi-logo.png");
+
 const LOCATIONS = [
   {
     id: "1",
@@ -85,9 +79,52 @@ const LOCATIONS = [
     openStatus: "Abre 10:00hs",
     address: "Gurruchaga 1500",
   },
+  {
+    id: "jevi-1",
+    title: "El Jevi Kiosco - Charcas",
+    coordinate: { latitude: -34.5903433, longitude: -58.4139933 },
+    category: "Kiosko",
+    image: "https://images.unsplash.com/photo-1542838132-92c53300491e?q=80&w=1000&auto=format&fit=crop",
+    rating: 4.4,
+    distance: "900 m",
+    openStatus: "Abierto 24hs",
+    address: "Charcas 3405, CABA",
+  },
+  {
+    id: "jevi-2",
+    title: "El Jevi Kiosco - Pueyrredon",
+    coordinate: { latitude: -34.5959475, longitude: -58.4030948 },
+    category: "Kiosko",
+    image: "https://images.unsplash.com/photo-1542838132-92c53300491e?q=80&w=1000&auto=format&fit=crop",
+    rating: 4.5,
+    distance: "1.2 km",
+    openStatus: "Abierto 24hs",
+    address: "Av. Pueyrredon 1270, CABA",
+  },
+  {
+    id: "jevi-3",
+    title: "El Jevi Kiosco - Cabrera",
+    coordinate: { latitude: -34.5966556, longitude: -58.4156186 },
+    category: "Kiosko",
+    image: "https://images.unsplash.com/photo-1542838132-92c53300491e?q=80&w=1000&auto=format&fit=crop",
+    rating: 4.4,
+    distance: "1.0 km",
+    openStatus: "Abierto 24hs",
+    address: "Cabrera 3501, CABA",
+  },
+  {
+    id: "jevi-4",
+    title: "El Jevi Kiosco - Scalabrini Ortiz",
+    coordinate: { latitude: -34.5907049, longitude: -58.4250183 },
+    category: "Kiosko",
+    image: "https://images.unsplash.com/photo-1542838132-92c53300491e?q=80&w=1000&auto=format&fit=crop",
+    rating: 4.5,
+    distance: "1.6 km",
+    openStatus: "Abierto 24hs",
+    address: "Av. Raul Scalabrini Ortiz 1602, CABA",
+  },
 ];
 
-const AVATAR: string = `https://pbs.twimg.com/profile_images/1906923012651106304/O6ccYsNM_400x400.jpg`;
 const SearchBar: React.FC<SearchBarProps> = ({
   placeholder = "Search...",
   onChangeText,
@@ -99,15 +136,10 @@ const SearchBar: React.FC<SearchBarProps> = ({
     <View style={searchStyles.container}>
       <GlassView
         style={searchStyles.searchContainer}
-        glassEffectStyle="regular"
-        tintColor="rgba(255, 255, 255, 0.8)"
+        intensity={24}
       >
         <View style={{ paddingLeft: 15 }}>
-          {Platform.OS === 'ios' ? (
-               <SymbolView name="magnifyingglass" tintColor={"#8E8E93"} size={20} />
-           ) : (
-               <IconSymbol name="magnifyingglass" color={"#8E8E93"} size={20} />
-           )}
+          <IconSymbol name="magnifyingglass" color={"#8E8E93"} size={20} />
         </View>
         <TextInput
           placeholder={placeholder}
@@ -119,20 +151,12 @@ const SearchBar: React.FC<SearchBarProps> = ({
           value={value}
         />
         <View style={{ paddingRight: 15 }}>
-           {Platform.OS === 'ios' ? (
-              <SymbolView name="mic" tintColor={"#8E8E93"} size={20} />
-           ) : (
-               <View /> // No mic icon fallback for now or use another icon
-           )}
+          <IconSymbol name="mic" color={"#8E8E93"} size={20} />
         </View>
       </GlassView>
       <View style={searchStyles.avatarContainer}>
           <View style={searchStyles.listButton}>
-             {Platform.OS === 'ios' ? (
-                <SymbolView name="list.bullet" tintColor={"#000"} size={20} />
-             ) : (
-                <IconSymbol name="plus" color={"#000"} size={20} /> // Fallback
-             )}
+            <IconSymbol name="list.bullet" color={"#000"} size={20} />
           </View>
       </View>
     </View>
@@ -154,6 +178,7 @@ const searchStyles = StyleSheet.create({
   searchContainer: {
     flex: 1,
     borderRadius: 99,
+    borderCurve: "continuous",
     height: 50,
     flexDirection: "row",
     alignItems: "center",
@@ -162,11 +187,7 @@ const searchStyles = StyleSheet.create({
     borderWidth: 1,
     borderColor: "rgba(0, 0, 0, 0.05)",
     backgroundColor: "#fff",
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 8,
-    elevation: 4,
+    boxShadow: "0 2px 8px rgba(0, 0, 0, 0.1)",
   },
   input: {
     flex: 1,
@@ -185,14 +206,11 @@ const searchStyles = StyleSheet.create({
     width: 50,
     height: 50,
     borderRadius: 25,
+    borderCurve: "continuous",
     backgroundColor: "#FFF",
     justifyContent: "center",
     alignItems: "center",
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 8,
-    elevation: 4,
+    boxShadow: "0 2px 8px rgba(0, 0, 0, 0.1)",
   },
 });
 
@@ -213,22 +231,14 @@ const RecentCard: React.FC<RecentCardProps> = ({
             { backgroundColor: iconBackground },
           ]}
         >
-            {Platform.OS === 'ios' ? (
-                 <SymbolView name={icon} size={24} tintColor={iconColor} />
-            ) : (
-                 <IconSymbol name={icon as any} size={24} color={iconColor} />
-            )}
+          <IconSymbol name={icon as any} size={24} color={iconColor} />
         </View>
         <View style={recentCardStyles.textContainer}>
           <Text style={recentCardStyles.title}>{title}</Text>
           <Text style={recentCardStyles.subtitle}>{subtitle}</Text>
         </View>
         <Pressable style={recentCardStyles.moreButton}>
-            {Platform.OS === 'ios' ? (
-                <SymbolView name="ellipsis" size={20} tintColor="#8E8E93" />
-            ) : (
-                <IconSymbol name="ellipsis" size={20} color="#8E8E93" />
-            )}
+          <IconSymbol name="ellipsis" size={20} color="#8E8E93" />
         </Pressable>
       </Pressable>
     </View>
@@ -275,32 +285,65 @@ const recentCardStyles = StyleSheet.create({
 
 const LocationCard = ({ location, onClose }: { location: any; onClose: () => void }) => {
   const openMaps = () => {
-    const scheme = Platform.select({ ios: 'maps:0,0?q=', android: 'geo:0,0?q=' });
+    const isIos = process.env.EXPO_OS === "ios";
+    const scheme = isIos ? "maps:0,0?q=" : "geo:0,0?q=";
     const latLng = `${location.coordinate.latitude},${location.coordinate.longitude}`;
     const label = location.title;
-    const url = Platform.select({
-      ios: `${scheme}${label}@${latLng}`,
-      android: `${scheme}${latLng}(${label})`
-    });
+    const url = isIos
+      ? `${scheme}${label}@${latLng}`
+      : `${scheme}${latLng}(${label})`;
 
     if (url) {
         Linking.openURL(url);
     }
   };
 
+  const statusTone = () => {
+    if (!location.openStatus) return null;
+    if (location.openStatus.includes("Abierto")) return "open";
+    if (location.openStatus.includes("Cierra")) return "closing";
+    if (location.openStatus.includes("Abre")) return "closed";
+    return "neutral";
+  };
+  const tone = statusTone();
+  const isJevi = location.id?.startsWith("jevi-") || location.category === "Kiosko";
+
   return (
     <View style={locationCardStyles.container}>
       <View style={locationCardStyles.card}>
         <View style={locationCardStyles.imageContainer}>
              <Image source={{ uri: location.image }} style={locationCardStyles.image} contentFit="cover" />
-             {location.openStatus.includes("Abre") && (
-                 <View style={locationCardStyles.statusTag}>
-                     <Text style={locationCardStyles.statusText}>{location.openStatus}</Text>
+             {location.openStatus && (
+                 <View
+                   style={[
+                     locationCardStyles.statusTag,
+                     tone === "open" && locationCardStyles.statusTagOpen,
+                     tone === "closing" && locationCardStyles.statusTagClosing,
+                     tone === "closed" && locationCardStyles.statusTagClosed,
+                   ]}
+                 >
+                     <Text
+                       style={[
+                         locationCardStyles.statusText,
+                         tone === "open" && locationCardStyles.statusTextOpen,
+                         tone === "closing" && locationCardStyles.statusTextClosing,
+                         tone === "closed" && locationCardStyles.statusTextClosed,
+                       ]}
+                     >
+                       {location.openStatus}
+                     </Text>
                  </View>
              )}
              <Pressable style={locationCardStyles.logoContainer}>
-                  {/* Placeholder for logo */}
-                  <View style={{width: 20, height: 20, backgroundColor: '#F00', borderRadius: 4}} /> 
+                  {isJevi ? (
+                    <Image
+                      source={JEVI_LOGO}
+                      style={locationCardStyles.logoImage}
+                      contentFit="contain"
+                    />
+                  ) : (
+                    <View style={{width: 20, height: 20, backgroundColor: '#F00', borderRadius: 4}} /> 
+                  )}
              </Pressable>
         </View>
         <View style={locationCardStyles.content}>
@@ -311,11 +354,7 @@ const LocationCard = ({ location, onClose }: { location: any; onClose: () => voi
             </View>
         </View>
         <Pressable style={locationCardStyles.directionsButton} onPress={openMaps}>
-             {Platform.OS === 'ios' ? (
-                 <SymbolView name="location.fill" size={24} tintColor="#FFF" />
-             ) : (
-                 <IconSymbol name="map.fill" size={24} color="#FFF" />
-             )}
+          <IconSymbol name="location.fill" size={24} color="#FFF" />
         </Pressable>
       </View>
     </View>
@@ -333,12 +372,9 @@ const locationCardStyles = StyleSheet.create({
     card: {
         backgroundColor: '#FFF',
         borderRadius: 20,
+        borderCurve: "continuous",
         overflow: 'hidden',
-        shadowColor: "#000",
-        shadowOffset: { width: 0, height: 4 },
-        shadowOpacity: 0.2,
-        shadowRadius: 12,
-        elevation: 8,
+        boxShadow: "0 4px 12px rgba(0, 0, 0, 0.2)",
     },
     imageContainer: {
         height: 150,
@@ -353,15 +389,33 @@ const locationCardStyles = StyleSheet.create({
         position: 'absolute',
         top: 12,
         left: 12,
-        backgroundColor: '#FFE4E4',
+        backgroundColor: '#F1F5F9',
         paddingHorizontal: 8,
         paddingVertical: 4,
         borderRadius: 8,
     },
     statusText: {
-        color: '#FF3B30',
+        color: '#0F172A',
         fontSize: 12,
         fontWeight: '600',
+    },
+    statusTagOpen: {
+        backgroundColor: "#DCFCE7",
+    },
+    statusTextOpen: {
+        color: "#166534",
+    },
+    statusTagClosing: {
+        backgroundColor: "#FFEDD5",
+    },
+    statusTextClosing: {
+        color: "#9A3412",
+    },
+    statusTagClosed: {
+        backgroundColor: "#FFE4E6",
+    },
+    statusTextClosed: {
+        color: "#9F1239",
     },
     logoContainer: {
         position: 'absolute',
@@ -373,6 +427,10 @@ const locationCardStyles = StyleSheet.create({
         backgroundColor: '#FFD700', // Yellow bg as in design
         justifyContent: 'center',
         alignItems: 'center',
+    },
+    logoImage: {
+        width: 22,
+        height: 22,
     },
     content: {
         padding: 16,
@@ -405,6 +463,8 @@ const locationCardStyles = StyleSheet.create({
 });
 
 const MarkerContent = ({ location, isSelected }: { location: any; isSelected: boolean }) => {
+    const isJevi = location.id?.startsWith("jevi-") || location.category === "Kiosko";
+    const markerLabel = isJevi ? "EL Jevi" : location.title.split(' ')[0];
     return (
         <View style={{ alignItems: 'center' }}>
             {location.discount && (
@@ -414,12 +474,18 @@ const MarkerContent = ({ location, isSelected }: { location: any; isSelected: bo
             )}
             <View style={[markerStyles.marker, isSelected && markerStyles.selectedMarker]}>
                 <View style={markerStyles.iconContainer}>
-                     {/* Simplified icon logic */}
-                     {location.category === 'Coffee' && <Text>☕</Text>}
-                     {location.category === 'Burger' && <Text>🍔</Text>}
-                     {location.category === 'Bar' && <Text>🍸</Text>}
-                     {location.category === 'Supermarket' && <Text>🛒</Text>}
-                     {location.category === 'Clothes' && <Text>👕</Text>}
+                     {isJevi ? (
+                        <Image source={JEVI_LOGO} style={markerStyles.jeviLogo} contentFit="contain" />
+                     ) : (
+                       <>
+                         {/* Simplified icon logic */}
+                         {location.category === 'Coffee' && <Text>☕</Text>}
+                         {location.category === 'Burger' && <Text>🍔</Text>}
+                         {location.category === 'Bar' && <Text>🍸</Text>}
+                         {location.category === 'Supermarket' && <Text>🛒</Text>}
+                         {location.category === 'Clothes' && <Text>👕</Text>}
+                       </>
+                     )}
                 </View>
                 {location.rating && (
                      <View style={markerStyles.ratingBadge}>
@@ -428,7 +494,7 @@ const MarkerContent = ({ location, isSelected }: { location: any; isSelected: bo
                 )}
             </View>
             <View style={markerStyles.arrow} />
-            <Text style={[markerStyles.label, isSelected && { color: '#000', fontWeight: 'bold' }]}>{location.title.split(' ')[0]}</Text>
+            <Text style={[markerStyles.label, isSelected && { color: '#000', fontWeight: 'bold' }]}>{markerLabel}</Text>
         </View>
     )
 }
@@ -449,14 +515,11 @@ const markerStyles = StyleSheet.create({
         width: 44,
         height: 44,
         borderRadius: 22,
+        borderCurve: "continuous",
         backgroundColor: '#FFF',
         justifyContent: 'center',
         alignItems: 'center',
-        shadowColor: "#000",
-        shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.2,
-        shadowRadius: 4,
-        elevation: 4,
+        boxShadow: "0 2px 4px rgba(0, 0, 0, 0.2)",
         borderWidth: 1,
         borderColor: 'rgba(0,0,0,0.05)',
     },
@@ -467,6 +530,10 @@ const markerStyles = StyleSheet.create({
     },
     iconContainer: {
         
+    },
+    jeviLogo: {
+        width: 22,
+        height: 22,
     },
     ratingBadge: {
         position: 'absolute',
@@ -496,10 +563,7 @@ const markerStyles = StyleSheet.create({
         borderTopColor: "#FFF",
         marginTop: -1,
         marginBottom: 2,
-        shadowColor: "#000",
-        shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.1,
-        shadowRadius: 2,
+        boxShadow: "0 2px 2px rgba(0, 0, 0, 0.1)",
     },
     label: {
         fontSize: 12,
@@ -516,9 +580,10 @@ const markerStyles = StyleSheet.create({
 const Maps: React.FC = (): React.ReactElement => {
   const bottomSheetRef = useRef<BottomSheet>(null);
   const [searchText, setSearchText] = useState<string>("");
-  const insets = useSafeAreaInsets();
-  const router = useRouter();
   const [selectedLocationId, setSelectedLocationId] = useState<string | null>(null);
+  const isAndroid = Platform.OS === "android";
+  const googleMapsKey = process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY?.trim().replace(/^['"]|['"]$/g, "");
+  const hasAndroidGoogleMapsKey = !isAndroid || /^AIza[A-Za-z0-9_-]{35}$/.test(googleMapsKey ?? "");
 
   const selectedLocation = useMemo(() => 
       LOCATIONS.find(l => l.id === selectedLocationId), 
@@ -550,13 +615,11 @@ const Maps: React.FC = (): React.ReactElement => {
       </View>
 
       <MapView
+        provider={isAndroid ? PROVIDER_GOOGLE : undefined}
+        mapType={isAndroid && !hasAndroidGoogleMapsKey ? "none" : "standard"}
         showsTraffic={false}
-        showsUserLocation={true}
-        style={{
-          flex: 1,
-          width: "100%",
-          height: "100%",
-        }}
+        showsUserLocation={!isAndroid}
+        style={styles.map}
         showsCompass={false}
         showsIndoors={false}
         showsScale={false}
@@ -578,6 +641,12 @@ const Maps: React.FC = (): React.ReactElement => {
         }}
         onPress={onMapPress}
       >
+          {isAndroid && !hasAndroidGoogleMapsKey && (
+            <UrlTile
+              maximumZ={19}
+              urlTemplate="https://tile.openstreetmap.org/{z}/{x}/{y}.png"
+            />
+          )}
           {LOCATIONS.map(location => (
               <Marker
                 key={location.id}
@@ -588,6 +657,14 @@ const Maps: React.FC = (): React.ReactElement => {
               </Marker>
           ))}
       </MapView>
+
+      {isAndroid && !hasAndroidGoogleMapsKey && (
+        <View style={styles.androidMapWarning}>
+          <Text style={styles.androidMapWarningText}>
+            Android Google Maps key is invalid. Showing OpenStreetMap fallback.
+          </Text>
+        </View>
+      )}
       
       {selectedLocation && (
           <LocationCard location={selectedLocation} onClose={() => setSelectedLocationId(null)} />
@@ -633,17 +710,34 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
   },
+  map: {
+    ...StyleSheet.absoluteFillObject,
+  },
+  androidMapWarning: {
+    position: "absolute",
+    top: 150,
+    left: 16,
+    right: 16,
+    zIndex: 15,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 10,
+    backgroundColor: "rgba(255, 196, 0, 0.92)",
+  },
+  androidMapWarningText: {
+    color: "#272400",
+    fontSize: 12,
+    fontWeight: "600",
+    textAlign: "center",
+  },
   bottomSheetBackground: {
     backgroundColor: "rgba(30, 30, 32, 0.98)",
     borderTopLeftRadius: 36,
     borderTopRightRadius: 36,
+    borderCurve: "continuous",
     borderWidth: 1,
     borderColor: "rgba(255, 255, 255, 0.08)",
-    shadowColor: "#000000",
-    shadowOpacity: 0.55,
-    shadowRadius: 24,
-    shadowOffset: { width: 0, height: 12 },
-    elevation: 12,
+    boxShadow: "0 12px 24px rgba(0, 0, 0, 0.55)",
   },
   scrollContent: {
     paddingHorizontal: 16,

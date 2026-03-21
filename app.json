@@ -5,7 +5,8 @@
     "version": "1.0.0",
     "platforms": [
       "ios",
-      "android"
+      "android",
+      "web"
     ],
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
@@ -48,6 +49,9 @@
         }
       ]
     },
+    "web": {
+      "output": "server"
+    },
     "extra": {
       "privyAppId": "",
       "privyClientId": "",
@@ -73,6 +77,15 @@
           "recordAudioAndroid": false
         }
       ],
+      [
+        "react-native-nfc-manager",
+        {
+          "nfcPermission": "Allow Cachin to interact with nearby Satochip cards over NFC.",
+          "selectIdentifiers": [
+            "5361746F43686970"
+          ]
+        }
+      ],
       "expo-apple-authentication",
       [
         "expo-build-properties",
@@ -81,15 +94,17 @@
             "deploymentTarget": "15.1"
           },
           "android": {
-            "compileSdkVersion": 35
+            "compileSdkVersion": 36
           }
         }
       ],
       "expo-font",
-      "expo-web-browser"
+      "expo-web-browser",
+      "expo-image"
     ],
     "experiments": {
-      "typedRoutes": true
+      "typedRoutes": true,
+      "reactCompiler": true
     },
     "owner": "kevan1"
   }

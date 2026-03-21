@@ -1,26 +1,12 @@
-import { StyleSheet, View, Text, TouchableOpacity, Image } from 'react-native';
+import { StyleSheet, View, Text, TouchableOpacity, Image, useColorScheme, ScrollView } from 'react-native';
 import { useRouter } from 'expo-router';
-import Svg, { Path } from 'react-native-svg';
-
-// Icon components
-function CreditCardIcon({ size = 28, color = '#000' }: { size?: number; color?: string }) {
-  return (
-    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
-      <Path d="M1 4h22v16H1zM1 8h22" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-    </Svg>
-  );
-}
-
-function BankIcon({ size = 28, color = '#000' }: { size?: number; color?: string }) {
-  return (
-    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
-      <Path d="M3 21h18M3 10h18M5 6l7-3 7 3M4 10v11M8 10v11M12 10v11M16 10v11M20 10v11" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-    </Svg>
-  );
-}
+import MaterialIcons from '@expo/vector-icons/MaterialIcons';
+import { Colors } from '@/constants/theme';
 
 export default function WithdrawScreen() {
   const router = useRouter();
+  const colorScheme = useColorScheme() ?? 'light';
+  const palette = Colors[colorScheme];
 
   const handleBack = () => {
     router.back();
@@ -48,49 +34,54 @@ export default function WithdrawScreen() {
   };
 
   return (
-    <View style={styles.container}>
+    <ScrollView
+      contentInsetAdjustmentBehavior="automatic"
+      style={[styles.container, { backgroundColor: palette.background }]}
+      contentContainerStyle={styles.containerContent}
+      showsVerticalScrollIndicator={false}
+    >
       {/* Header */}
       <View style={styles.header}>
-        <TouchableOpacity style={styles.backButton} onPress={handleBack}>
-          <Text style={styles.backIcon}>‹</Text>
+        <TouchableOpacity 
+          style={[styles.iconButton, { backgroundColor: palette.surfaceMuted, borderColor: palette.borderSubtle }]} 
+          onPress={handleBack}
+        >
+          <MaterialIcons name="arrow-back" size={20} color={palette.primaryText} />
         </TouchableOpacity>
-        <Text style={styles.title}>Withdraw</Text>
-        <View style={styles.placeholder} />
+        <Text style={[styles.headerTitle, { color: palette.primaryText }]}>Withdraw</Text>
+        <View style={styles.headerSpacer} />
       </View>
 
-      {/* Section Title */}
-      <Text style={styles.sectionTitle}>Choose withdrawing method</Text>
+      <Text style={[styles.headline, { color: palette.primaryText }]}>Choose withdrawing method</Text>
 
       {/* Options Container */}
       <View style={styles.optionsContainer}>
         {/* Crypto Option */}
         <TouchableOpacity 
-          style={styles.optionItem}
+          style={[styles.optionItem, { backgroundColor: palette.surface, borderColor: palette.borderSubtle }]}
           onPress={handleCrypto}
-          activeOpacity={0.8}
+          activeOpacity={0.7}
         >
           <View style={styles.optionLeft}>
-            <View style={[styles.iconCircle, { backgroundColor: '#FFD700' }]}>
-              <CreditCardIcon size={28} color="#000" />
+            <View style={[styles.iconCircle, { backgroundColor: palette.surfaceMuted }]}>
+              <MaterialIcons name="credit-card" size={24} color={palette.primaryText} />
             </View>
             <View style={styles.optionInfo}>
-              <Text style={styles.optionTitle}>Crypto</Text>
-              <Text style={styles.optionSubtitle}>Withdraw to a wallet address</Text>
+              <Text style={[styles.optionTitle, { color: palette.primaryText }]}>Crypto</Text>
+              <Text style={[styles.optionSubtitle, { color: palette.secondaryText }]}>Withdraw to a wallet address</Text>
             </View>
           </View>
-          <View style={styles.arrowButton}>
-            <Text style={styles.arrowIcon}>›</Text>
-          </View>
+          <MaterialIcons name="chevron-right" size={24} color={palette.secondaryText} />
         </TouchableOpacity>
 
         {/* Mercado Pago Option */}
         <TouchableOpacity 
-          style={styles.optionItem}
+          style={[styles.optionItem, { backgroundColor: palette.surface, borderColor: palette.borderSubtle }]}
           onPress={handleMercadoPago}
-          activeOpacity={0.8}
+          activeOpacity={0.7}
         >
           <View style={styles.optionLeft}>
-            <View style={[styles.iconCircle, { backgroundColor: '#00A8E1' }]}>
+            <View style={[styles.iconCircle, { backgroundColor: palette.surfaceMuted }]}>
               <Image 
                 source={require('../assets/images/mp.png')} 
                 style={styles.mpImage}
@@ -98,98 +89,79 @@ export default function WithdrawScreen() {
               />
             </View>
             <View style={styles.optionInfo}>
-              <Text style={styles.optionTitle}>Mercado Pago</Text>
-              <Text style={styles.optionSubtitle}>Instant transfers</Text>
+              <Text style={[styles.optionTitle, { color: palette.primaryText }]}>Mercado Pago</Text>
+              <Text style={[styles.optionSubtitle, { color: palette.secondaryText }]}>Instant transfers</Text>
             </View>
           </View>
-          <View style={styles.arrowButton}>
-            <Text style={styles.arrowIcon}>›</Text>
-          </View>
+          <MaterialIcons name="chevron-right" size={24} color={palette.secondaryText} />
         </TouchableOpacity>
 
         {/* To Bank Option */}
         <TouchableOpacity 
-          style={[styles.optionItem, styles.lastOptionItem]}
+          style={[styles.optionItem, { backgroundColor: palette.surface, borderColor: palette.borderSubtle }]}
           onPress={handleBank}
-          activeOpacity={0.8}
+          activeOpacity={0.7}
         >
           <View style={styles.optionLeft}>
-            <View style={[styles.iconCircle, { backgroundColor: '#FFD700' }]}>
-              <BankIcon size={28} color="#000" />
+            <View style={[styles.iconCircle, { backgroundColor: palette.surfaceMuted }]}>
+              <MaterialIcons name="account-balance" size={24} color={palette.primaryText} />
             </View>
             <View style={styles.optionInfo}>
-              <Text style={styles.optionTitle}>To Bank</Text>
-              <Text style={styles.optionSubtitle}>Standard bank withdrawal</Text>
+              <Text style={[styles.optionTitle, { color: palette.primaryText }]}>To Bank</Text>
+              <Text style={[styles.optionSubtitle, { color: palette.secondaryText }]}>Standard bank withdrawal</Text>
             </View>
           </View>
-          <View style={styles.arrowButton}>
-            <Text style={styles.arrowIcon}>›</Text>
-          </View>
+          <MaterialIcons name="chevron-right" size={24} color={palette.secondaryText} />
         </TouchableOpacity>
       </View>
-    </View>
+    </ScrollView>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#F5E6D3',
-    padding: 20,
+  },
+  containerContent: {
+    paddingHorizontal: 20,
   },
   header: {
     flexDirection: 'row',
+    alignItems: 'center',
     justifyContent: 'space-between',
-    alignItems: 'center',
-    marginTop: 50,
-    marginBottom: 30,
+    marginBottom: 24,
+    marginTop: 12,
   },
-  backButton: {
-    width: 50,
-    height: 50,
-    borderRadius: 10,
-    borderWidth: 3,
-    borderColor: '#000000',
-    backgroundColor: '#FFFFFF',
+  iconButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    alignItems: 'center',
     justifyContent: 'center',
-    alignItems: 'center',
+    borderWidth: 1,
   },
-  backIcon: {
-    fontSize: 32,
-    fontWeight: 'bold',
-    color: '#000000',
+  headerTitle: {
+    fontSize: 18,
+    fontWeight: '600',
   },
-  title: {
-    fontSize: 28,
-    fontWeight: 'bold',
-    color: '#000000',
+  headerSpacer: {
+    width: 40,
   },
-  placeholder: {
-    width: 50,
-  },
-  sectionTitle: {
+  headline: {
     fontSize: 22,
-    fontWeight: 'bold',
-    color: '#000000',
+    fontWeight: '700',
     marginBottom: 20,
   },
   optionsContainer: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 12,
-    borderWidth: 3,
-    borderColor: '#000000',
-    overflow: 'hidden',
+    gap: 12,
   },
   optionItem: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    padding: 20,
-    borderBottomWidth: 2,
-    borderBottomColor: '#000000',
-  },
-  lastOptionItem: {
-    borderBottomWidth: 0,
+    padding: 16,
+    borderRadius: 16,
+    borderWidth: 1,
   },
   optionLeft: {
     flexDirection: 'row',
@@ -197,41 +169,26 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   iconCircle: {
-    width: 55,
-    height: 55,
-    borderRadius: 27.5,
+    width: 48,
+    height: 48,
+    borderRadius: 24,
     justifyContent: 'center',
     alignItems: 'center',
-    marginRight: 15,
+    marginRight: 16,
   },
   mpImage: {
-    width: 32,
-    height: 32,
+    width: 28,
+    height: 28,
   },
   optionInfo: {
     flex: 1,
   },
   optionTitle: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    color: '#000000',
+    fontSize: 16,
+    fontWeight: '600',
     marginBottom: 4,
   },
   optionSubtitle: {
-    fontSize: 14,
-    color: '#666666',
-  },
-  arrowButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: '#FF69B4',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  arrowIcon: {
-    fontSize: 28,
-    fontWeight: 'bold',
-    color: '#000000',
+    fontSize: 13,
   },
 });

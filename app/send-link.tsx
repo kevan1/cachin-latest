@@ -1,15 +1,14 @@
 import {
   Alert,
   Keyboard,
-  Platform,
   StyleSheet,
   Text,
   TextInput,
   TouchableOpacity,
   TouchableWithoutFeedback,
   View,
+  ScrollView,
 } from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 import { useColorScheme } from "react-native";
 import MaterialIcons from "@expo/vector-icons/MaterialIcons";
@@ -19,6 +18,7 @@ import { useState } from "react";
 import { Colors } from "@/constants/theme";
 import { normalizeDecimalInput, parseDecimalToUnits } from "@/utils/tokenAmount";
 import { useEmbeddedSolanaWallet } from "@privy-io/expo";
+import { formatAmount } from "@/utils/formatAmount";
 
 const USDC_DECIMALS = 6;
 const QUICK_AMOUNTS = [50, 100, 200, 500];
@@ -49,8 +49,8 @@ export default function SendLinkScreen() {
   const amountNumber = Number(amount);
   const equivalentValue =
     Number.isFinite(amountNumber) && amountNumber > 0
-      ? (amountNumber * FX_RATE).toFixed(2)
-      : "0.00";
+      ? formatAmount(amountNumber * FX_RATE, { maxFractionDigits: 2 })
+      : "0";
 
   const handleCopyLink = async () => {
     if (!amountUnits || amountUnits <= 0n) {
@@ -65,9 +65,11 @@ export default function SendLinkScreen() {
 
   return (
     <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
-      <SafeAreaView
-        edges={["left", "right", "bottom"]}
+      <ScrollView
+        contentInsetAdjustmentBehavior="automatic"
         style={[styles.container, { backgroundColor: palette.background }]}
+        contentContainerStyle={styles.containerContent}
+        showsVerticalScrollIndicator={false}
       >
         <View style={styles.header}>
           <TouchableOpacity
@@ -172,14 +174,16 @@ export default function SendLinkScreen() {
             </Text>
           </TouchableOpacity>
         </View>
-      </SafeAreaView>
+      </ScrollView>
     </TouchableWithoutFeedback>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
-    flex: Platform.OS === "ios" ? 0 : 1,
+    flex: 1,
+  },
+  containerContent: {
     paddingHorizontal: 20,
     paddingTop: 12,
     paddingBottom: 16,

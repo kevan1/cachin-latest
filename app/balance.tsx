@@ -10,6 +10,11 @@ import {
   type MultiChainBalances,
 } from '@/utils/multiChainBalanceService';
 import { getSponsoredSolanaWallet } from '@/utils/sponsoredWalletStorage';
+import {
+  loadAvalancheWalletSource,
+  loadSatochipAvalancheAddress,
+  type AvalancheWalletSource,
+} from "@/utils/satochipStorage";
 
 const EMPTY_BALANCES: MultiChainBalances = {
   solana: null,
@@ -34,9 +39,15 @@ export default function BalanceScreen() {
   const [balances, setBalances] = useState<MultiChainBalances>(EMPTY_BALANCES);
   const [isLoadingBalance, setIsLoadingBalance] = useState(true);
   const [sponsoredWalletAddress, setSponsoredWalletAddress] = useState<string | null>(null);
+  const [avalancheWalletSource, setAvalancheWalletSource] =
+    useState<AvalancheWalletSource>("privy");
+  const [satochipAvalancheAddress, setSatochipAvalancheAddress] = useState<string | null>(null);
 
   const solanaAddress = sponsoredWalletAddress ?? solanaWallets?.[0]?.publicKey ?? null;
-  const avalancheAddress = ethereumWallets?.[0]?.address ?? null;
+  const avalancheAddress =
+    avalancheWalletSource === "satochip"
+      ? satochipAvalancheAddress
+      : ethereumWallets?.[0]?.address ?? null;
 
   useEffect(() => {
     getSponsoredSolanaWallet()
@@ -45,6 +56,17 @@ export default function BalanceScreen() {
       })
       .catch(() => {
         setSponsoredWalletAddress(null);
+      });
+  }, []);
+
+  useEffect(() => {
+    Promise.all([loadAvalancheWalletSource(), loadSatochipAvalancheAddress()])
+      .then(([source, address]) => {
+        setAvalancheWalletSource(source);
+        setSatochipAvalancheAddress(address);
+      })
+      .catch((error) => {
+        console.error("Failed to load Avalanche wallet source", error);
       });
   }, []);
 

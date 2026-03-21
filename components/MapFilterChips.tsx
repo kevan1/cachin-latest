@@ -1,12 +1,10 @@
 import React from "react";
 import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from "react-native";
-import { SymbolView } from "expo-symbols";
-import { IconSymbol } from "@/components/ui/icon-symbol";
-import { Platform } from "react-native";
+import { IconSymbol, type IconSymbolName } from "@/components/ui/icon-symbol";
 
 interface FilterChipProps {
   label: string;
-  icon?: string;
+  icon?: IconSymbolName;
   active?: boolean;
   onPress?: () => void;
   hasDropdown?: boolean;
@@ -26,25 +24,13 @@ const FilterChip: React.FC<FilterChipProps> = ({
     >
       {icon && (
         <View style={styles.iconContainer}>
-            {/* Using a simple text or view for icon placeholder if not using IconSymbol/SymbolView directly for custom icons */}
-            {/* For this specific design, we can use simple icons */}
-           {Platform.OS === 'ios' ? (
-                // @ts-ignore
-               <SymbolView name={icon} size={14} tintColor={active ? "#FFF" : "#000"} />
-           ) : (
-                // @ts-ignore
-               <IconSymbol name={icon} size={14} color={active ? "#FFF" : "#000"} />
-           )}
+          <IconSymbol name={icon} size={14} color={active ? "#FFF" : "#000"} />
         </View>
       )}
       <Text style={[styles.label, active && styles.activeLabel]}>{label}</Text>
       {hasDropdown && (
          <View style={{marginLeft: 4}}>
-             {Platform.OS === 'ios' ? (
-                 <SymbolView name="chevron.down" size={10} tintColor={active ? "#FFF" : "#000"} />
-             ) : (
-                 <IconSymbol name="arrow.down" size={10} color={active ? "#FFF" : "#000"} />
-             )}
+           <IconSymbol name="chevron.down" size={14} color={active ? "#FFF" : "#000"} />
          </View>
       )}
     </TouchableOpacity>
@@ -60,11 +46,7 @@ export const MapFilterChips: React.FC = () => {
       style={styles.scrollView}
     >
       <TouchableOpacity style={styles.filterButton}>
-         {Platform.OS === 'ios' ? (
-             <SymbolView name="slider.horizontal.3" size={18} tintColor="#000" />
-         ) : (
-             <IconSymbol name="chevron.right" size={18} color="#000" />
-         )}
+        <IconSymbol name="slider.horizontal.3" size={18} color="#000" />
       </TouchableOpacity>
       
       <FilterChip label="Ordenar" hasDropdown onPress={() => {}} />
@@ -91,11 +73,8 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 8,
     borderRadius: 20,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 3,
+    borderCurve: "continuous",
+    boxShadow: "0 2px 4px rgba(0, 0, 0, 0.1)",
   },
   activeChip: {
     backgroundColor: "#000",
@@ -118,10 +97,7 @@ const styles = StyleSheet.create({
       backgroundColor: "#FFF",
       justifyContent: "center",
       alignItems: "center",
-      shadowColor: "#000",
-      shadowOffset: { width: 0, height: 2 },
-      shadowOpacity: 0.1,
-      shadowRadius: 4,
-      elevation: 3,
+      borderCurve: "continuous",
+      boxShadow: "0 2px 4px rgba(0, 0, 0, 0.1)",
   }
 });

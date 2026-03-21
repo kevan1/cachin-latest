@@ -1,16 +1,12 @@
-import React, { useState, useCallback } from "react";
-import { Text, TextInput, View, Button, ScrollView } from "react-native";
+import React from "react";
+import { Text, View, Button, ScrollView } from "react-native";
 
 import {
   usePrivy,
-  useEmbeddedEthereumWallet,
-  getUserEmbeddedEthereumWallet,
-  PrivyEmbeddedWalletProvider,
 } from "@privy-io/expo";
 import { PrivyUser } from "@privy-io/public-api";
 import Wallets from "./userManagement/Wallets";
 import SolanaWalletActions from "./walletActions/SolanaWalletActions";
-import EVMWalletActions from "./walletActions/EVMWalletActions";
 
 const toMainIdentifier = (x: PrivyUser["linked_accounts"][number]) => {
   if (x.type === "wallet") {
@@ -20,26 +16,7 @@ const toMainIdentifier = (x: PrivyUser["linked_accounts"][number]) => {
 };
 
 export const UserScreen = () => {
-  const [chainId, setChainId] = useState("1");
-
   const { logout, user } = usePrivy();
-  const { wallets } = useEmbeddedEthereumWallet();
-  const account = getUserEmbeddedEthereumWallet(user);
-
-  const switchChain = useCallback(
-    async (provider: PrivyEmbeddedWalletProvider, id: string) => {
-      try {
-        await provider.request({
-          method: "wallet_switchEthereumChain",
-          params: [{ chainId: id }],
-        });
-        alert(`Chain switched to ${id} successfully`);
-      } catch (e) {
-        console.error(e);
-      }
-    },
-    []
-  );
 
   if (!user) {
     return null;
@@ -81,33 +58,7 @@ export const UserScreen = () => {
               </View>
             ) : null}
           </View>
-
-          <View>
-            {account?.address && (
-              <>
-                <Text style={{ fontWeight: "bold" }}>Embedded Wallet</Text>
-                <Text>{account?.address}</Text>
-              </>
-            )}
-
-            <>
-              <Text>Chain ID to set to:</Text>
-              <TextInput
-                value={chainId}
-                onChangeText={setChainId}
-                placeholder="Chain Id"
-              />
-              <Button
-                title="Switch Chain"
-                onPress={async () =>
-                  switchChain(await wallets[0].getProvider(), chainId)
-                }
-              />
-            </>
-          </View>
-
           <SolanaWalletActions />
-          <EVMWalletActions />
           <Button title="Logout" onPress={logout} />
         </View>
       </ScrollView>
