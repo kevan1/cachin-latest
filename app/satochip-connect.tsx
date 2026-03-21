@@ -18,6 +18,7 @@ import { Colors } from "@/constants/theme";
 import {
   getSatochipErrorMessage,
   readSatochipAvalancheAddress,
+  setupSatochipCard,
 } from "@/utils/satochip";
 import {
   loadAvalancheWalletSource,
@@ -37,6 +38,8 @@ export default function SatochipConnectScreen() {
   const palette = Colors[colorScheme];
   const [pin, setPin] = useState("");
   const [isConnecting, setIsConnecting] = useState(false);
+  const [isSettingUp, setIsSettingUp] = useState(false);
+  const [showSetup, setShowSetup] = useState(false);
   const [currentAddress, setCurrentAddress] = useState<string | null>(null);
   const [currentSource, setCurrentSource] = useState<"privy" | "satochip">("privy");
 
@@ -50,6 +53,39 @@ export default function SatochipConnectScreen() {
         console.error("[SatochipConnect] Failed to load state", error);
       });
   }, []);
+
+  const handleSetup = async () => {
+    if (!pin.trim() || pin.trim().length < 4) {
+      Alert.alert("PIN required", "Choose a PIN of at least 4 characters.");
+      return;
+    }
+
+    try {
+      setIsSettingUp(true);
+      const result = await setupSatochipCard({
+        newPin: pin.trim(),
+      });
+
+      await saveSatochipAvalancheAddress(result.address);
+      await saveAvalancheWalletSource("satochip");
+
+      setCurrentAddress(result.address);
+      setCurrentSource("satochip");
+      setPin("");
+      setShowSetup(false);
+
+      Alert.alert(
+        "Satochip initialized",
+        `Card is set up and ready. Avalanche address: ${result.address}`,
+        [{ text: "Done", onPress: () => router.back() }]
+      );
+    } catch (error) {
+      console.error("[SatochipConnect] Setup failed", error);
+      Alert.alert("Setup failed", getSatochipErrorMessage(error));
+    } finally {
+      setIsSettingUp(false);
+    }
+  };
 
   const handleConnect = async () => {
     if (!pin.trim()) {
@@ -140,73 +176,172 @@ export default function SatochipConnectScreen() {
           </Text>
         </View>
 
-        <View
-          style={[
-            styles.card,
-            {
-              backgroundColor: palette.surface,
-              borderColor: palette.borderSubtle,
-            },
-          ]}
-        >
-          <Text style={[styles.sectionLabel, { color: palette.secondaryText }]}>
-            Satochip PIN
-          </Text>
-          <TextInput
-            value={pin}
-            onChangeText={setPin}
-            placeholder="Enter PIN"
-            placeholderTextColor={palette.secondaryText}
-            keyboardType="number-pad"
-            secureTextEntry
-            style={[
-              styles.pinInput,
-              {
-                color: palette.primaryText,
-                backgroundColor: palette.surfaceMuted,
-                borderColor: palette.borderSubtle,
-              },
-            ]}
-          />
-          <Text style={[styles.helper, { color: palette.secondaryText }]}>
-            Hold the card near the phone after tapping connect. Android devices with NFC are
-            the primary target for this flow.
-          </Text>
-        </View>
+        {showSetup ? (
+          <>
+            <View
+              style={[
+                styles.card,
+                {
+                  backgroundColor: palette.surface,
+                  borderColor: palette.borderSubtle,
+                },
+              ]}
+            >
+              <Text style={[styles.sectionLabel, { color: palette.secondaryText }]}>
+                New card setup
+              </Text>
+              <Text style={[styles.helper, { color: palette.secondaryText, marginTop: 6 }]}>
+                This will initialize a fresh Satochip card: set your PIN and PUK, then generate
+                a new wallet keypair on the card.
+              </Text>
 
-        <TouchableOpacity
-          accessibilityRole="button"
-          onPress={handleConnect}
-          disabled={isConnecting}
-          style={[
-            styles.primaryButton,
-            {
-              backgroundColor: palette.actionPrimary,
-              opacity: isConnecting ? 0.7 : 1,
-            },
-          ]}
-        >
-          {isConnecting ? (
-            <ActivityIndicator color={palette.actionPrimaryText} />
-          ) : (
-            <Text style={[styles.primaryButtonText, { color: palette.actionPrimaryText }]}>
-              Tap card to connect
-            </Text>
-          )}
-        </TouchableOpacity>
+              <Text style={[styles.sectionLabel, { color: palette.secondaryText, marginTop: 16 }]}>
+                Choose a PIN
+              </Text>
+              <TextInput
+                value={pin}
+                onChangeText={setPin}
+                placeholder="At least 4 characters"
+                placeholderTextColor={palette.secondaryText}
+                secureTextEntry
+                style={[
+                  styles.pinInput,
+                  {
+                    color: palette.primaryText,
+                    backgroundColor: palette.surfaceMuted,
+                    borderColor: palette.borderSubtle,
+                  },
+                ]}
+              />
 
-        <TouchableOpacity
-          accessibilityRole="button"
-          onPress={handleUsePrivy}
-          style={[
-            styles.secondaryButton,
-            { backgroundColor: palette.actionSecondary },
-          ]}
-        >
-          <Text style={[styles.secondaryButtonText, { color: palette.actionSecondaryText }]}>
-            Use Privy wallet instead
-          </Text>
-        </TouchableOpacity>
+              <Text style={[styles.helper, { color: palette.secondaryText, marginTop: 10 }]}>
+                Hold the card near the phone after tapping initialize.
+              </Text>
+            </View>
+
+            <TouchableOpacity
+              accessibilityRole="button"
+              onPress={handleSetup}
+              disabled={isSettingUp}
+              style={[
+                styles.primaryButton,
+                {
+                  backgroundColor: palette.actionPrimary,
+                  opacity: isSettingUp ? 0.7 : 1,
+                },
+              ]}
+            >
+              {isSettingUp ? (
+                <ActivityIndicator color={palette.actionPrimaryText} />
+              ) : (
+                <Text style={[styles.primaryButtonText, { color: palette.actionPrimaryText }]}>
+                  Tap card to initialize
+                </Text>
+              )}
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              accessibilityRole="button"
+              onPress={() => {
+                setShowSetup(false);
+                setPin("");
+              }}
+              style={[
+                styles.secondaryButton,
+                { backgroundColor: palette.actionSecondary },
+              ]}
+            >
+              <Text style={[styles.secondaryButtonText, { color: palette.actionSecondaryText }]}>
+                Back to connect
+              </Text>
+            </TouchableOpacity>
+          </>
+        ) : (
+          <>
+            <View
+              style={[
+                styles.card,
+                {
+                  backgroundColor: palette.surface,
+                  borderColor: palette.borderSubtle,
+                },
+              ]}
+            >
+              <Text style={[styles.sectionLabel, { color: palette.secondaryText }]}>
+                Satochip PIN
+              </Text>
+              <TextInput
+                value={pin}
+                onChangeText={setPin}
+                placeholder="Enter PIN"
+                placeholderTextColor={palette.secondaryText}
+                secureTextEntry
+                style={[
+                  styles.pinInput,
+                  {
+                    color: palette.primaryText,
+                    backgroundColor: palette.surfaceMuted,
+                    borderColor: palette.borderSubtle,
+                  },
+                ]}
+              />
+              <Text style={[styles.helper, { color: palette.secondaryText }]}>
+                Hold the card near the phone after tapping connect. Android devices with NFC are
+                the primary target for this flow.
+              </Text>
+            </View>
+
+            <TouchableOpacity
+              accessibilityRole="button"
+              onPress={handleConnect}
+              disabled={isConnecting}
+              style={[
+                styles.primaryButton,
+                {
+                  backgroundColor: palette.actionPrimary,
+                  opacity: isConnecting ? 0.7 : 1,
+                },
+              ]}
+            >
+              {isConnecting ? (
+                <ActivityIndicator color={palette.actionPrimaryText} />
+              ) : (
+                <Text style={[styles.primaryButtonText, { color: palette.actionPrimaryText }]}>
+                  Tap card to connect
+                </Text>
+              )}
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              accessibilityRole="button"
+              onPress={() => {
+                setShowSetup(true);
+                setPin("");
+              }}
+              style={[
+                styles.secondaryButton,
+                { backgroundColor: palette.actionSecondary },
+              ]}
+            >
+              <Text style={[styles.secondaryButtonText, { color: palette.actionSecondaryText }]}>
+                Set up a new card
+              </Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              accessibilityRole="button"
+              onPress={handleUsePrivy}
+              style={[
+                styles.secondaryButton,
+                { backgroundColor: palette.actionSecondary },
+              ]}
+            >
+              <Text style={[styles.secondaryButtonText, { color: palette.actionSecondaryText }]}>
+                Use Privy wallet instead
+              </Text>
+            </TouchableOpacity>
+          </>
+        )}
       </ScrollView>
     </KeyboardAvoidingView>
   );

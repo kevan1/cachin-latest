@@ -30,6 +30,7 @@
     "assert": "^2.1.0",
     "buffer": "^6.0.3",
     "canonicalize": "^2.1.0",
+    "dotenv": "^17.3.1",
     "expo": "^55.0.0",
     "expo-apple-authentication": "~55.0.8",
     "expo-application": "~55.0.8",

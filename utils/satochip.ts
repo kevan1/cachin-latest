@@ -1,4 +1,6 @@
 import { NativeModules, Platform } from "react-native";
+import { secp256k1 } from "@noble/curves/secp256k1";
+import { sha256 } from "@noble/hashes/sha2";
 import {
   bytesToHex,
   createPublicClient,
@@ -21,6 +23,13 @@ import {
 import { avalancheFuji } from "viem/chains";
 
 import { ChainType, getChainMetadata, getChainToken } from "@/constants/chains";
+import {
+  buildInitSecureChannelApdu,
+  completeSecureChannel,
+  decryptResponse,
+  encryptApdu,
+  type SecureChannelState,
+} from "@/utils/satochipSecureChannel";
 
 type NfcModule = typeof import("react-native-nfc-manager");
 
@@ -45,11 +54,18 @@ const avalancheUsdcTransferAbi = [
 ] as const;
 
 const INS = {
+  SETUP: 0x2a,
   GET_STATUS: 0x3c,
   VERIFY_PIN: 0x42,
+  BIP32_IMPORT_SEED: 0x6c,
   BIP32_GET_EXTENDED_KEY: 0x6d,
   SIGN_TX_HASH: 0x7a,
 } as const;
+
+const DEFAULT_PIN = [0x4d, 0x75, 0x73, 0x63, 0x6c, 0x65, 0x30, 0x30]; // "Muscle00"
+const DEFAULT_PIN_TRIES = 5;
+const DEFAULT_PUK_TRIES = 1;
+const DEFAULT_SECMEM_SIZE = 32; // memory cache slots, NOT bytes — must fit in a signed Java short
 
 export interface SatochipCardStatus {
   protocolVersion: number;
@@ -59,6 +75,11 @@ export interface SatochipCardStatus {
   isSeeded: boolean;
   setupDone: boolean;
   needsSecureChannel: boolean;
+  nfcPolicy: number;
+  featureSchnorrPolicy: number | null;
+  featureNostrPolicy: number | null;
+  featureLiquidPolicy: number | null;
+  featureMusig2Policy: number | null;
 }
 
 export interface SatochipAddressResult {
@@ -70,6 +91,11 @@ export interface SatochipAvalancheTransferResult {
   address: Address;
   signature: Hex;
   fee: number;
+}
+
+export interface SatochipSetupResult {
+  address: Address;
+  status: SatochipCardStatus;
 }
 
 class SatochipError extends Error {
@@ -90,6 +116,11 @@ function parseStatus(response: number[]): SatochipCardStatus {
     isSeeded: (response[9] ?? 0) !== 0x00,
     setupDone: response.length >= 11 ? response[10] !== 0x00 : true,
     needsSecureChannel: response.length >= 12 ? response[11] !== 0x00 : false,
+    nfcPolicy: response.length >= 13 ? (response[12] ?? 0) : 0,
+    featureSchnorrPolicy: response.length >= 14 ? (response[13] ?? null) : null,
+    featureNostrPolicy: response.length >= 15 ? (response[14] ?? null) : null,
+    featureLiquidPolicy: response.length >= 16 ? (response[15] ?? null) : null,
+    featureMusig2Policy: response.length >= 17 ? (response[16] ?? null) : null,
   };
 }
 
@@ -140,10 +171,98 @@ function formatStatusWord(sw1: number, sw2: number): string {
   if (sw1 === 0x9c && sw2 === 0x15) return "The card rejected the transaction hash.";
   if (sw1 === 0x6d && sw2 === 0x00) return "The card does not support this Satochip command.";
   if (sw1 === 0x90 && sw2 === 0x00) return "Success";
-  return `Card error 0x${sw1.toString(16)}${sw2.toString(16)}`;
+  return `Card error 0x${sw1.toString(16).padStart(2, "0")}${sw2.toString(16).padStart(2, "0")}`;
+}
+
+function recoverUncompressedPublicKeyFromCoordX(
+  message: number[],
+  coordX: number[],
+  derSignature: number[]
+): number[] {
+  if (coordX.length !== 32) {
+    throw new SatochipError(`Invalid coordx length ${coordX.length}, expected 32.`);
+  }
+
+  const digest = sha256(Uint8Array.from(message));
+
+  for (let recovery = 0; recovery < 4; recovery += 1) {
+    try {
+      const point = secp256k1.Signature
+        .fromDER(Uint8Array.from(derSignature))
+        .addRecoveryBit(recovery)
+        .recoverPublicKey(digest);
+
+      const compressed = point.toRawBytes(true);
+      if (compressed.length !== 33) {
+        continue;
+      }
+
+      const sameCoordX = coordX.every((value, index) => compressed[index + 1] === value);
+      if (!sameCoordX) {
+        continue;
+      }
+
+      return Array.from(point.toRawBytes(false));
+    } catch {
+      // Try the next recovery id.
+    }
+  }
+
+  throw new SatochipError(
+    "Could not recover the Satochip public key from the extended-key signature."
+  );
+}
+
+function extractPublicKeyFromExtendedKeyResponse(response: number[]): number[] {
+  if (response.length < 36) {
+    throw new SatochipError("The extended-key response is too short.");
+  }
+
+  const coordXSize = ((response[32] & 0x7f) << 8) | (response[33] & 0xff);
+  if (coordXSize <= 0) {
+    throw new SatochipError("The card returned an invalid coordx size.");
+  }
+
+  const coordXStart = 34;
+  const coordXEnd = coordXStart + coordXSize;
+  if (coordXEnd + 2 > response.length) {
+    throw new SatochipError("The card returned truncated coordx data.");
+  }
+
+  const coordX = response.slice(coordXStart, coordXEnd);
+  const signedMessage = response.slice(0, coordXEnd);
+
+  const sigSize = ((response[coordXEnd] & 0xff) << 8) | (response[coordXEnd + 1] & 0xff);
+  const sigStart = coordXEnd + 2;
+  const sigEnd = sigStart + sigSize;
+  if (sigSize <= 0 || sigEnd > response.length) {
+    throw new SatochipError("The card returned an invalid extended-key signature.");
+  }
+
+  const signature = response.slice(sigStart, sigEnd);
+  return recoverUncompressedPublicKeyFromCoordX(signedMessage, coordX, signature);
 }
 
 function extractPublicKey(response: number[]): number[] {
+  console.log(`[Satochip] extractPublicKey response (${response.length} bytes): ${response.slice(0, 40).map(b => b.toString(16).padStart(2, "0")).join(" ")}...`);
+
+  // Response format: key_size(2 BE) | pubkey(key_size) | ...
+  if (response.length >= 67) {
+    const keySize = (response[0] << 8) | response[1];
+    if (keySize === 65 && response[2] === 0x04) {
+      return response.slice(2, 67);
+    }
+  }
+
+  // Current Satochip format: chaincode(32) | coordx_size(2) | coordx | sig_size(2) | sig | ...
+  try {
+    return extractPublicKeyFromExtendedKeyResponse(response);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.log(`[Satochip] Extended-key parser failed: ${message}`);
+  }
+
+  // Fallback: scan for 0x04 prefix
   for (let index = 0; index <= response.length - 65; index += 1) {
     if (response[index] === 0x04) {
       return response.slice(index, index + 65);
@@ -281,7 +400,10 @@ async function getCardStatus(
     throw new SatochipError(formatStatusWord(sw1, sw2), (sw1 << 8) | sw2);
   }
 
-  return parseStatus(data);
+  console.log("[Satochip] GET_STATUS raw:", data.map(b => b.toString(16).padStart(2, "0")).join(" "));
+  const status = parseStatus(data);
+  console.log("[Satochip] GET_STATUS decoded:", JSON.stringify(status));
+  return status;
 }
 
 function assertCardReady(status: SatochipCardStatus) {
@@ -293,17 +415,139 @@ function assertCardReady(status: SatochipCardStatus) {
     throw new SatochipError("This Satochip card does not have a seed yet.");
   }
 
-  if (status.needsSecureChannel) {
-    throw new SatochipError(
-      "This Satochip card requires a secure channel. That flow is not enabled in Cachin yet."
-    );
-  }
-
   if (status.needs2FA) {
     throw new SatochipError(
       "This Satochip card requires 2FA for signing. Cachin does not handle that extra step yet."
     );
   }
+}
+
+/**
+ * Negotiate a secure channel with the card if required.
+ * Returns a wrapped transceive function that encrypts/decrypts APDUs transparently.
+ */
+async function openSecureChannel(
+  rawTransceive: (apdu: number[]) => Promise<number[]>
+): Promise<{
+  transceive: (apdu: number[]) => Promise<number[]>;
+  state: SecureChannelState;
+}> {
+  const { apdu, clientPrivateKey } = buildInitSecureChannelApdu();
+  const response = normalizeResponse(await rawTransceive(apdu));
+
+  if (response.sw1 !== 0x90 || response.sw2 !== 0x00) {
+    throw new SatochipError(
+      `Secure channel init failed: ${formatStatusWord(response.sw1, response.sw2)}`,
+      response.sw
+    );
+  }
+
+  let scState = completeSecureChannel(clientPrivateKey, response.data);
+  console.log("[Satochip] Secure channel established");
+
+  const secureTransceive = async (innerApdu: number[]): Promise<number[]> => {
+    const innerIns = innerApdu.length >= 2 ? innerApdu[1] : 0;
+    console.log(`[Satochip] SC wrapping INS=0x${innerIns.toString(16).padStart(2, "0")} (${innerApdu.length} bytes)`);
+
+    const { wrappedApdu, nextState } = encryptApdu(scState, innerApdu);
+    scState = nextState;
+
+    const raw = await rawTransceive(wrappedApdu);
+    const { data, sw1, sw2 } = normalizeResponse(raw);
+
+    console.log(`[Satochip] SC response SW=0x${sw1.toString(16).padStart(2, "0")}${sw2.toString(16).padStart(2, "0")} (${data.length} bytes)`);
+
+    if (sw1 !== 0x90 || sw2 !== 0x00) {
+      return [...data, sw1, sw2];
+    }
+
+    const decrypted = decryptResponse(scState, data);
+    return [...decrypted, sw1, sw2];
+  };
+
+  return { transceive: secureTransceive, state: scState };
+}
+
+/**
+ * If the card needs a secure channel, negotiate one and return a wrapped transceive.
+ * Otherwise return the raw transceive as-is.
+ */
+async function maybeOpenSecureChannel(
+  rawTransceive: (apdu: number[]) => Promise<number[]>,
+  status: SatochipCardStatus
+): Promise<(apdu: number[]) => Promise<number[]>> {
+  if (!status.needsSecureChannel) return rawTransceive;
+  const { transceive } = await openSecureChannel(rawTransceive);
+  return transceive;
+}
+
+/**
+ * Generate a random BIP32 seed (64 bytes, matching BIP39 seed length).
+ */
+function generateRandomSeed(): number[] {
+  return randomByteArray(64);
+}
+
+/**
+ * Build the INS_SETUP APDU payload.
+ */
+function randomByteArray(length: number): number[] {
+  const buf = new Uint8Array(length);
+  if (typeof globalThis.crypto?.getRandomValues === "function") {
+    globalThis.crypto.getRandomValues(buf);
+  } else {
+    for (let i = 0; i < length; i++) buf[i] = Math.floor(Math.random() * 256);
+  }
+  return Array.from(buf);
+}
+
+function buildSetupApdu(newPin: string): number[] {
+  const pinBytes = asciiBytes(newPin);
+  // PUK0 — random 16 raw bytes (matches uniblow)
+  const pukBytes = randomByteArray(16);
+  // PIN1 / PUK1 — random, unused (matches uniblow)
+  const pin1Bytes = randomByteArray(16);
+  const puk1Bytes = randomByteArray(16);
+
+  const data = [
+    // Default PIN verification (must match factory default "Muscle00")
+    DEFAULT_PIN.length,
+    ...DEFAULT_PIN,
+    // PIN[0] / PUK[0]
+    DEFAULT_PIN_TRIES,
+    DEFAULT_PUK_TRIES,
+    pinBytes.length,
+    ...pinBytes,
+    pukBytes.length,
+    ...pukBytes,
+    // PIN[1] / PUK[1] — random, 1 try each (matches uniblow)
+    0x01,
+    0x01,
+    pin1Bytes.length,
+    ...pin1Bytes,
+    puk1Bytes.length,
+    ...puk1Bytes,
+    // memsize (2 bytes big-endian) — cache slots, must be positive signed short
+    (DEFAULT_SECMEM_SIZE >>> 8) & 0xff,
+    DEFAULT_SECMEM_SIZE & 0xff,
+    // memsize2 (2 bytes big-endian) — RFU, 0
+    0x00,
+    0x00,
+    // Deprecated ACL bytes (create_object, create_key, create_pin)
+    0x01,
+    0x01,
+    0x01,
+    // No option_flags when not using 2FA (matches uniblow)
+  ];
+
+  return [CLA, INS.SETUP, 0x00, 0x00, data.length, ...data];
+}
+
+/**
+ * Build the INS_BIP32_IMPORT_SEED APDU.
+ */
+function buildImportSeedApdu(seed: number[]): number[] {
+  return [CLA, INS.BIP32_IMPORT_SEED, seed.length, 0x00, seed.length, ...seed];
 }
 
 async function verifyPin(
@@ -358,12 +602,15 @@ async function derivePublicKey(
 }
 
 async function readSatochipAvalancheAddressInternal(
-  transceive: (apdu: number[]) => Promise<number[]>,
+  rawTransceive: (apdu: number[]) => Promise<number[]>,
   pin: string
 ): Promise<SatochipAddressResult> {
-  await selectSatochipApplet(transceive);
-  const status = await getCardStatus(transceive);
+  await selectSatochipApplet(rawTransceive);
+  const status = await getCardStatus(rawTransceive);
   assertCardReady(status);
+
+  const transceive = await maybeOpenSecureChannel(rawTransceive, status);
+
   await verifyPin(transceive, pin);
 
   const publicKey = await derivePublicKey(transceive);
@@ -445,8 +692,16 @@ export async function sendSatochipAvalancheUsdcTransfer({
 
   return withIsoDepSession(
     "Hold your Satochip card steady while Cachin signs the Fuji USDC transfer.",
-    async (transceive) => {
-      const { address } = await readSatochipAvalancheAddressInternal(transceive, pin.trim());
+    async (rawTransceive) => {
+      await selectSatochipApplet(rawTransceive);
+      const status = await getCardStatus(rawTransceive);
+      assertCardReady(status);
+
+      const transceive = await maybeOpenSecureChannel(rawTransceive, status);
+
+      await verifyPin(transceive, pin.trim());
+      const publicKey = await derivePublicKey(transceive);
+      const address = publicKeyToAddress(publicKey);
 
       if (expectedAddress && !isAddressEqual(address, getAddress(expectedAddress))) {
         throw new SatochipError(
@@ -522,6 +777,93 @@ export async function sendSatochipAvalancheUsdcTransfer({
         signature,
         fee,
       };
+    }
+  );
+}
+
+/**
+ * Read the card status without requiring a PIN.
+ * Used by the UI to detect whether the card needs setup before prompting for a PIN.
+ */
+export async function readSatochipCardStatus(): Promise<SatochipCardStatus> {
+  return withIsoDepSession(
+    "Hold your Satochip card near the phone to check its status.",
+    async (transceive) => {
+      await selectSatochipApplet(transceive);
+      return getCardStatus(transceive);
+    }
+  );
+}
+
+/**
+ * Set up a freshly flashed Satochip card:
+ *   1. Open secure channel (if the card requires one).
+ *   2. Run INS_SETUP with the user's chosen PIN/PUK (verifies default "Muscle00" PIN).
+ *   3. Verify the new PIN.
+ *   4. Generate a random 32-byte seed and import it via INS_BIP32_IMPORT_SEED.
+ *   5. Derive and return the Avalanche address.
+ */
+export async function setupSatochipCard({
+  newPin,
+}: {
+  newPin: string;
+}): Promise<SatochipSetupResult> {
+  if (!newPin.trim() || newPin.trim().length < 4) {
+    throw new SatochipError("Choose a PIN of at least 4 characters.");
+  }
+
+  return withIsoDepSession(
+    "Hold your Satochip card near the phone to set it up.",
+    async (rawTransceive) => {
+      await selectSatochipApplet(rawTransceive);
+      const status = await getCardStatus(rawTransceive);
+
+      console.log("[Satochip] Card status:", JSON.stringify(status));
+
+      if (status.setupDone) {
+        throw new SatochipError(
+          "This Satochip card has already been set up. Use the connect flow instead."
+        );
+      }
+
+      // Open secure channel if the card requires it
+      const transceive = await maybeOpenSecureChannel(rawTransceive, status);
+
+      // 1. Run setup — sets PIN, generates random PUK (matches uniblow)
+      const setupApdu = buildSetupApdu(newPin.trim());
+      console.log("[Satochip] SETUP APDU hex:", setupApdu.map(b => b.toString(16).padStart(2, "0")).join(" "));
+      console.log("[Satochip] SETUP APDU length:", setupApdu.length);
+      const setupResp = normalizeResponse(await transceive(setupApdu));
+      if (setupResp.sw1 !== 0x90 || setupResp.sw2 !== 0x00) {
+        throw new SatochipError(
+          `Card setup failed: ${formatStatusWord(setupResp.sw1, setupResp.sw2)}`,
+          setupResp.sw
+        );
+      }
+
+      // 2. Verify the newly set PIN
+      await verifyPin(transceive, newPin.trim());
+
+      // 3. Generate a random seed and import it
+      const seed = generateRandomSeed();
+      const importResp = normalizeResponse(await transceive(buildImportSeedApdu(seed)));
+      if (importResp.sw1 !== 0x90 || importResp.sw2 !== 0x00) {
+        throw new SatochipError(
+          `Seed import failed: ${formatStatusWord(importResp.sw1, importResp.sw2)}`,
+          importResp.sw
+        );
+      }
+
+      // 4. Derive the Avalanche address
+      const publicKey = await derivePublicKey(transceive);
+      const address = publicKeyToAddress(publicKey);
+
+      // Re-read status to confirm
+      const finalStatus = await getCardStatus(
+        status.needsSecureChannel ? transceive : rawTransceive
+      );
+
+      return { address, status: finalStatus };
     }
   );
 }
