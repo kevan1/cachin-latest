@@ -1,11 +1,16 @@
-import { defineChain } from 'viem';
-
 /**
  * Chain types supported in the app
  */
 export enum ChainType {
   SOLANA = 'solana',
-  MONAD = 'monad',
+  AVALANCHE = 'avalanche',
+}
+
+export interface ChainTokenMetadata {
+  address: string;
+  name: string;
+  symbol: string;
+  decimals: number;
 }
 
 /**
@@ -15,6 +20,7 @@ export interface ChainMetadata {
   id: string;
   name: string;
   type: ChainType;
+  chainId?: number;
   nativeCurrency: {
     name: string;
     symbol: string;
@@ -22,66 +28,11 @@ export interface ChainMetadata {
   };
   rpcUrl: string;
   blockExplorer: string;
-  chainId?: number; // For EVM chains
   testnet?: boolean;
+  tokens?: {
+    usdc?: ChainTokenMetadata;
+  };
 }
-
-/**
- * Monad Testnet Chain Configuration
- * Using viem's defineChain for EVM compatibility
- */
-export const monadTestnet = defineChain({
-  id: 41454,
-  name: 'Monad Testnet',
-  nativeCurrency: {
-    name: 'Monad',
-    symbol: 'MON',
-    decimals: 18,
-  },
-  rpcUrls: {
-    default: {
-      http: ['https://testnet.monad.xyz'],
-    },
-    public: {
-      http: ['https://testnet.monad.xyz'],
-    },
-  },
-  blockExplorers: {
-    default: {
-      name: 'Monad Explorer',
-      url: 'https://explorer.testnet.monad.xyz',
-    },
-  },
-  testnet: true,
-});
-
-/**
- * Monad Mainnet Chain Configuration (placeholder for when mainnet launches)
- */
-export const monadMainnet = defineChain({
-  id: 10001, // Placeholder - update when mainnet launches
-  name: 'Monad',
-  nativeCurrency: {
-    name: 'Monad',
-    symbol: 'MON',
-    decimals: 18,
-  },
-  rpcUrls: {
-    default: {
-      http: ['https://mainnet.monad.xyz'], // Placeholder
-    },
-    public: {
-      http: ['https://mainnet.monad.xyz'], // Placeholder
-    },
-  },
-  blockExplorers: {
-    default: {
-      name: 'Monad Explorer',
-      url: 'https://explorer.monad.xyz',
-    },
-  },
-  testnet: false,
-});
 
 /**
  * All supported chains metadata
@@ -99,19 +50,27 @@ export const SUPPORTED_CHAINS: Record<ChainType, ChainMetadata> = {
     rpcUrl: 'https://solxar.mainnet.rpcpool.com/efba4db1-e231-40f6-a16f-6e24e8f72b5c',
     blockExplorer: 'https://explorer.solana.com',
   },
-  [ChainType.MONAD]: {
-    id: 'monad-testnet',
-    name: 'Monad Testnet',
-    type: ChainType.MONAD,
+  [ChainType.AVALANCHE]: {
+    id: 'avalanche-fuji',
+    name: 'Avalanche Fuji',
+    type: ChainType.AVALANCHE,
+    chainId: 43113,
     nativeCurrency: {
-      name: 'Monad',
-      symbol: 'MON',
+      name: 'Avalanche Fuji',
+      symbol: 'AVAX',
       decimals: 18,
     },
-    rpcUrl: 'https://testnet.monad.xyz',
-    blockExplorer: 'https://explorer.testnet.monad.xyz',
-    chainId: 41454,
+    rpcUrl: 'https://api.avax-test.network/ext/bc/C/rpc',
+    blockExplorer: 'https://testnet.snowtrace.io',
     testnet: true,
+    tokens: {
+      usdc: {
+        address: '0x5425890298aed601595a70AB815c96711a31Bc65',
+        name: 'USD Coin',
+        symbol: 'USDC',
+        decimals: 6,
+      },
+    },
   },
 };
 
@@ -136,16 +95,19 @@ export function getChainSymbol(chainType: ChainType): string {
   return SUPPORTED_CHAINS[chainType].nativeCurrency.symbol;
 }
 
+export function getChainToken(
+  chainType: ChainType,
+  token: 'usdc'
+): ChainTokenMetadata | undefined {
+  return SUPPORTED_CHAINS[chainType].tokens?.[token];
+}
+
 /**
  * Get block explorer URL for a transaction
  */
 export function getExplorerUrl(chainType: ChainType, txHash: string): string {
   const chain = SUPPORTED_CHAINS[chainType];
-  if (chainType === ChainType.SOLANA) {
-    return `${chain.blockExplorer}/tx/${txHash}`;
-  } else {
-    return `${chain.blockExplorer}/tx/${txHash}`;
-  }
+  return `${chain.blockExplorer}/tx/${txHash}`;
 }
 
 /**
@@ -153,11 +115,7 @@ export function getExplorerUrl(chainType: ChainType, txHash: string): string {
  */
 export function getExplorerAddressUrl(chainType: ChainType, address: string): string {
   const chain = SUPPORTED_CHAINS[chainType];
-  if (chainType === ChainType.SOLANA) {
-    return `${chain.blockExplorer}/address/${address}`;
-  } else {
-    return `${chain.blockExplorer}/address/${address}`;
-  }
+  return `${chain.blockExplorer}/address/${address}`;
 }
 
 /**
@@ -165,10 +123,13 @@ export function getExplorerAddressUrl(chainType: ChainType, address: string): st
  */
 export function isValidAddress(chainType: ChainType, address: string): boolean {
   if (chainType === ChainType.SOLANA) {
-    // Solana addresses are base58 encoded and typically 32-44 characters
+    // Solana addresses are base58 encoded and typically 32-44 characters.
     return /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(address);
-  } else {
-    // EVM addresses are 0x followed by 40 hex characters
+  }
+
+  if (chainType === ChainType.AVALANCHE) {
     return /^0x[a-fA-F0-9]{40}$/.test(address);
   }
+
+  return false;
 }

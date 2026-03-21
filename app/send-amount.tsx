@@ -1,24 +1,24 @@
 import {
   ActivityIndicator,
   Alert,
-  Keyboard,
-  Platform,
   StyleSheet,
   Text,
   TextInput,
   TouchableOpacity,
-  TouchableWithoutFeedback,
+  useColorScheme,
   View,
+  ScrollView,
 } from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
-import { useRouter, useLocalSearchParams } from "expo-router";
-import { useEffect, useMemo, useState } from "react";
+import { useRouter, useLocalSearchParams, useFocusEffect } from "expo-router";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Connection, PublicKey } from "@solana/web3.js";
 import MaterialIcons from "@expo/vector-icons/MaterialIcons";
-import { useColorScheme } from "react-native";
+import * as Haptics from "expo-haptics";
+import { isAddress } from "viem";
 
 import { getUserByUsername } from "@/services/firestoreService";
-import { useEmbeddedSolanaWallet } from "@privy-io/expo";
+import { useEmbeddedEthereumWallet, useEmbeddedSolanaWallet } from "@privy-io/expo";
+import { ChainType, getChainToken } from "@/constants/chains";
 import { getSolanaRpcUrl } from "@/utils/solanaRpc";
 import {
   formatTokenUnits,
@@ -26,11 +26,12 @@ import {
   parseDecimalToUnits,
 } from "@/utils/tokenAmount";
 import { Colors } from "@/constants/theme";
+import { getSelectedCurrency, Currency } from "@/utils/userStorage";
+import { IconSymbol } from "@/components/ui/icon-symbol";
+import { fetchErc20EvmBalance } from "@/utils/evmBalanceService";
 
 const USDC_MINT_ADDRESS = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
 const USDC_DECIMALS = 6;
-const QUICK_AMOUNTS = [50, 100, 200, 500];
-const FX_RATE = 0.86;
 
 type RecipientStatus = "idle" | "resolving" | "resolved" | "error";
 
@@ -62,10 +63,21 @@ export default function SendAmountScreen() {
   const params = useLocalSearchParams();
   const colorScheme = useColorScheme() ?? "light";
   const palette = Colors[colorScheme];
+  const isIOS = process.env.EXPO_OS === "ios";
+  const amountInputRef = useRef<TextInput>(null);
+  const requestedChain = firstParam(params.chain);
+  const activeChain =
+    requestedChain === ChainType.AVALANCHE ? ChainType.AVALANCHE : ChainType.SOLANA;
+  const isAvalancheTransfer = activeChain === ChainType.AVALANCHE;
+  const avalancheUsdcToken = getChainToken(ChainType.AVALANCHE, "usdc");
+  const assetSymbol = isAvalancheTransfer ? avalancheUsdcToken?.symbol ?? "USDC" : "USDC";
+  const assetDecimals = isAvalancheTransfer
+    ? avalancheUsdcToken?.decimals ?? USDC_DECIMALS
+    : USDC_DECIMALS;
 
   const initialRecipient =
     firstParam(params.address) || firstParam(params.username) || firstParam(params.recipient);
-  const initialAmount = normalizeDecimalInput(firstParam(params.amount), USDC_DECIMALS);
+  const initialAmount = normalizeDecimalInput(firstParam(params.amount), assetDecimals);
 
   const [recipientInput, setRecipientInput] = useState(initialRecipient);
   const [recipientAddress, setRecipientAddress] = useState("");
@@ -75,10 +87,33 @@ export default function SendAmountScreen() {
   const [balance, setBalance] = useState("0.00");
   const [balanceUnits, setBalanceUnits] = useState<bigint>(0n);
   const [isLoadingBalance, setIsLoadingBalance] = useState(true);
+  const [currency, setCurrency] = useState<Currency>("USD");
 
-  const { wallets } = useEmbeddedSolanaWallet();
-  const wallet = wallets?.[0];
-  const walletAddress = wallet?.publicKey ?? null;
+  const { wallets: solanaWallets } = useEmbeddedSolanaWallet();
+  const { wallets: ethereumWallets } = useEmbeddedEthereumWallet();
+  const solanaWallet = solanaWallets?.[0];
+  const avalancheWallet = ethereumWallets?.[0];
+  const walletAddress = isAvalancheTransfer
+    ? avalancheWallet?.address ?? null
+    : solanaWallet?.publicKey ?? null;
+
+  useFocusEffect(
+    useCallback(() => {
+      let isActive = true;
+      const loadCurrency = async () => {
+        try {
+          const selected = await getSelectedCurrency();
+          if (isActive) setCurrency(selected);
+        } catch (error) {
+          console.error("Error loading currency:", error);
+        }
+      };
+      loadCurrency();
+      return () => {
+        isActive = false;
+      };
+    }, [])
+  );
 
   useEffect(() => {
     const trimmed = recipientInput.trim();
@@ -86,6 +121,20 @@ export default function SendAmountScreen() {
       setRecipientAddress("");
       setRecipientUsername("");
       setRecipientStatus("idle");
+      return;
+    }
+
+    if (isAvalancheTransfer) {
+      if (isAddress(trimmed)) {
+        setRecipientAddress(trimmed);
+        setRecipientUsername("");
+        setRecipientStatus("resolved");
+        return;
+      }
+
+      setRecipientAddress("");
+      setRecipientUsername("");
+      setRecipientStatus(trimmed.length >= 42 ? "error" : "idle");
       return;
     }
 
@@ -131,13 +180,44 @@ export default function SendAmountScreen() {
       isActive = false;
       clearTimeout(debounce);
     };
-  }, [recipientInput]);
+  }, [isAvalancheTransfer, recipientInput]);
 
   useEffect(() => {
-    const fetchUSDCBalance = async () => {
-      if (!walletAddress) return;
+    const fetchSelectedBalance = async () => {
+      if (!walletAddress) {
+        setBalanceUnits(0n);
+        setBalance("0");
+        setIsLoadingBalance(false);
+        return;
+      }
       try {
         setIsLoadingBalance(true);
+
+        if (isAvalancheTransfer) {
+          if (!avalancheUsdcToken) {
+            throw new Error("Avalanche USDC is not configured.");
+          }
+
+          const tokenBalance = await fetchErc20EvmBalance(
+            ChainType.AVALANCHE,
+            walletAddress,
+            avalancheUsdcToken.address,
+            avalancheUsdcToken.decimals
+          );
+          const normalizedUnits =
+            parseDecimalToUnits(String(tokenBalance), assetDecimals) ?? 0n;
+
+          setBalanceUnits(normalizedUnits);
+          setBalance(
+            formatTokenUnits(normalizedUnits, assetDecimals, {
+              minFractionDigits: 0,
+              maxFractionDigits: 6,
+              trimTrailingZeros: true,
+            })
+          );
+          return;
+        }
+
         const connection = new Connection(getSolanaRpcUrl(), "confirmed");
         const ownerPublicKey = new PublicKey(walletAddress);
         const usdcMintPublicKey = new PublicKey(USDC_MINT_ADDRESS);
@@ -157,32 +237,31 @@ export default function SendAmountScreen() {
         setBalanceUnits(totalUnits);
         setBalance(
           formatTokenUnits(totalUnits, USDC_DECIMALS, {
-            minFractionDigits: 2,
-            maxFractionDigits: 2,
+            minFractionDigits: 0,
+            maxFractionDigits: USDC_DECIMALS,
+            trimTrailingZeros: true,
           })
         );
       } catch (error) {
-        console.error("Error fetching USDC balance:", error);
+        console.error("Error fetching selected chain balance:", error);
         setBalanceUnits(0n);
-        setBalance("0.00");
+        setBalance("0");
       } finally {
         setIsLoadingBalance(false);
       }
     };
-    fetchUSDCBalance();
-  }, [walletAddress]);
+    void fetchSelectedBalance();
+  }, [assetDecimals, avalancheUsdcToken, isAvalancheTransfer, walletAddress]);
 
   const amountUnits = useMemo(
-    () => parseDecimalToUnits(amount, USDC_DECIMALS),
-    [amount]
+    () => parseDecimalToUnits(amount, assetDecimals),
+    [amount, assetDecimals]
   );
   const isAmountValid = !!amountUnits && amountUnits > 0n;
   const safeAmountUnits = amountUnits ?? 0n;
-  const amountNumber = Number(amount);
-  const equivalentValue =
-    Number.isFinite(amountNumber) && amountNumber > 0
-      ? (amountNumber * FX_RATE).toFixed(2)
-      : "0.00";
+  const currencyLabel = isAvalancheTransfer
+    ? "Fuji USDC transfer"
+    : `Selected currency: ${currency}`;
 
   const recipientDisplay = recipientUsername
     ? `@${recipientUsername}`
@@ -197,33 +276,61 @@ export default function SendAmountScreen() {
     safeAmountUnits <= balanceUnits;
 
   const handleContinue = () => {
+    console.log("[SendAmount] Continue pressed", {
+      recipientInput,
+      recipientAddress,
+      recipientStatus,
+      amount,
+      balance,
+      chain: activeChain,
+    });
     if (!isAmountValid) {
       Alert.alert("Invalid amount", "Please enter an amount greater than 0.");
       return;
     }
     if (amountUnits && amountUnits > balanceUnits) {
-      Alert.alert("Insufficient balance", "You do not have enough USDC.");
+      Alert.alert("Insufficient balance", `You do not have enough ${assetSymbol}.`);
       return;
     }
     if (!recipientAddress) {
-      Alert.alert("Recipient missing", "Enter a valid username or Solana address.");
+      Alert.alert(
+        "Recipient missing",
+        isAvalancheTransfer
+          ? "Enter a valid Avalanche address."
+          : "Enter a valid username or Solana address."
+      );
       return;
     }
-    if (!isValidSolanaAddress(recipientAddress)) {
-      Alert.alert("Invalid recipient", "Recipient address is not a valid Solana address.");
+    if (
+      (!isAvalancheTransfer && !isValidSolanaAddress(recipientAddress)) ||
+      (isAvalancheTransfer && !isAddress(recipientAddress))
+    ) {
+      Alert.alert(
+        "Invalid recipient",
+        isAvalancheTransfer
+          ? "Recipient address is not a valid Avalanche address."
+          : "Recipient address is not a valid Solana address."
+      );
       return;
+    }
+
+    if (isIOS) {
+      void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     }
 
     const recipientName = recipientUsername || recipientInput.trim();
 
-    router.push({
+    router.replace({
       pathname: "/send-confirm",
       params: {
+        chain: activeChain,
+        currency: assetSymbol,
         recipient: recipientName,
         address: recipientAddress,
-        amount: formatTokenUnits(amountUnits ?? 0n, USDC_DECIMALS, {
-          minFractionDigits: 2,
-          maxFractionDigits: USDC_DECIMALS,
+        amount: formatTokenUnits(amountUnits ?? 0n, assetDecimals, {
+          minFractionDigits: 0,
+          maxFractionDigits: assetDecimals,
+          trimTrailingZeros: true,
         }),
       },
     });
@@ -239,199 +346,170 @@ export default function SendAmountScreen() {
     ) : null;
 
   return (
-    <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
-      <SafeAreaView
-        edges={["left", "right", "bottom"]}
-        style={[styles.container, { backgroundColor: palette.background }]}
-      >
-        <View style={styles.header}>
-          <TouchableOpacity
-            accessibilityRole="button"
-            onPress={() => router.back()}
-            style={[
-              styles.iconButton,
-              { backgroundColor: palette.surfaceMuted, borderColor: palette.borderSubtle },
-            ]}
-          >
-            <MaterialIcons name="arrow-back" size={20} color={palette.primaryText} />
-          </TouchableOpacity>
-          <Text style={[styles.title, { color: palette.primaryText }]}>Send</Text>
-          <View style={styles.headerSpacer} />
-        </View>
+    <ScrollView
+      contentInsetAdjustmentBehavior="automatic"
+      style={[
+        styles.container,
+        { backgroundColor: isIOS ? "transparent" : palette.background },
+      ]}
+      contentContainerStyle={styles.containerContent}
+      showsVerticalScrollIndicator={false}
+      keyboardShouldPersistTaps="handled"
+      keyboardDismissMode="on-drag"
+    >
+      <View style={[styles.heroIcon, { backgroundColor: palette.success }]}>
+        <IconSymbol name="person.crop.circle" size={24} color={palette.actionPrimaryText} />
+      </View>
+      <Text style={[styles.subheadline, { color: palette.secondaryText }]} selectable>
+        {isAvalancheTransfer
+          ? "Enter a USDC amount and an Avalanche Fuji address."
+          : "Enter an amount to send to the recipient."}
+      </Text>
 
-        <View style={[styles.heroIcon, { backgroundColor: palette.success }]}>
-          <MaterialIcons name="person" size={22} color={palette.actionPrimaryText} />
-        </View>
-        <Text style={[styles.headline, { color: palette.primaryText }]}>Send to username</Text>
-        <Text style={[styles.subheadline, { color: palette.secondaryText }]}>
-          The recipient will receive the money once they open it and complete onboarding.
+      <View style={styles.inputSection}>
+        <Text style={[styles.inputLabel, { color: palette.secondaryText }]} selectable>
+          {isAvalancheTransfer
+            ? "Enter the recipient's Avalanche address"
+            : "Enter the recipient's username or address"}
         </Text>
-
-        <View style={styles.inputSection}>
-          <Text style={[styles.inputLabel, { color: palette.secondaryText }]}>
-            Enter the recipient's username or address
-          </Text>
-          <View
-            style={[
-              styles.inputRow,
-              { backgroundColor: palette.surface, borderColor: palette.borderSubtle },
-            ]}
-          >
-            <View
-              style={[
-                styles.inputIconWrap,
-                { backgroundColor: palette.surfaceMuted },
-              ]}
-            >
-              <Text style={[styles.inputIconText, { color: palette.secondaryText }]}>@</Text>
-            </View>
-            <TextInput
-              style={[styles.inputField, { color: palette.primaryText }]}
-              value={recipientInput}
-              onChangeText={setRecipientInput}
-              placeholder="Username or Solana address"
-              placeholderTextColor={palette.secondaryText}
-              autoCapitalize="none"
-              autoCorrect={false}
-              keyboardType="default"
-            />
-            <View style={styles.inputStatus}>{statusIcon}</View>
-          </View>
-          {recipientStatus === "error" && (
-            <Text style={[styles.helperText, { color: palette.secondaryText }]}>
-              We could not find that username.
-            </Text>
-          )}
-        </View>
-
         <View
           style={[
-            styles.amountCard,
+            styles.inputRow,
             { backgroundColor: palette.surface, borderColor: palette.borderSubtle },
           ]}
         >
-          <View style={[styles.amountBadge, { backgroundColor: palette.surfaceMuted }]}>
-            <Text style={[styles.amountBadgeText, { color: palette.secondaryText }]}>
-              Transfer amount
-            </Text>
-          </View>
-          <View style={styles.amountRow}>
-            <Text style={[styles.currencySymbol, { color: palette.secondaryText }]}>$</Text>
-            <TextInput
-              style={[styles.amountInput, { color: palette.primaryText }]}
-              value={amount}
-              onChangeText={(text) => setAmount(normalizeDecimalInput(text, USDC_DECIMALS))}
-              keyboardType="decimal-pad"
-              placeholder="0.00"
-              placeholderTextColor={palette.secondaryText}
-            />
-          </View>
-          <Text style={[styles.equivalentText, { color: palette.secondaryText }]}>
-            ~{equivalentValue}
-          </Text>
-          <Text style={[styles.balanceText, { color: palette.secondaryText }]}>
-            {isLoadingBalance ? "Loading balance..." : `Available $${balance} USDC`}
-          </Text>
-        </View>
-
-        <View style={styles.quickRow}>
-          {QUICK_AMOUNTS.map((value) => (
-            <TouchableOpacity
-              key={value}
-              accessibilityRole="button"
-              onPress={() => setAmount(String(value))}
-              style={[
-                styles.quickChip,
-                { backgroundColor: palette.surfaceMuted, borderColor: palette.borderSubtle },
-              ]}
-            >
-              <Text style={[styles.quickChipText, { color: palette.primaryText }]}>
-                ${value}
-              </Text>
-            </TouchableOpacity>
-          ))}
-        </View>
-
-        <View style={styles.metaRow}>
-          <Text style={[styles.metaLabel, { color: palette.secondaryText }]}>Recipient</Text>
-          <Text style={[styles.metaValue, { color: palette.primaryText }]}>
-            {recipientDisplay}
-          </Text>
-        </View>
-        <View style={styles.footer}>
-          <TouchableOpacity
-            accessibilityRole="button"
-            onPress={() => router.back()}
+          <View
             style={[
-              styles.secondaryButton,
-              { backgroundColor: palette.actionSecondary },
+              styles.inputIconWrap,
+              { backgroundColor: palette.surfaceMuted },
             ]}
           >
-            <Text style={[styles.secondaryButtonText, { color: palette.actionSecondaryText }]}>
-              Cancel
+            <Text style={[styles.inputIconText, { color: palette.secondaryText }]}>
+              {isAvalancheTransfer ? "0x" : "@"}
             </Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            accessibilityRole="button"
-            onPress={handleContinue}
-            disabled={!canContinue}
-            style={[
-              styles.primaryButton,
-              { backgroundColor: palette.actionPrimary, opacity: canContinue ? 1 : 0.5 },
-            ]}
-          >
-            <Text style={[styles.primaryButtonText, { color: palette.actionPrimaryText }]}>
-              Continue
-            </Text>
-          </TouchableOpacity>
+          </View>
+          <TextInput
+            style={[styles.inputField, { color: palette.primaryText }]}
+            value={recipientInput}
+            onChangeText={setRecipientInput}
+            placeholder={isAvalancheTransfer ? "0x..." : "Username or Solana address"}
+            placeholderTextColor={palette.secondaryText}
+            autoCapitalize="none"
+            autoCorrect={false}
+            keyboardType="default"
+            autoFocus
+            returnKeyType="next"
+            blurOnSubmit={false}
+            onSubmitEditing={() => amountInputRef.current?.focus()}
+          />
+          <View style={styles.inputStatus}>{statusIcon}</View>
         </View>
-      </SafeAreaView>
-    </TouchableWithoutFeedback>
+        {recipientStatus === "error" && (
+          <Text style={[styles.helperText, { color: palette.secondaryText }]} selectable>
+            {isAvalancheTransfer
+              ? "Enter a valid Avalanche address."
+              : "We could not find that username."}
+          </Text>
+        )}
+      </View>
+
+      <View
+        style={[
+          styles.amountCard,
+          { backgroundColor: palette.surface, borderColor: palette.borderSubtle },
+        ]}
+      >
+        <View style={[styles.amountBadge, { backgroundColor: palette.surfaceMuted }]}>
+          <Text style={[styles.amountBadgeText, { color: palette.secondaryText }]} selectable>
+            Amount to send
+          </Text>
+        </View>
+        <View style={styles.amountRow}>
+          <Text style={[styles.currencySymbol, { color: palette.secondaryText }]}>$</Text>
+          <TextInput
+            style={[styles.amountInput, { color: palette.primaryText }]}
+            value={amount}
+            onChangeText={(text) => setAmount(normalizeDecimalInput(text, assetDecimals))}
+            keyboardType="decimal-pad"
+            placeholder="0.00"
+            placeholderTextColor={palette.secondaryText}
+            ref={amountInputRef}
+          />
+        </View>
+        <Text style={[styles.equivalentText, { color: palette.secondaryText }]} selectable>
+          {currencyLabel}
+        </Text>
+        <Text style={[styles.balanceText, { color: palette.secondaryText }]} selectable>
+          {isLoadingBalance
+            ? "Loading balance..."
+            : isAvalancheTransfer
+              ? `Available $${balance} ${assetSymbol}`
+              : `Available $${balance} USDC`}
+        </Text>
+      </View>
+
+      <View style={styles.metaRow}>
+        <Text style={[styles.metaLabel, { color: palette.secondaryText }]} selectable>
+          Recipient
+        </Text>
+        <Text style={[styles.metaValue, { color: palette.primaryText }]} selectable>
+          {recipientDisplay}
+        </Text>
+      </View>
+      <View style={styles.footer}>
+        <TouchableOpacity
+          accessibilityRole="button"
+          onPress={() => {
+            if (isAvalancheTransfer) {
+              router.back();
+              return;
+            }
+            router.replace("/send-options");
+          }}
+          style={[
+            styles.secondaryButton,
+            { backgroundColor: palette.actionSecondary },
+          ]}
+        >
+          <Text style={[styles.secondaryButtonText, { color: palette.actionSecondaryText }]}>
+            Cancel
+          </Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          accessibilityRole="button"
+          onPress={handleContinue}
+          style={[
+            styles.primaryButton,
+            { backgroundColor: palette.actionPrimary, opacity: canContinue ? 1 : 0.5 },
+          ]}
+        >
+          <Text style={[styles.primaryButtonText, { color: palette.actionPrimaryText }]}>
+            Continue
+          </Text>
+        </TouchableOpacity>
+      </View>
+    </ScrollView>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
-    flex: Platform.OS === "ios" ? 0 : 1,
+    flex: 1,
+  },
+  containerContent: {
     paddingHorizontal: 20,
-    paddingTop: 12,
+    paddingTop: 0,
     paddingBottom: 16,
-  },
-  header: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    marginBottom: 16,
-  },
-  iconButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    alignItems: "center",
-    justifyContent: "center",
-    borderWidth: 1,
-  },
-  headerSpacer: {
-    width: 40,
-  },
-  title: {
-    fontSize: 18,
-    fontWeight: "600",
   },
   heroIcon: {
     width: 44,
     height: 44,
     borderRadius: 22,
+    borderCurve: "continuous",
     alignItems: "center",
     justifyContent: "center",
     alignSelf: "center",
     marginBottom: 12,
-  },
-  headline: {
-    fontSize: 18,
-    fontWeight: "600",
-    textAlign: "center",
-    marginBottom: 6,
   },
   subheadline: {
     fontSize: 13,
@@ -520,21 +598,6 @@ const styles = StyleSheet.create({
     textAlign: "center",
     fontSize: 12,
     marginTop: 6,
-  },
-  quickRow: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    marginBottom: 12,
-  },
-  quickChip: {
-    borderRadius: 999,
-    paddingVertical: 8,
-    paddingHorizontal: 14,
-    borderWidth: 1,
-  },
-  quickChipText: {
-    fontSize: 12,
-    fontWeight: "600",
   },
   metaRow: {
     flexDirection: "row",

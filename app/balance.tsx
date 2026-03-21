@@ -1,107 +1,188 @@
 import { StyleSheet, View, Text, TouchableOpacity, ScrollView } from 'react-native';
-import { useRouter } from 'expo-router';
-import { useEffect, useState } from 'react';
-import { fetchAllTokenBalances, type TokenBalances } from '@/utils/balanceService';
-import { fetchTokenPrices, type TokenPrices } from '@/utils/priceService';
-import { useEmbeddedSolanaWallet } from '@privy-io/expo';
+import { useLocalSearchParams, useRouter } from 'expo-router';
+import { useEffect, useMemo, useState } from 'react';
+import { useEmbeddedEthereumWallet, useEmbeddedSolanaWallet } from '@privy-io/expo';
+
+import { ChainType } from '@/constants/chains';
+import { type ChainFilter } from '@/utils/chainStorage';
+import {
+  fetchMultiChainBalances,
+  type MultiChainBalances,
+} from '@/utils/multiChainBalanceService';
+import { getSponsoredSolanaWallet } from '@/utils/sponsoredWalletStorage';
+
+const EMPTY_BALANCES: MultiChainBalances = {
+  solana: null,
+  avalanche: null,
+  totalUsd: 0,
+};
 
 export default function BalanceScreen() {
   const router = useRouter();
+  const params = useLocalSearchParams();
+  const { wallets: solanaWallets } = useEmbeddedSolanaWallet();
+  const { wallets: ethereumWallets } = useEmbeddedEthereumWallet();
 
-  const [balances, setBalances] = useState<TokenBalances>({ sol: 0, usdc: 0, usdt: 0 });
-  const [prices, setPrices] = useState<TokenPrices>({ sol: 0, usdc: 1, usdt: 1, mon: 0 });
+  const chainParam = Array.isArray(params.chain) ? params.chain[0] : params.chain;
+  const selectedChain: ChainFilter =
+    chainParam === ChainType.SOLANA ||
+    chainParam === ChainType.AVALANCHE ||
+    chainParam === 'all'
+      ? chainParam
+      : 'all';
 
-  const { wallets } = useEmbeddedSolanaWallet();
-  const wallet = wallets?.[0];
+  const [balances, setBalances] = useState<MultiChainBalances>(EMPTY_BALANCES);
+  const [isLoadingBalance, setIsLoadingBalance] = useState(true);
+  const [sponsoredWalletAddress, setSponsoredWalletAddress] = useState<string | null>(null);
 
-  const getAddress = () => {
-    if (wallet?.publicKey) {
-      return wallet.publicKey;
-    }
-    return null;
-  };
+  const solanaAddress = sponsoredWalletAddress ?? solanaWallets?.[0]?.publicKey ?? null;
+  const avalancheAddress = ethereumWallets?.[0]?.address ?? null;
 
   useEffect(() => {
-    const load = async () => {
-      const address = getAddress();
-      if (!address) return;
-      try {
-        const [bals, prs] = await Promise.all([
-          fetchAllTokenBalances(address),
-          fetchTokenPrices(),
-        ]);
-        setBalances(bals);
-        setPrices(prs);
-      } catch (error) {
-        console.error('Failed to load balances', error);
-      }
-    };
-    load();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    getSponsoredSolanaWallet()
+      .then(({ address }) => {
+        setSponsoredWalletAddress(address);
+      })
+      .catch(() => {
+        setSponsoredWalletAddress(null);
+      });
   }, []);
 
-  const totalUsd = balances.sol * prices.sol + balances.usdc * prices.usdc + balances.usdt * prices.usdt;
+  useEffect(() => {
+    const loadBalances = async () => {
+      if (!solanaAddress && !avalancheAddress) {
+        setBalances(EMPTY_BALANCES);
+        setIsLoadingBalance(false);
+        return;
+      }
+
+      try {
+        setIsLoadingBalance(true);
+        const nextBalances = await fetchMultiChainBalances(solanaAddress, avalancheAddress);
+        setBalances(nextBalances);
+      } catch (error) {
+        console.error('Failed to load balances', error);
+        setBalances(EMPTY_BALANCES);
+      } finally {
+        setIsLoadingBalance(false);
+      }
+    };
+
+    void loadBalances();
+  }, [avalancheAddress, solanaAddress]);
+
+  const totalUsd = useMemo(() => {
+    if (selectedChain === ChainType.SOLANA) {
+      return balances.solana?.totalUsd ?? 0;
+    }
+
+    if (selectedChain === ChainType.AVALANCHE) {
+      return balances.avalanche?.totalUsd ?? 0;
+    }
+
+    return balances.totalUsd;
+  }, [balances, selectedChain]);
+
+  const rows = useMemo(() => {
+    const nextRows: { label: string; amount: string; color: string; icon: string }[] = [];
+
+    if (selectedChain !== ChainType.AVALANCHE && balances.solana) {
+      nextRows.push({
+        label: 'Solana (SOL)',
+        amount: balances.solana.nativeBalance.toFixed(4),
+        color: '#7C3AED',
+        icon: '◎',
+      });
+      nextRows.push({
+        label: 'USD Coin (USDC)',
+        amount: balances.solana.usdcBalance.toFixed(2),
+        color: '#2563EB',
+        icon: 'Ⓢ',
+      });
+      nextRows.push({
+        label: 'Tether (USDT)',
+        amount: balances.solana.usdtBalance.toFixed(2),
+        color: '#059669',
+        icon: '₮',
+      });
+    }
+
+    if (selectedChain !== ChainType.SOLANA && balances.avalanche) {
+      nextRows.push({
+        label: 'Avalanche Fuji USDC',
+        amount: balances.avalanche.usdcBalance.toFixed(2),
+        color: '#2563EB',
+        icon: 'Ⓢ',
+      });
+      nextRows.push({
+        label: 'Avalanche Fuji (AVAX)',
+        amount: balances.avalanche.nativeBalance.toFixed(4),
+        color: '#DC2626',
+        icon: 'A',
+      });
+    }
+
+    return nextRows;
+  }, [balances, selectedChain]);
+
   const arsRate = 1500;
   const arsValue = totalUsd * arsRate;
-
   const handleBack = () => router.back();
+
+  const title =
+    selectedChain === ChainType.SOLANA
+      ? 'Solana balance'
+      : selectedChain === ChainType.AVALANCHE
+        ? 'Avalanche Fuji balance'
+        : 'Balance';
 
   return (
     <View style={styles.container}>
-      {/* Header */}
       <View style={styles.header}>
         <TouchableOpacity style={styles.backButton} onPress={handleBack}>
           <Text style={styles.backIcon}>‹</Text>
         </TouchableOpacity>
-        <Text style={styles.title}>Balance</Text>
+        <Text style={styles.title}>{title}</Text>
         <View style={styles.placeholder} />
       </View>
 
       <ScrollView style={{ flex: 1 }}>
         <View style={styles.list}>
-          {/* SOL */}
-          <View style={styles.item}>
-            <View style={styles.left}>
-              <View style={[styles.iconCircle, { backgroundColor: '#7C3AED' }]}>
-                <Text style={styles.iconText}>◎</Text>
-              </View>
-              <Text style={styles.name}>Solana (SOL)</Text>
+          {isLoadingBalance ? (
+            <View style={[styles.item, styles.lastItem]}>
+              <Text style={styles.emptyText}>Loading balances...</Text>
             </View>
-            <Text style={styles.amount}>{balances.sol.toFixed(4)}</Text>
-          </View>
-
-          {/* USDC */}
-          <View style={styles.item}>
-            <View style={styles.left}>
-              <View style={[styles.iconCircle, { backgroundColor: '#2563EB' }]}>
-                <Text style={styles.iconText}>Ⓢ</Text>
-              </View>
-              <Text style={styles.name}>USD Coin (USDC)</Text>
+          ) : rows.length === 0 ? (
+            <View style={[styles.item, styles.lastItem]}>
+              <Text style={styles.emptyText}>No wallet connected for this chain yet.</Text>
             </View>
-            <Text style={styles.amount}>{balances.usdc.toFixed(2)}</Text>
-          </View>
-
-          {/* USDT */}
-          <View style={styles.item}>
-            <View style={styles.left}>
-              <View style={[styles.iconCircle, { backgroundColor: '#059669' }]}>
-                <Text style={styles.iconText}>₮</Text>
+          ) : (
+            <>
+              {rows.map((row) => (
+                <View
+                  key={row.label}
+                  style={styles.item}
+                >
+                  <View style={styles.left}>
+                    <View style={[styles.iconCircle, { backgroundColor: row.color }]}>
+                      <Text style={styles.iconText}>{row.icon}</Text>
+                    </View>
+                    <Text style={styles.name}>{row.label}</Text>
+                  </View>
+                  <Text style={styles.amount}>{row.amount}</Text>
+                </View>
+              ))}
+              <View style={[styles.item, styles.lastItem]}>
+                <View style={styles.left}>
+                  <View style={[styles.iconCircle, { backgroundColor: '#60A5FA' }]}>
+                    <Text style={styles.iconText}>🇦🇷</Text>
+                  </View>
+                  <Text style={styles.name}>Argentine Peso (ARS)</Text>
+                </View>
+                <Text style={styles.amount}>{arsValue.toFixed(2)}</Text>
               </View>
-              <Text style={styles.name}>Tether (USDT)</Text>
-            </View>
-            <Text style={styles.amount}>{balances.usdt.toFixed(2)}</Text>
-          </View>
-
-          {/* ARS */}
-          <View style={[styles.item, styles.lastItem]}>
-            <View style={styles.left}>
-              <View style={[styles.iconCircle, { backgroundColor: '#60A5FA' }]}>
-                <Text style={styles.iconText}>🇦🇷</Text>
-              </View>
-              <Text style={styles.name}>Argentine Peso (ARS)</Text>
-            </View>
-            <Text style={styles.amount}>{arsValue.toFixed(2)}</Text>
-          </View>
+            </>
+          )}
         </View>
       </ScrollView>
     </View>
@@ -140,8 +221,11 @@ const styles = StyleSheet.create({
     fontSize: 28,
     fontWeight: 'bold',
     color: '#000000',
+    textTransform: 'capitalize',
   },
-  placeholder: { width: 50 },
+  placeholder: {
+    width: 50,
+  },
   list: {
     backgroundColor: '#FFFFFF',
     borderRadius: 12,
@@ -157,8 +241,13 @@ const styles = StyleSheet.create({
     borderBottomWidth: 2,
     borderBottomColor: '#000000',
   },
-  lastItem: { borderBottomWidth: 0 },
-  left: { flexDirection: 'row', alignItems: 'center' },
+  lastItem: {
+    borderBottomWidth: 0,
+  },
+  left: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
   iconCircle: {
     width: 50,
     height: 50,
@@ -167,7 +256,24 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginRight: 12,
   },
-  iconText: { fontSize: 22 },
-  name: { fontSize: 16, fontWeight: 'bold', color: '#000000' },
-  amount: { fontSize: 18, fontWeight: 'bold', color: '#000000' },
+  iconText: {
+    fontSize: 22,
+    color: '#FFFFFF',
+    fontWeight: '700',
+  },
+  name: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: '#000000',
+  },
+  amount: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#000000',
+  },
+  emptyText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#000000',
+  },
 });

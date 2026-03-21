@@ -28,7 +28,11 @@ export async function saveSelectedChain(chain: ChainFilter): Promise<void> {
 export async function loadSelectedChain(): Promise<ChainFilter> {
   try {
     const chain = await AsyncStorage.getItem(SELECTED_CHAIN_KEY);
-    if (chain === ChainType.SOLANA || chain === ChainType.MONAD || chain === 'all') {
+    if (
+      chain === ChainType.SOLANA ||
+      chain === ChainType.AVALANCHE ||
+      chain === 'all'
+    ) {
       console.log('[ChainStorage] Loaded selected chain:', chain);
       return chain;
     }

@@ -1,11 +1,11 @@
 /**
- * Service for aggregating balances across multiple chains (Solana and Monad)
+ * Service for aggregating balances across supported chains (Solana)
  */
 
 import { ChainType } from '@/constants/chains';
-import { fetchAllTokenBalances, TokenBalances } from './balanceService';
-import { fetchEvmTokenBalances, EvmTokenBalances } from './evmBalanceService';
-import { fetchTokenPrices, TokenPrices } from './priceService';
+import { fetchAllTokenBalances } from './balanceService';
+import { fetchAvalancheBalances } from './evmBalanceService';
+import { fetchTokenPrices } from './priceService';
 
 export interface ChainBalance {
   chain: ChainType;
@@ -18,27 +18,28 @@ export interface ChainBalance {
 
 export interface MultiChainBalances {
   solana: ChainBalance | null;
-  monad: ChainBalance | null;
+  avalanche: ChainBalance | null;
   totalUsd: number;
 }
 
 /**
- * Fetch and aggregate balances from both Solana and Monad
+ * Fetch and aggregate balances from supported chains
  * Returns balances per chain and total USD value
  */
 export async function fetchMultiChainBalances(
   solanaAddress: string | null,
-  evmAddress: string | null,
+  avalancheAddress: string | null,
   forceFresh: boolean = false
 ): Promise<MultiChainBalances> {
-  // Fetch prices first (shared between chains)
+  // Fetch prices first
   const prices = await fetchTokenPrices(forceFresh);
 
-  // Fetch balances in parallel
-  const [solanaBalances, evmBalances] = await Promise.all([
-    solanaAddress ? fetchAllTokenBalances(solanaAddress, forceFresh) : null,
-    evmAddress ? fetchEvmTokenBalances(evmAddress, forceFresh) : null,
-  ]);
+  const solanaBalances = solanaAddress
+    ? await fetchAllTokenBalances(solanaAddress, forceFresh)
+    : null;
+  const avalancheBalances = avalancheAddress
+    ? await fetchAvalancheBalances(avalancheAddress, forceFresh)
+    : null;
 
   // Calculate Solana chain balance
   let solanaChainBalance: ChainBalance | null = null;
@@ -58,34 +59,25 @@ export async function fetchMultiChainBalances(
     };
   }
 
-  // Calculate Monad chain balance
-  let monadChainBalance: ChainBalance | null = null;
-  if (evmBalances) {
-    // For MON price, we'll use a placeholder until it's on CoinGecko
-    // TODO: Add MON price fetching when available
-    const monPrice = prices.mon || 0;
-    const monadUsd =
-      evmBalances.mon * monPrice +
-      evmBalances.usdc * prices.usdc +
-      evmBalances.usdt * prices.usdt;
-
-    monadChainBalance = {
-      chain: ChainType.MONAD,
-      nativeBalance: evmBalances.mon,
-      nativeSymbol: 'MON',
-      usdcBalance: evmBalances.usdc,
-      usdtBalance: evmBalances.usdt,
-      totalUsd: monadUsd,
+  let avalancheChainBalance: ChainBalance | null = null;
+  if (avalancheBalances) {
+    avalancheChainBalance = {
+      chain: ChainType.AVALANCHE,
+      nativeBalance: avalancheBalances.native,
+      nativeSymbol: 'AVAX',
+      usdcBalance: avalancheBalances.usdc,
+      usdtBalance: 0,
+      totalUsd: avalancheBalances.native * prices.avax + avalancheBalances.usdc * prices.usdc,
     };
   }
 
-  // Calculate total USD across all chains
   const totalUsd =
-    (solanaChainBalance?.totalUsd || 0) + (monadChainBalance?.totalUsd || 0);
+    (solanaChainBalance?.totalUsd || 0) +
+    (avalancheChainBalance?.totalUsd || 0);
 
   return {
     solana: solanaChainBalance,
-    monad: monadChainBalance,
+    avalanche: avalancheChainBalance,
     totalUsd,
   };
 }
@@ -115,21 +107,17 @@ export async function fetchChainBalance(
       usdtBalance: balances.usdt,
       totalUsd,
     };
-  } else if (chainType === ChainType.MONAD) {
-    const balances = await fetchEvmTokenBalances(address, forceFresh);
-    const monPrice = prices.mon || 0;
-    const totalUsd =
-      balances.mon * monPrice +
-      balances.usdc * prices.usdc +
-      balances.usdt * prices.usdt;
+  }
 
+  if (chainType === ChainType.AVALANCHE) {
+    const avalancheBalances = await fetchAvalancheBalances(address, forceFresh);
     return {
-      chain: ChainType.MONAD,
-      nativeBalance: balances.mon,
-      nativeSymbol: 'MON',
-      usdcBalance: balances.usdc,
-      usdtBalance: balances.usdt,
-      totalUsd,
+      chain: ChainType.AVALANCHE,
+      nativeBalance: avalancheBalances.native,
+      nativeSymbol: 'AVAX',
+      usdcBalance: avalancheBalances.usdc,
+      usdtBalance: 0,
+      totalUsd: avalancheBalances.native * prices.avax + avalancheBalances.usdc * prices.usdc,
     };
   }
 

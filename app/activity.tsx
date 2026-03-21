@@ -10,6 +10,7 @@ import { getUsernameByAddress } from '@/services/firestoreService';
 import { useEmbeddedSolanaWallet } from '@privy-io/expo';
 import Svg, { Path } from 'react-native-svg';
 import { formatAmount } from '@/utils/formatAmount';
+import { getExplorerUrl } from '@/constants/chains';
 
 // Icon components
 function SendIcon({ size = 24, color = '#FFF' }: { size?: number; color?: string }) {
@@ -208,7 +209,8 @@ export default function ActivityScreen() {
   };
 
   const openExplorer = (signature: string) => {
-    Linking.openURL(`https://explorer.solana.com/tx/${signature}`);
+    if (!selectedTransaction) return;
+    Linking.openURL(getExplorerUrl(selectedTransaction.chain, signature));
   };
 
   const renderBackdrop = useCallback(

@@ -1,159 +1,162 @@
-/**
- * Service for fetching EVM token balances (Monad)
- */
+import { ChainType, getChainMetadata, getChainToken } from '@/constants/chains';
+import {
+  createPublicClient,
+  formatEther,
+  formatUnits,
+  getAddress,
+  http,
+  isAddress,
+  type Address,
+} from 'viem';
+import { avalancheFuji } from 'viem/chains';
 
-import { createPublicClient, http, formatUnits, type Address } from 'viem';
-import { monadTestnet } from '@/constants/chains';
+const BALANCE_CACHE_DURATION = 30 * 1000;
 
-// ERC-20 ABI for balanceOf
-const ERC20_ABI = [
+const cachedBalances: Record<string, { balance: number; timestamp: number }> = {};
+const cachedTokenBalances: Record<string, { balance: number; timestamp: number }> = {};
+
+const erc20BalanceAbi = [
   {
-    inputs: [{ name: 'account', type: 'address' }],
+    type: 'function',
     name: 'balanceOf',
-    outputs: [{ name: '', type: 'uint256' }],
     stateMutability: 'view',
-    type: 'function',
-  },
-  {
-    inputs: [],
-    name: 'decimals',
-    outputs: [{ name: '', type: 'uint8' }],
-    stateMutability: 'view',
-    type: 'function',
+    inputs: [{ name: 'account', type: 'address' }],
+    outputs: [{ name: 'balance', type: 'uint256' }],
   },
 ] as const;
 
-// Monad testnet token addresses (placeholders - update when actual addresses are known)
-// These will be updated when Monad testnet has official USDC/USDT deployments
-const MONAD_TOKENS = {
-  // USDC and USDT addresses will be added when available on Monad testnet
-  // usdc: '0x...' as Address,
-  // usdt: '0x...' as Address,
-};
-
-export interface EvmTokenBalances {
-  mon: number;
-  usdc: number;
-  usdt: number;
+function getAvalancheRpcUrl(): string {
+  return (
+    process.env.EXPO_PUBLIC_AVALANCHE_RPC ||
+    getChainMetadata(ChainType.AVALANCHE).rpcUrl
+  );
 }
 
-// Balance cache to reduce RPC calls
-let cachedEvmBalances: { [address: string]: { balances: EvmTokenBalances; timestamp: number } } = {};
-const EVM_BALANCE_CACHE_DURATION = 30 * 1000; // 30 seconds
-
-// Create public client for Monad
-const monadClient = createPublicClient({
-  chain: monadTestnet,
-  transport: http(),
-});
-
-/**
- * Fetch native MON balance for an address
- */
-async function fetchMonBalance(address: Address): Promise<number> {
-  try {
-    const balance = await monadClient.getBalance({ address });
-    return Number(formatUnits(balance, 18)); // MON has 18 decimals
-  } catch (error) {
-    console.error('Error fetching MON balance:', error);
-    return 0;
-  }
-}
-
-/**
- * Fetch ERC-20 token balance for an address
- */
-async function fetchErc20Balance(
-  walletAddress: Address,
-  tokenAddress: Address,
-  decimals: number = 6
-): Promise<number> {
-  try {
-    const balance = await monadClient.readContract({
-      address: tokenAddress,
-      abi: ERC20_ABI,
-      functionName: 'balanceOf',
-      args: [walletAddress],
+function getClient(chainType: ChainType) {
+  if (chainType === ChainType.AVALANCHE) {
+    return createPublicClient({
+      chain: avalancheFuji,
+      transport: http(getAvalancheRpcUrl()),
     });
-    return Number(formatUnits(balance, decimals));
-  } catch (error) {
-    console.error('Error fetching ERC-20 balance:', error);
-    return 0;
   }
+
+  throw new Error(`Unsupported EVM chain: ${chainType}`);
 }
 
-/**
- * Fetch all EVM token balances (MON, USDC, USDT) for an address
- * Balances are cached for 30 seconds to avoid rate limiting
- */
-export async function fetchEvmTokenBalances(
+export async function fetchNativeEvmBalance(
+  chainType: ChainType,
   address: string,
   forceFresh: boolean = false
-): Promise<EvmTokenBalances> {
-  // Validate EVM address format
-  if (!address.startsWith('0x') || address.length !== 42) {
-    console.error('Invalid EVM address format:', address);
-    return { mon: 0, usdc: 0, usdt: 0 };
+): Promise<number> {
+  const normalizedInput = address.trim();
+  if (!isAddress(normalizedInput)) {
+    return 0;
   }
 
-  const evmAddress = address as Address;
-
-  // Check cache first
+  const normalizedAddress = getAddress(normalizedInput);
+  const cacheKey = `${chainType}:${normalizedAddress}`;
+  const cached = cachedBalances[cacheKey];
   const now = Date.now();
-  const cached = cachedEvmBalances[address];
 
-  if (!forceFresh && cached && now - cached.timestamp < EVM_BALANCE_CACHE_DURATION) {
-    console.log('Using cached EVM balances for', address);
-    return cached.balances;
+  if (!forceFresh && cached && now - cached.timestamp < BALANCE_CACHE_DURATION) {
+    return cached.balance;
   }
 
   try {
-    // Fetch MON balance
-    const mon = await fetchMonBalance(evmAddress);
+    const client = getClient(chainType);
+    const balance = await client.getBalance({
+      address: normalizedAddress as Address,
+    });
+    const formattedBalance = Number(formatEther(balance));
 
-    // USDC and USDT are not yet deployed on Monad testnet
-    // When they are, uncomment and update the addresses:
-    // const [usdc, usdt] = await Promise.all([
-    //   fetchErc20Balance(evmAddress, MONAD_TOKENS.usdc, 6),
-    //   fetchErc20Balance(evmAddress, MONAD_TOKENS.usdt, 6),
-    // ]);
-
-    const balances: EvmTokenBalances = {
-      mon,
-      usdc: 0, // Will be updated when tokens are available
-      usdt: 0, // Will be updated when tokens are available
-    };
-
-    // Update cache
-    cachedEvmBalances[address] = {
-      balances,
+    cachedBalances[cacheKey] = {
+      balance: formattedBalance,
       timestamp: now,
     };
 
-    console.log('Fetched fresh EVM balances for', address, balances);
-    return balances;
-  } catch (error: any) {
-    console.error('Error fetching EVM token balances:', error);
+    return formattedBalance;
+  } catch (error) {
+    console.error(`[EvmBalance] Failed to fetch ${chainType} balance`, error);
 
-    // On rate limit, return cached data if available
-    if (error?.message?.includes('429') && cached) {
-      console.log('Rate limited, using cached EVM balances');
-      return cached.balances;
-    }
-
-    // Return cached data if available, otherwise zeros
     if (cached) {
-      console.log('Returning stale cached EVM balances due to error');
-      return cached.balances;
+      return cached.balance;
     }
 
-    return { mon: 0, usdc: 0, usdt: 0 };
+    return 0;
   }
 }
 
-/**
- * Clear the EVM balance cache
- */
-export function clearEvmBalanceCache(): void {
-  cachedEvmBalances = {};
+export async function fetchErc20EvmBalance(
+  chainType: ChainType,
+  walletAddress: string,
+  tokenAddress: string,
+  decimals: number,
+  forceFresh: boolean = false
+): Promise<number> {
+  const normalizedWallet = walletAddress.trim();
+  const normalizedToken = tokenAddress.trim();
+
+  if (!isAddress(normalizedWallet) || !isAddress(normalizedToken)) {
+    return 0;
+  }
+
+  const wallet = getAddress(normalizedWallet);
+  const token = getAddress(normalizedToken);
+  const cacheKey = `${chainType}:${token}:${wallet}`;
+  const cached = cachedTokenBalances[cacheKey];
+  const now = Date.now();
+
+  if (!forceFresh && cached && now - cached.timestamp < BALANCE_CACHE_DURATION) {
+    return cached.balance;
+  }
+
+  try {
+    const client = getClient(chainType);
+    const balance = await client.readContract({
+      address: token as Address,
+      abi: erc20BalanceAbi,
+      functionName: 'balanceOf',
+      args: [wallet as Address],
+    });
+    const formattedBalance = Number(formatUnits(balance, decimals));
+
+    cachedTokenBalances[cacheKey] = {
+      balance: formattedBalance,
+      timestamp: now,
+    };
+
+    return formattedBalance;
+  } catch (error) {
+    console.error(`[EvmBalance] Failed to fetch ${chainType} token balance`, error);
+
+    if (cached) {
+      return cached.balance;
+    }
+
+    return 0;
+  }
+}
+
+export async function fetchAvalancheBalances(
+  address: string,
+  forceFresh: boolean = false
+): Promise<{ native: number; usdc: number }> {
+  const usdc = getChainToken(ChainType.AVALANCHE, 'usdc');
+  const [nativeBalance, usdcBalance] = await Promise.all([
+    fetchNativeEvmBalance(ChainType.AVALANCHE, address, forceFresh),
+    usdc
+      ? fetchErc20EvmBalance(
+          ChainType.AVALANCHE,
+          address,
+          usdc.address,
+          usdc.decimals,
+          forceFresh
+        )
+      : Promise.resolve(0),
+  ]);
+
+  return {
+    native: nativeBalance,
+    usdc: usdcBalance,
+  };
 }

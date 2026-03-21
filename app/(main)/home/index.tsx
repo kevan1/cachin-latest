@@ -12,25 +12,44 @@ import { getUsername, saveUsername, getSelectedCurrency, Currency } from '@/util
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { fetchMultiChainBalances } from '@/utils/multiChainBalanceService';
 import { fetchArsPrice } from '@/utils/priceService';
-import { ChainType } from '@/constants/chains';
+import { ChainType, getExplorerUrl, getChainSymbol } from '@/constants/chains';
 import { ChainFilter, loadSelectedChain, saveSelectedChain } from '@/utils/chainStorage';
 import { THEMES, MESH_POINTS } from '@/constants/themes';
 import { ThemeSelectorSheet } from '@/components/ThemeSelectorSheet';
 import Svg, { Path } from 'react-native-svg';
-import { usePrivy, useEmbeddedSolanaWallet, useEmbeddedEthereumWallet, useSessionSigners, useIdentityToken, getAccessToken } from '@privy-io/expo';
+import {
+  getAccessToken,
+  useEmbeddedEthereumWallet,
+  useEmbeddedSolanaWallet,
+  useIdentityToken,
+  usePrivy,
+  useSessionSigners,
+} from '@privy-io/expo';
 import QRCode from 'react-native-qrcode-svg';
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { LinearGradient } from "expo-linear-gradient";
 import { GlassView } from "@/components/ui/GlassView";
+import { ANDROID_GLASS_TAB_HEIGHT } from "@/components/GlassTabBar";
 import { IconSymbol } from "@/components/ui/icon-symbol";
 import { PlatformPressable } from "@react-navigation/elements";
 import { useToast } from "heroui-native";
 import { MeshGradientView } from "@wilmxre/react-native-mesh-gradient/src";
 import { buildSolanaPayUri, createSolanaPayReferences, SOLANA_USDC_MINT } from "@/utils/solanaPay";
+import {
+  isDuplicateSessionSignerError,
+  isGaslessAuthorizationRequiredError,
+} from "@/utils/privyGasless";
 import { ensureSponsoredSolanaWallet } from "@/utils/privySponsorship";
+import {
+  getEmbeddedSolanaWalletAddress,
+  getSolanaProviderAddress,
+} from "@/utils/privySolanaWallet";
 import { getSponsoredSolanaWallet, setSponsoredSolanaWallet } from "@/utils/sponsoredWalletStorage";
+import { Image } from "expo-image";
+import { buildAvatarUrl, resolveAvatarSeed } from "@/utils/avatar";
 
 const MESH_DIMENSION = 3;
+type ReceiveAsset = 'usdc' | 'sol' | 'avax';
 
 
 // Icon components using LineIcons style
@@ -136,9 +155,16 @@ export default function HomeScreen() {
   const topInset = Math.max(insets.top, StatusBar.currentHeight ?? 0);
   const androidHeaderOffset = Math.max(6, topInset + 6) + 52;
   const { user, isReady } = usePrivy();
-  const { wallets: solanaWallets } = useEmbeddedSolanaWallet();
+  const {
+    wallets: ethereumWallets,
+    create: createEthereumWallet,
+  } = useEmbeddedEthereumWallet();
+  const {
+    wallets: solanaWallets,
+    create: createSolanaWallet,
+    status: solanaWalletStatus,
+  } = useEmbeddedSolanaWallet();
   const { addSessionSigners, removeSessionSigners } = useSessionSigners();
-  const { wallets: evmWallets } = useEmbeddedEthereumWallet();
   const { getIdentityToken } = useIdentityToken();
   const { toast } = useToast();
   const didLogUserJwt = useRef(false);
@@ -149,13 +175,14 @@ export default function HomeScreen() {
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [selectedTransaction, setSelectedTransaction] = useState<Transaction | null>(null);
   const [username, setUsername] = useState<string>('User');
+  const [avatarError, setAvatarError] = useState(false);
   const [addressToUsername, setAddressToUsername] = useState<{ [address: string]: string }>({});
   const [isBalanceVisible, setIsBalanceVisible] = useState<boolean>(true);
   const [hideWallet, setHideWallet] = useState(false);
-  const [receiveAsset, setReceiveAsset] = useState<'usdc' | 'sol'>('usdc');
+  const [receiveAsset, setReceiveAsset] = useState<ReceiveAsset>('usdc');
   const [currency, setCurrency] = useState<Currency>('USD');
   const [arsPrice, setArsPrice] = useState<number>(0);
-  const [sponsoredWalletId, setSponsoredWalletId] = useState<string | null>(null);
+  const [, setSponsoredWalletId] = useState<string | null>(null);
   const [sponsoredWalletAddress, setSponsoredWalletAddress] = useState<string | null>(null);
   const [sponsoredWalletLoaded, setSponsoredWalletLoaded] = useState(false);
 
@@ -199,76 +226,88 @@ export default function HomeScreen() {
 
         // Wallet API endpoints like /v1/wallets/authenticate expect the user's *access token* ("user_jwt") most of the time.
         // Copy the access token by default to avoid confusion. (ID token is still logged above when available.)
-        await Clipboard.setStringAsync(accessToken);
-        toast.show("Copied PRIVY_ACCESS_TOKEN to clipboard.");
+        if (accessToken) {
+          await Clipboard.setStringAsync(accessToken);
+          toast.show("Copied PRIVY_ACCESS_TOKEN to clipboard.");
+        }
       })
       .catch((error) => {
         console.warn("[Privy] Failed to fetch access token", error);
       });
   }, [getIdentityToken, isReady, toast, user?.id]);
 
-  const handleAuthorizeGasless = useCallback(async () => {
-    try {
-      const address =
-        sponsoredWalletAddress ||
-        (solanaWallets && solanaWallets.length > 0
-          ? solanaWallets[0]?.publicKey ?? solanaWallets[0]?.address
-          : null);
-      if (!address) {
-        toast.show("No Solana address available.");
-        return;
-      }
+  const embeddedSolanaAddress = useMemo(() => {
+    return getEmbeddedSolanaWalletAddress(solanaWallets);
+  }, [solanaWallets]);
+
+  const embeddedAvalancheAddress = useMemo(() => {
+    return ethereumWallets[0]?.address ?? null;
+  }, [ethereumWallets]);
+
+  const authorizeGaslessForAddress = useCallback(
+    async (address: string, options?: { silent?: boolean }) => {
       if (!keyQuorumId) {
-        toast.show(
+        throw new Error(
           "Missing EXPO_PUBLIC_PRIVY_KEY_QUORUM_ID. Add it to .env and restart Metro."
         );
-        return;
       }
 
-      console.log("[Home] Adding session signer", {
-        address,
-        keyQuorumId,
-        policyIds: sessionSignerPolicyIds,
-        sponsoredWalletId,
-      });
-      await addSessionSigners({
-        address,
-        signers: [
-          {
-            signerId: keyQuorumId,
-            policyIds: sessionSignerPolicyIds,
-          },
-        ],
-      });
+      try {
+        console.log("[Home] Adding session signer", {
+          address,
+          keyQuorumId,
+          policyIds: sessionSignerPolicyIds,
+        });
+        await addSessionSigners({
+          address,
+          signers: [
+            {
+              signerId: keyQuorumId,
+              policyIds: sessionSignerPolicyIds,
+            },
+          ],
+        });
 
-      toast.show("Gasless authorization enabled for this wallet.");
+        if (!options?.silent) {
+          toast.show("Gasless authorization enabled for this wallet.");
+        }
+      } catch (error) {
+        if (isDuplicateSessionSignerError(error)) {
+          if (!options?.silent) {
+            toast.show("Gasless authorization is already enabled for this wallet.");
+          }
+          return;
+        }
+        throw error;
+      }
+    },
+    [addSessionSigners, keyQuorumId, sessionSignerPolicyIds, toast]
+  );
+
+  const handleAuthorizeGasless = useCallback(async () => {
+    try {
+      const address = embeddedSolanaAddress;
+      if (!address) {
+        toast.show("No embedded Solana wallet available.");
+        return;
+      }
+      await authorizeGaslessForAddress(address);
     } catch (error: any) {
       const message = error instanceof Error ? error.message : String(error);
-      if (message.includes("Duplicate signer")) {
-        toast.show("Gasless authorization is already enabled for this wallet.");
-        return;
-      }
       console.error("[Home] Failed to add session signer", error);
       toast.show(message || "Failed to authorize wallet.");
     }
   }, [
-    addSessionSigners,
-    keyQuorumId,
-    sessionSignerPolicyIds,
-    solanaWallets,
-    sponsoredWalletAddress,
+    authorizeGaslessForAddress,
+    embeddedSolanaAddress,
     toast,
   ]);
 
   const handleRevokeGasless = useCallback(async () => {
     try {
-      const address =
-        sponsoredWalletAddress ||
-        (solanaWallets && solanaWallets.length > 0
-          ? solanaWallets[0]?.publicKey ?? solanaWallets[0]?.address
-          : null);
+      const address = embeddedSolanaAddress;
       if (!address) {
-        toast.show("No Solana address available.");
+        toast.show("No embedded Solana wallet available.");
         return;
       }
       await removeSessionSigners({ address });
@@ -278,10 +317,8 @@ export default function HomeScreen() {
       toast.show(error instanceof Error ? error.message : "Failed to revoke gasless.");
     }
   }, [
+    embeddedSolanaAddress,
     removeSessionSigners,
-    solanaWallets,
-    sponsoredWalletAddress,
-    sponsoredWalletId,
     toast,
   ]);
   
@@ -298,7 +335,7 @@ export default function HomeScreen() {
   const cryptoReceiveSnapPoints = useMemo(() => ['70%'], []);
   const fiatReceiveSnapPoints = useMemo(() => ['75%'], []);
   const isIOS = process.env.EXPO_OS === "ios";
-  const tabBarHeight = isIOS ? 49 : 56;
+  const tabBarHeight = isIOS ? 49 : ANDROID_GLASS_TAB_HEIGHT;
   const sheetBottomPadding = Math.max(24, insets.bottom + tabBarHeight + 12);
   
   // Load selected chain preference
@@ -334,30 +371,19 @@ export default function HomeScreen() {
       loadData();
     }, [])
   );
-  
-  // Get the first EVM address
-  const getEvmAddress = () => {
-    if (evmWallets && evmWallets.length > 0) {
-      const wallet = evmWallets[0];
-      return wallet.address || null;
-    }
-    return null;
-  };
-  
-  const getEvmAddressShort = () => {
-    const addr = getEvmAddress();
-    if (addr) {
-      return `${addr.slice(0, 4)}...${addr.slice(-4)}`;
-    }
-    return null;
+
+  const formatCompactAddress = (address: string | null, start = 4, end = 4) => {
+    if (!address) return null;
+    return `${address.slice(0, start)}...${address.slice(-end)}`;
   };
   
   // Get display address based on selected chain
   const getDisplayAddress = () => {
-    if (selectedChain === ChainType.MONAD) {
-      return getEvmAddressShort();
+    if (selectedChain === ChainType.AVALANCHE) {
+      return getAvalancheAddress();
     }
-    return getSolanaAddress();
+
+    return getSolanaAddress() ?? getAvalancheAddress();
   };
   
   // Handle chain selection
@@ -418,87 +444,132 @@ export default function HomeScreen() {
   }, [solanaWallets, sponsoredWalletAddress]);
 
   const walletInitAttempted = useRef(false);
+  const walletCreationAttempted = useRef(false);
+  const avalancheWalletInitAttempted = useRef(false);
+
+  useEffect(() => {
+    walletInitAttempted.current = false;
+    walletCreationAttempted.current = false;
+    avalancheWalletInitAttempted.current = false;
+  }, [user?.id]);
+
+  useEffect(() => {
+    if (!isReady || !user?.id || avalancheWalletInitAttempted.current) return;
+
+    if (embeddedAvalancheAddress) {
+      avalancheWalletInitAttempted.current = true;
+      return;
+    }
+
+    if (typeof createEthereumWallet !== 'function') {
+      console.warn('[Home] No embedded Avalanche wallet available and create() is unavailable.');
+      return;
+    }
+
+    let isCancelled = false;
+    avalancheWalletInitAttempted.current = true;
+
+    void createEthereumWallet().catch((error) => {
+      if (isCancelled) return;
+      avalancheWalletInitAttempted.current = false;
+      console.error('[Home] Failed to prepare Avalanche wallet', error);
+    });
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [createEthereumWallet, embeddedAvalancheAddress, isReady, user?.id]);
+
   useEffect(() => {
     if (!sponsoredWalletLoaded) return;
     if (!isReady || !user?.id || walletInitAttempted.current) return;
-    walletInitAttempted.current = true;
 
-    const walletAddress =
-      solanaWallets && solanaWallets.length > 0
-        ? solanaWallets[0]?.publicKey ?? solanaWallets[0]?.address
-        : undefined;
+    const walletIsBusy =
+      solanaWalletStatus === "creating" ||
+      solanaWalletStatus === "connecting" ||
+      solanaWalletStatus === "reconnecting";
 
-    ensureSponsoredSolanaWallet({
-      userId: user.id,
-      walletId: sponsoredWalletId ?? undefined,
-      walletAddress,
-    })
-      .then((wallet) => {
-        console.log("[Home] ✅ Sponsored wallet ready", wallet?.address);
-        const nextId = wallet?.walletId ?? null;
-        const nextAddress = wallet?.publicKey ?? wallet?.address ?? null;
-        setSponsoredWalletId(nextId);
-        setSponsoredWalletAddress(nextAddress);
-        void setSponsoredSolanaWallet({ id: nextId, address: nextAddress });
-      })
-      .catch((error) => {
-        console.error("[Home] ❌ Failed to ensure sponsored wallet", error);
-      });
-  }, [isReady, solanaWallets, sponsoredWalletId, sponsoredWalletLoaded, user]);
-  
-  // Get the first Solana address
-  const getSolanaAddress = () => {
-    console.log('Solana Wallets:', solanaWallets);
-    if (sponsoredWalletAddress) {
-      return `${sponsoredWalletAddress.slice(0, 4)}...${sponsoredWalletAddress.slice(-4)}`;
-    }
-    if (solanaWallets && solanaWallets.length > 0) {
-      const wallet = solanaWallets[0];
-      console.log('First Solana wallet:', wallet);
-      if (wallet.publicKey) {
-        const addr = wallet.publicKey;
-        return `${addr.slice(0, 4)}...${addr.slice(-4)}`;
+    let isCancelled = false;
+
+    const prepareSponsoredWallet = async () => {
+      let walletAddress = embeddedSolanaAddress;
+
+      if (!walletAddress) {
+        if (walletIsBusy) return;
+        if (walletCreationAttempted.current) return;
+        if (typeof createSolanaWallet !== "function") {
+          console.warn("[Home] No embedded Solana wallet available and create() is unavailable.");
+          return;
+        }
+
+        walletCreationAttempted.current = true;
+        console.log("[Home] No embedded Solana wallet found. Creating one...");
+        const provider = await createSolanaWallet({ recoveryMethod: "privy" });
+        walletAddress = getSolanaProviderAddress(provider);
+
+        if (!walletAddress) {
+          console.log("[Home] Embedded Solana wallet created. Waiting for local wallet state to sync.");
+          return;
+        }
       }
-    }
-    return null;
-  };
-  
-  const solanaAddress = getSolanaAddress();
-  console.log('Solana address to display:', solanaAddress);
-  
-  // Fetch all token balances and calculate USD value
-  const fetchBalance = async (forceFresh: boolean = false) => {
-    try {
-      const solAddress = getFullSolanaAddress();
-      const evmAddr = getEvmAddress();
-      
-      const multiBalances = await fetchMultiChainBalances(
-        solAddress,
-        evmAddr,
-        forceFresh
-      );
-      
-      console.log('Multi-chain balances:', multiBalances);
-      
-      // Calculate total based on selected chain filter
-      let totalUsd = 0;
-      if (selectedChain === 'all') {
-        totalUsd = multiBalances.totalUsd;
-      } else if (selectedChain === ChainType.SOLANA && multiBalances.solana) {
-        totalUsd = multiBalances.solana.totalUsd;
-      } else if (selectedChain === ChainType.MONAD && multiBalances.monad) {
-        totalUsd = multiBalances.monad.totalUsd;
+
+      if (keyQuorumId) {
+        await authorizeGaslessForAddress(walletAddress, { silent: true });
       }
-      
-      setUsdBalance(totalUsd.toFixed(2));
-      console.log('Total USD balance:', totalUsd.toFixed(2));
-    } catch (error) {
-      console.error('Error fetching balance:', error);
-      setUsdBalance('0.00');
-    }
-  };
-  
-  // Get full Solana address for balance fetch
+
+      walletInitAttempted.current = true;
+
+      let wallet;
+      try {
+        wallet = await ensureSponsoredSolanaWallet({
+          userId: user.id,
+          walletAddress,
+        });
+      } catch (error) {
+        if (keyQuorumId && isGaslessAuthorizationRequiredError(error)) {
+          await authorizeGaslessForAddress(walletAddress, { silent: true });
+          wallet = await ensureSponsoredSolanaWallet({
+            userId: user.id,
+            walletAddress,
+          });
+        } else {
+          throw error;
+        }
+      }
+
+      if (isCancelled) return;
+
+      console.log("[Home] ✅ Sponsored wallet ready", wallet?.address);
+      const nextId = wallet?.walletId ?? null;
+      const nextAddress = wallet?.publicKey ?? wallet?.address ?? null;
+      setSponsoredWalletId(nextId);
+      setSponsoredWalletAddress(nextAddress);
+      await setSponsoredSolanaWallet({ id: nextId, address: nextAddress });
+    };
+
+    void prepareSponsoredWallet().catch((error) => {
+      if (isCancelled) return;
+      walletInitAttempted.current = false;
+      if (!embeddedSolanaAddress) {
+        walletCreationAttempted.current = false;
+      }
+      console.error("[Home] ❌ Failed to prepare sponsored wallet", error);
+    });
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [
+    createSolanaWallet,
+    embeddedSolanaAddress,
+    isReady,
+    keyQuorumId,
+    solanaWalletStatus,
+    sponsoredWalletLoaded,
+    authorizeGaslessForAddress,
+    user?.id,
+  ]);
+
   const getFullSolanaAddress = () => {
     if (sponsoredWalletAddress) {
       return sponsoredWalletAddress;
@@ -510,24 +581,112 @@ export default function HomeScreen() {
     return null;
   };
 
+  const getFullAvalancheAddress = () => {
+    return embeddedAvalancheAddress;
+  };
+
+  const getSolanaAddress = () => {
+    return formatCompactAddress(getFullSolanaAddress());
+  };
+
+  const getAvalancheAddress = () => {
+    return formatCompactAddress(getFullAvalancheAddress(), 6, 4);
+  };
+
   const fullSolanaAddress = getFullSolanaAddress();
+  const fullAvalancheAddress = getFullAvalancheAddress();
+  const solanaAddress = getSolanaAddress();
+  const avalancheAddress = getAvalancheAddress();
+
+  console.log('Solana address to display:', solanaAddress);
+  console.log('Avalanche address to display:', avalancheAddress);
+
+  // Fetch all token balances and calculate USD value
+  const fetchBalance = async (forceFresh: boolean = false) => {
+    try {
+      const multiBalances = await fetchMultiChainBalances(
+        fullSolanaAddress,
+        fullAvalancheAddress,
+        forceFresh
+      );
+
+      console.log('Multi-chain balances:', multiBalances);
+
+      let totalUsd = 0;
+      if (selectedChain === 'all') {
+        totalUsd = multiBalances.totalUsd;
+      } else if (selectedChain === ChainType.SOLANA && multiBalances.solana) {
+        totalUsd = multiBalances.solana.totalUsd;
+      } else if (selectedChain === ChainType.AVALANCHE && multiBalances.avalanche) {
+        totalUsd = multiBalances.avalanche.totalUsd;
+      }
+
+      setUsdBalance(totalUsd.toFixed(2));
+      console.log('Total USD balance:', totalUsd.toFixed(2));
+    } catch (error) {
+      console.error('Error fetching balance:', error);
+      setUsdBalance('0.00');
+    }
+  };
+
+  const avatarSeed = useMemo(
+    () =>
+      resolveAvatarSeed({
+        username,
+        userId: user?.id,
+        address: fullSolanaAddress,
+      }),
+    [fullSolanaAddress, user?.id, username]
+  );
+  const avatarUri = useMemo(() => buildAvatarUrl(avatarSeed, 96), [avatarSeed]);
+
+  useEffect(() => {
+    setAvatarError(false);
+  }, [avatarUri]);
 
   const solanaPayReferences = useMemo(
     () => (fullSolanaAddress ? createSolanaPayReferences(1) : []),
-    [fullSolanaAddress, receiveAsset]
+    [fullSolanaAddress]
   );
+
+  const solanaReceiveAsset = receiveAsset === 'sol' ? 'sol' : 'usdc';
 
   const solanaPayUri = useMemo(() => {
     if (!fullSolanaAddress) return '';
     return buildSolanaPayUri({
       recipient: fullSolanaAddress,
-      splToken: receiveAsset === 'usdc' ? SOLANA_USDC_MINT : undefined,
+      splToken: solanaReceiveAsset === 'usdc' ? SOLANA_USDC_MINT : undefined,
       references: solanaPayReferences,
       label: 'Cachin',
-      message: receiveAsset === 'usdc' ? 'Pay with USDC' : 'Pay with SOL',
-      memo: receiveAsset === 'usdc' ? 'cachin-usdc' : 'cachin-sol',
+      message: solanaReceiveAsset === 'usdc' ? 'Pay with USDC' : 'Pay with SOL',
+      memo: solanaReceiveAsset === 'usdc' ? 'cachin-usdc' : 'cachin-sol',
     });
-  }, [fullSolanaAddress, receiveAsset, solanaPayReferences]);
+  }, [fullSolanaAddress, solanaPayReferences, solanaReceiveAsset]);
+
+  const isAvalancheSelected = selectedChain === ChainType.AVALANCHE;
+
+  useEffect(() => {
+    if (isAvalancheSelected && receiveAsset === 'sol') {
+      setReceiveAsset('usdc');
+      return;
+    }
+
+    if (!isAvalancheSelected && receiveAsset === 'avax') {
+      setReceiveAsset('usdc');
+    }
+  }, [isAvalancheSelected, receiveAsset]);
+
+  const activeReceiveAddress = isAvalancheSelected
+    ? fullAvalancheAddress
+    : fullSolanaAddress;
+  const activeReceiveQrValue = isAvalancheSelected
+    ? fullAvalancheAddress || 'No wallet'
+    : solanaPayUri || fullSolanaAddress || 'No wallet';
+  const activeReceiveSubtitle = isAvalancheSelected
+    ? receiveAsset === 'avax'
+      ? 'Scan with an Avalanche Fuji wallet. Send test AVAX to this address.'
+      : 'Scan with an Avalanche Fuji wallet. Send Fuji USDC to this address.'
+    : 'Scan with a Solana Pay wallet. USDC is preferred, SOL is supported.';
   
   // Fetch transactions and resolve usernames
   const fetchTransactions = useCallback(async (address: string) => {
@@ -567,15 +726,19 @@ export default function HomeScreen() {
   const onRefresh = useCallback(async () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     const fullAddress = getFullSolanaAddress();
-    if (!fullAddress) return;
+    const avalancheAddress = getFullAvalancheAddress();
+    if (!fullAddress && !avalancheAddress) return;
     
     setIsRefreshing(true);
     // Clear cache to force fresh fetch
     await clearTransactions();
-    await Promise.all([
-      fetchBalance(true), // Force fresh prices on manual refresh
-      fetchTransactions(fullAddress),
-    ]);
+    const refreshTasks: Promise<unknown>[] = [
+      fetchBalance(true),
+    ];
+    if (fullAddress) {
+      refreshTasks.push(fetchTransactions(fullAddress));
+    }
+    await Promise.all(refreshTasks);
     setIsRefreshing(false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [fetchBalance, fetchTransactions]);
@@ -583,22 +746,25 @@ export default function HomeScreen() {
   // Fetch balance and transactions when wallet address is available
   useEffect(() => {
     const fullAddress = getFullSolanaAddress();
-    if (!fullAddress) return;
-    
+    const avalancheAddress = getFullAvalancheAddress();
+    if (!fullAddress && !avalancheAddress) return;
+
     // Initial fetch
     fetchBalance();
-    fetchTransactions(fullAddress);
-    
-    // Start polling for new transactions
-    const stopPolling = startTransactionPolling(
-      fullAddress,
-      120000, // Poll every 2 minutes to avoid rate limits
-      (newTransaction) => {
-        console.log('New transaction received:', newTransaction);
-        // Refresh transactions list
-        fetchTransactions(fullAddress);
-      }
-    );
+    if (fullAddress) {
+      fetchTransactions(fullAddress);
+    }
+
+    const stopPolling = fullAddress
+      ? startTransactionPolling(
+          fullAddress,
+          120000,
+          (newTransaction) => {
+            console.log('New transaction received:', newTransaction);
+            fetchTransactions(fullAddress);
+          }
+        )
+      : () => {};
     
     // Refresh balance every 2 minutes (less aggressive to avoid rate limits)
     const balanceInterval = setInterval(() => {
@@ -610,7 +776,7 @@ export default function HomeScreen() {
       stopPolling();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [solanaWallets, evmWallets, selectedChain]);
+  }, [embeddedAvalancheAddress, solanaWallets, selectedChain, sponsoredWalletAddress]);
   
   // Format transaction for display
   const formatTransaction = (tx: Transaction) => {
@@ -665,9 +831,17 @@ export default function HomeScreen() {
   const selectedChainLabel =
     selectedChain === "all"
       ? "All chains"
-      : selectedChain === ChainType.SOLANA
-        ? "Solana"
-        : "Monad";
+      : selectedChain === ChainType.AVALANCHE
+        ? "Avalanche Fuji"
+        : "Solana";
+
+  const getSelectedWalletAddress = () => {
+    if (selectedChain === ChainType.AVALANCHE) {
+      return fullAvalancheAddress;
+    }
+
+    return fullSolanaAddress ?? (selectedChain === 'all' ? fullAvalancheAddress : null);
+  };
 
   const handleAdd = () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
@@ -676,11 +850,22 @@ export default function HomeScreen() {
 
   const handleWithdraw = () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    if (selectedChain === ChainType.AVALANCHE) {
+      showToast('Avalanche withdraw is coming soon. Switch to Solana to continue.');
+      return;
+    }
     router.push('/withdraw');
   };
 
   const handleSend = () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    if (selectedChain === ChainType.AVALANCHE) {
+      router.push({
+        pathname: "/send-amount",
+        params: { chain: ChainType.AVALANCHE },
+      });
+      return;
+    }
     if (isIOS) {
       router.push("/send-options");
       return;
@@ -691,7 +876,10 @@ export default function HomeScreen() {
 
   const handleBalance = () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    router.push('/balance');
+    router.push({
+      pathname: '/balance',
+      params: { chain: selectedChain },
+    });
   };
 
   const showToast = useCallback(
@@ -703,19 +891,15 @@ export default function HomeScreen() {
 
   const handleCopyAddress = async () => {
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-    let addressToCopy = null;
-    
-    if (selectedChain === ChainType.MONAD) {
-      addressToCopy = getEvmAddress();
-    } else {
-      // Default to Solana for 'solana' or 'all'
-      addressToCopy = getFullSolanaAddress();
-    }
+    const addressToCopy = getSelectedWalletAddress();
 
     if (addressToCopy) {
       await Clipboard.setStringAsync(addressToCopy);
       showToast('Address copied to clipboard');
+      return;
     }
+
+    showToast('Wallet not found. Connect your wallet first.');
   };
 
   const handleToggleBalanceHidden = () => {
@@ -725,11 +909,11 @@ export default function HomeScreen() {
 
   const handleCopyReceiveAddress = async () => {
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-    if (solanaPayUri) {
+    if (!isAvalancheSelected && solanaPayUri) {
       await Clipboard.setStringAsync(solanaPayUri);
       showToast('Payment link copied to clipboard');
-    } else if (fullSolanaAddress) {
-      await Clipboard.setStringAsync(fullSolanaAddress);
+    } else if (activeReceiveAddress) {
+      await Clipboard.setStringAsync(activeReceiveAddress);
       showToast('Address copied to clipboard');
     } else {
       showToast('Wallet not found. Connect your wallet first.');
@@ -748,6 +932,10 @@ export default function HomeScreen() {
   };
   
   const handleTransactionPress = (tx: Transaction) => {
+    if (selectedChain === ChainType.AVALANCHE) {
+      showToast('Avalanche activity is coming soon. Switch to Solana to view transaction history.');
+      return;
+    }
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     setSelectedTransaction(tx);
     bottomSheetRef.current?.expand();
@@ -791,7 +979,8 @@ export default function HomeScreen() {
   };
   
   const openExplorer = (signature: string) => {
-    Linking.openURL(`https://explorer.solana.com/tx/${signature}`);
+    const explorerUrl = getExplorerUrl(selectedTransaction?.chain ?? ChainType.SOLANA, signature);
+    Linking.openURL(explorerUrl);
   };
   
   const getInitials = (address: string) => {
@@ -852,7 +1041,12 @@ export default function HomeScreen() {
 
   const recentCardContent = (
     <>
-      {transactions.length === 0 && !isLoadingTransactions ? (
+      {selectedChain === ChainType.AVALANCHE ? (
+        <View style={styles.emptyStateLiquid}>
+          <Text style={styles.emptyTitle}>Avalanche Fuji activity soon</Text>
+          <Text style={styles.emptySubtitle}>History is still available for Solana only in this version.</Text>
+        </View>
+      ) : transactions.length === 0 && !isLoadingTransactions ? (
         <View style={styles.emptyStateLiquid}>
           <Text style={styles.emptyTitle}>No activity yet</Text>
           <Text style={styles.emptySubtitle}>Your recent transfers will appear here.</Text>
@@ -957,34 +1151,56 @@ export default function HomeScreen() {
 
           <View style={styles.safeArea}>
             <View style={[styles.topHeader, { paddingTop: Math.max(6, topInset + 6) }]}>
+              <TouchableOpacity
+                style={styles.headerProfileRow}
+                activeOpacity={0.85}
+                onPress={() => {
+                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                  router.push("/profile");
+                }}
+              >
+                <GlassView style={styles.headerGlassAvatar} intensity={30}>
+                  {avatarError ? (
+                    <View style={styles.headerProfileFallback}>
+                      <Text style={styles.headerProfileFallbackText}>
+                        {(username || "User").slice(0, 2).toUpperCase()}
+                      </Text>
+                    </View>
+                  ) : (
+                    <Image
+                      source={{ uri: avatarUri }}
+                      style={styles.headerGlassAvatarImage}
+                      contentFit="cover"
+                      onError={() => setAvatarError(true)}
+                    />
+                  )}
+                </GlassView>
+                <Text style={styles.headerGreetingText} numberOfLines={1}>
+                  Hello, {username || "User"}
+                </Text>
+              </TouchableOpacity>
+
               <View style={styles.headerRight}>
                 <PlatformPressable
                   onPress={() => {
                     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                    router.push("/activity");
+                    handleAdd();
                   }}
                   pressOpacity={0.7}
                   style={styles.headerIconHit}
                 >
                   <GlassView style={styles.headerIconButton} intensity={30}>
                     <IconSymbol
-                      name="bell.fill"
-                      size={18}
+                      name="plus"
+                      size={22}
                       color="rgba(0,0,0,0.72)"
                     />
-                    <View style={styles.badge}>
-                      <Text style={styles.badgeText}>2</Text>
-                    </View>
                   </GlassView>
                 </PlatformPressable>
 
                 <PlatformPressable
                   onPress={() => {
                     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                    router.push("/profile");
-                  }}
-                  onLongPress={() => {
-                    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
                     setShowThemeSelector(true);
                   }}
                   pressOpacity={0.7}
@@ -992,8 +1208,8 @@ export default function HomeScreen() {
                 >
                   <GlassView style={styles.headerIconButton} intensity={30}>
                     <IconSymbol
-                      name="ellipsis"
-                      size={18}
+                      name="paintpalette.fill"
+                      size={22}
                       color="rgba(0,0,0,0.72)"
                     />
                   </GlassView>
@@ -1059,9 +1275,20 @@ export default function HomeScreen() {
                     selectedChain === "all"
                       ? ChainType.SOLANA
                       : selectedChain === ChainType.SOLANA
-                        ? ChainType.MONAD
+                        ? ChainType.AVALANCHE
                         : "all";
                   handleChainSelect(next as ChainFilter);
+                }}
+                onLongPress={() => {
+                  if (selectedChain === ChainType.AVALANCHE) {
+                    showToast('Gasless sponsorship is only available on Solana.');
+                    return;
+                  }
+                  if (keyQuorumId) {
+                    handleRevokeGasless();
+                    return;
+                  }
+                  handleAuthorizeGasless();
                 }}
                 activeOpacity={0.85}
               >
@@ -1073,20 +1300,6 @@ export default function HomeScreen() {
                 )}
               </TouchableOpacity>
 
-              <TouchableOpacity
-                onPress={handleAuthorizeGasless}
-                onLongPress={handleRevokeGasless}
-                activeOpacity={0.85}
-              >
-                {renderGlassSurface(
-                  <Text style={styles.chainPillText}>
-                    {keyQuorumId ? "Authorize gasless" : "Setup gasless"}
-                  </Text>,
-                  styles.chainPill,
-                  22,
-                  true
-                )}
-              </TouchableOpacity>
             </View>
           </View>
 
@@ -1095,7 +1308,7 @@ export default function HomeScreen() {
               {renderGlassSurface(
                 <>
                   <View style={styles.actionIconCircle}>
-                    <IconSymbol name="plus" size={18} color="rgba(0,0,0,0.72)" />
+                    <IconSymbol name="plus" size={24} color="rgba(0,0,0,0.72)" />
                   </View>
                   <Text style={styles.actionLabel}>Deposit</Text>
                 </>,
@@ -1109,7 +1322,7 @@ export default function HomeScreen() {
               {renderGlassSurface(
                 <>
                   <View style={styles.actionIconCircle}>
-                    <IconSymbol name="arrow.up" size={18} color="rgba(0,0,0,0.72)" />
+                    <IconSymbol name="arrow.up" size={24} color="rgba(0,0,0,0.72)" />
                   </View>
                   <Text style={styles.actionLabel}>Withdraw</Text>
                 </>,
@@ -1123,7 +1336,7 @@ export default function HomeScreen() {
               {renderGlassSurface(
                 <>
                   <View style={styles.actionIconCircle}>
-                    <IconSymbol name="paperplane.fill" size={18} color="rgba(0,0,0,0.72)" />
+                    <IconSymbol name="paperplane.fill" size={24} color="rgba(0,0,0,0.72)" />
                   </View>
                   <Text style={styles.actionLabel}>Send</Text>
                 </>,
@@ -1137,6 +1350,11 @@ export default function HomeScreen() {
           <View style={styles.recentHeaderRow}>
             <Text style={styles.recentHeaderText}>Recent activity</Text>
             <TouchableOpacity onPress={() => {
+                        if (selectedChain === ChainType.AVALANCHE) {
+                          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                          showToast('Avalanche activity is coming soon. Switch to Solana to continue.');
+                          return;
+                        }
                         Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
                         router.push("/activity");
                       }} activeOpacity={0.85}>
@@ -1158,7 +1376,7 @@ export default function HomeScreen() {
         index={-1}
         snapPoints={snapPoints}
         enablePanDownToClose
-        backdropComponent={disableBottomSheetBackdrops ? undefined : renderBackdrop}
+        backdropComponent={renderBackdrop}
         backgroundStyle={styles.bottomSheetBackground}
         handleIndicatorStyle={styles.bottomSheetIndicator}
       >
@@ -1228,7 +1446,10 @@ export default function HomeScreen() {
                     <View style={styles.detailRow}>
                       <Text style={styles.detailLabel}>Network fee</Text>
                       <Text style={styles.detailValue}>
-                        {(selectedTransaction.fee / 1000000000).toFixed(6)} SOL
+                        {selectedTransaction.chain === ChainType.SOLANA
+                          ? (selectedTransaction.fee / 1000000000).toFixed(6)
+                          : selectedTransaction.fee.toFixed(6)}{" "}
+                        {getChainSymbol(selectedTransaction.chain)}
                       </Text>
                     </View>
                   </>
@@ -1270,7 +1491,7 @@ export default function HomeScreen() {
             index={-1}
             snapPoints={sendSnapPoints}
             enablePanDownToClose
-            backdropComponent={disableBottomSheetBackdrops ? undefined : renderBackdrop}
+            backdropComponent={renderBackdrop}
             backgroundStyle={styles.sendSheetBackground}
             handleIndicatorStyle={styles.sendSheetIndicator}
           >
@@ -1351,7 +1572,7 @@ export default function HomeScreen() {
         index={-1}
         snapPoints={receiveSnapPoints}
         enablePanDownToClose
-        backdropComponent={disableBottomSheetBackdrops ? undefined : renderBackdrop}
+        backdropComponent={renderBackdrop}
         backgroundStyle={styles.receiveSheetBackground}
         handleIndicatorStyle={styles.receiveSheetIndicator}
       >
@@ -1426,7 +1647,7 @@ export default function HomeScreen() {
         index={-1}
         snapPoints={cryptoReceiveSnapPoints}
         enablePanDownToClose
-        backdropComponent={disableBottomSheetBackdrops ? undefined : renderLockedBackdrop}
+        backdropComponent={renderLockedBackdrop}
         backgroundStyle={styles.cryptoSheetBackground}
         handleIndicatorStyle={styles.cryptoSheetIndicator}
         enableDismissOnClose={false}
@@ -1448,7 +1669,7 @@ export default function HomeScreen() {
           </View>
 
           <Text style={styles.cryptoTitle}>Receive</Text>
-          <Text style={styles.cryptoSubtitle}>Scan with a Solana Pay wallet. USDC is preferred, SOL is supported.</Text>
+          <Text style={styles.cryptoSubtitle}>{activeReceiveSubtitle}</Text>
 
           <View style={styles.cryptoAssetToggle}>
             <TouchableOpacity
@@ -1463,14 +1684,24 @@ export default function HomeScreen() {
               </Text>
             </TouchableOpacity>
             <TouchableOpacity
-              style={[styles.cryptoAssetButton, receiveAsset === 'sol' && styles.cryptoAssetButtonActive]}
+              style={[
+                styles.cryptoAssetButton,
+                (isAvalancheSelected ? receiveAsset === 'avax' : receiveAsset === 'sol') &&
+                  styles.cryptoAssetButtonActive,
+              ]}
               onPress={() => {
                 Haptics.selectionAsync();
-                setReceiveAsset('sol');
+                setReceiveAsset(isAvalancheSelected ? 'avax' : 'sol');
               }}
             >
-              <Text style={[styles.cryptoAssetText, receiveAsset === 'sol' && styles.cryptoAssetTextActive]}>
-                SOL
+              <Text
+                style={[
+                  styles.cryptoAssetText,
+                  (isAvalancheSelected ? receiveAsset === 'avax' : receiveAsset === 'sol') &&
+                    styles.cryptoAssetTextActive,
+                ]}
+              >
+                {isAvalancheSelected ? 'AVAX' : 'SOL'}
               </Text>
             </TouchableOpacity>
           </View>
@@ -1503,7 +1734,7 @@ export default function HomeScreen() {
                 onPress={handleCopyReceiveAddress}
               >
                 <QRCode
-                  value={solanaPayUri || fullSolanaAddress || 'No wallet'}
+                  value={activeReceiveQrValue}
                   size={220}
                   color="#000000"
                   backgroundColor="#ffffff"
@@ -1511,7 +1742,7 @@ export default function HomeScreen() {
               </TouchableOpacity>
             </Animated.View>
             <Text selectable style={styles.cryptoAddress}>{(() => {
-              const addr = fullSolanaAddress;
+              const addr = activeReceiveAddress;
               if (!addr) return 'No address available';
               const midpoint = Math.ceil(addr.length / 2);
               return `${addr.slice(0, midpoint)}\n${addr.slice(midpoint)}`;
@@ -1519,33 +1750,37 @@ export default function HomeScreen() {
           </View>
 
           <View style={styles.cryptoBottomSection}>
-            <View style={styles.cryptoToggleRow}>
-              <View style={{ flex: 1 }}>
-                <Text style={styles.cryptoToggleLabel}>Receive with Hide My Wallet</Text>
-                <TouchableOpacity
-                  onPress={() => {
-                    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                    showToast(
-                      'Hide My Wallet routes deposits through a masked address for extra privacy.'
-                    );
-                  }}
-                >
-                  <Text style={styles.cryptoToggleHelp}>
-                    How it works? <Text style={styles.cryptoToggleHelpIcon}>?</Text>
-                  </Text>
-                </TouchableOpacity>
+            {!isAvalancheSelected ? (
+              <View style={styles.cryptoToggleRow}>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.cryptoToggleLabel}>Receive with Hide My Wallet</Text>
+                  <TouchableOpacity
+                    onPress={() => {
+                      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                      showToast(
+                        'Hide My Wallet routes deposits through a masked address for extra privacy.'
+                      );
+                    }}
+                  >
+                    <Text style={styles.cryptoToggleHelp}>
+                      How it works? <Text style={styles.cryptoToggleHelpIcon}>?</Text>
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+                <Switch
+                  value={hideWallet}
+                  onValueChange={handleToggleHideWallet}
+                  trackColor={{ false: '#E5E7EB', true: '#2563EB' }}
+                  thumbColor="#ffffff"
+                />
               </View>
-              <Switch
-                value={hideWallet}
-                onValueChange={handleToggleHideWallet}
-                trackColor={{ false: '#E5E7EB', true: '#2563EB' }}
-                thumbColor="#ffffff"
-              />
-            </View>
+            ) : null}
 
             <TouchableOpacity style={styles.cryptoCopyButton} onPress={handleCopyReceiveAddress}>
               <CopyIcon size={18} color="#111827" />
-              <Text style={styles.cryptoCopyButtonText}>Copy payment link</Text>
+              <Text style={styles.cryptoCopyButtonText}>
+                {isAvalancheSelected ? 'Copy address' : 'Copy payment link'}
+              </Text>
             </TouchableOpacity>
           </View>
         </BottomSheetView>
@@ -1557,7 +1792,7 @@ export default function HomeScreen() {
         index={-1}
         snapPoints={fiatReceiveSnapPoints}
         enablePanDownToClose
-        backdropComponent={disableBottomSheetBackdrops ? undefined : renderBackdrop}
+        backdropComponent={renderBackdrop}
         backgroundStyle={styles.cryptoSheetBackground}
         handleIndicatorStyle={styles.cryptoSheetIndicator}
       >
@@ -1687,10 +1922,10 @@ const styles = StyleSheet.create({
   },
   scrollContent: {
     paddingHorizontal: 18,
-    paddingBottom: 32,
+    paddingBottom: 110,
   },
   scrollContentIos: {
-    paddingTop: 72,
+    paddingTop: 112,
   },
   topHeader: {
     position: "absolute",
@@ -1699,10 +1934,10 @@ const styles = StyleSheet.create({
     right: 0,
     flexDirection: "row",
     alignItems: "center",
-    justifyContent: "flex-end",
+    justifyContent: "space-between",
     paddingHorizontal: 18,
     paddingTop: 6,
-    paddingBottom: 14,
+    paddingBottom: 10,
     zIndex: 20,
     elevation: 20,
   },
@@ -1719,18 +1954,20 @@ const styles = StyleSheet.create({
   headerProfileRow: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 10,
+    gap: 12,
+    flexShrink: 1,
+    maxWidth: "62%",
   },
   headerGreetingText: {
-    fontSize: 14,
-    fontWeight: "600",
-    color: "rgba(0,0,0,0.72)",
-    maxWidth: 140,
+    fontSize: 19,
+    fontWeight: "700",
+    color: "rgba(2,44,68,0.92)",
+    maxWidth: 180,
   },
   headerRight: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 10,
+    gap: 12,
   },
   headerIconHit: {
     borderRadius: 999,
@@ -1748,16 +1985,16 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   headerIconButton: {
-    width: 38,
-    height: 38,
-    borderRadius: 19,
+    width: 52,
+    height: 52,
+    borderRadius: 26,
     alignItems: "center",
     justifyContent: "center",
   },
   headerProfileFallback: {
-    paddingHorizontal: 12,
-    height: 36,
-    borderRadius: 18,
+    width: 48,
+    height: 48,
+    borderRadius: 24,
     alignItems: "center",
     justifyContent: "center",
     backgroundColor: "rgba(255,255,255,0.75)",
@@ -1765,21 +2002,21 @@ const styles = StyleSheet.create({
     borderColor: "rgba(0,0,0,0.12)",
   },
   headerProfileFallbackText: {
-    fontSize: 12,
+    fontSize: 14,
     fontWeight: "700",
     color: "rgba(0,0,0,0.72)",
   },
   headerGlassAvatar: {
-    width: 45,
-    height: 45,
-    borderRadius: 22.5,
+    width: 56,
+    height: 56,
+    borderRadius: 28,
     alignItems: "center",
     justifyContent: "center",
   },
   headerGlassAvatarImage: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
+    width: 46,
+    height: 46,
+    borderRadius: 23,
   },
   badge: {
     position: "absolute",
@@ -1801,8 +2038,8 @@ const styles = StyleSheet.create({
   },
   balanceBlock: {
     alignItems: "center",
-    paddingTop: 8,
-    paddingBottom: 18,
+    paddingTop: 50,
+    paddingBottom: 22,
   },
   balanceTap: {
     alignItems: "center",
@@ -1819,25 +2056,25 @@ const styles = StyleSheet.create({
     marginRight: 4,
   },
   balanceMainLiquid: {
-    fontSize: 44,
+    fontSize: 72,
     fontWeight: "800",
     letterSpacing: 0.2,
     color: "rgba(255,255,255,0.95)",
   },
   balanceCentsLiquid: {
-    fontSize: 18,
+    fontSize: 34,
     fontWeight: "800",
     color: "rgba(255,255,255,0.9)",
     marginBottom: 10,
   },
   balanceHidden: {
-    fontSize: 44,
+    fontSize: 72,
     fontWeight: "800",
     color: "rgba(255,255,255,0.95)",
   },
   balanceSub: {
     marginTop: 8,
-    fontSize: 12,
+    fontSize: 14,
     fontWeight: "600",
     color: "rgba(255,255,255,0.82)",
   },
@@ -1845,7 +2082,7 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     gap: 10,
-    marginTop: 14,
+    marginTop: 16,
   },
   glassButtonSurface: {
     borderWidth: 1,
@@ -1858,22 +2095,22 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     gap: 8,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
+    paddingHorizontal: 18,
+    paddingVertical: 11,
     borderRadius: 999,
   },
   addressPillText: {
-    fontSize: 12,
+    fontSize: 14,
     fontWeight: "700",
     color: "rgba(0,0,0,0.60)",
   },
   chainPill: {
-    paddingHorizontal: 12,
-    paddingVertical: 8,
+    paddingHorizontal: 18,
+    paddingVertical: 11,
     borderRadius: 999,
   },
   chainPillText: {
-    fontSize: 12,
+    fontSize: 14,
     fontWeight: "700",
     color: "rgba(0,0,0,0.60)",
   },
@@ -1916,22 +2153,23 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     justifyContent: "space-between",
     gap: 10,
-    marginTop: 12,
+    marginTop: 14,
   },
   actionHit: {
     flex: 1,
   },
   actionTile: {
-    borderRadius: 18,
+    borderRadius: 24,
+    minHeight: 136,
     paddingVertical: 14,
     alignItems: "center",
     justifyContent: "center",
     gap: 10,
   },
   actionIconCircle: {
-    width: 34,
-    height: 34,
-    borderRadius: 17,
+    width: 50,
+    height: 50,
+    borderRadius: 25,
     alignItems: "center",
     justifyContent: "center",
     backgroundColor: "rgba(255,255,255,0.35)",
@@ -1939,19 +2177,19 @@ const styles = StyleSheet.create({
     borderColor: "rgba(255,255,255,0.45)",
   },
   actionLabel: {
-    fontSize: 12,
+    fontSize: 15,
     fontWeight: "800",
     color: "rgba(0,0,0,0.62)",
   },
   recentHeaderRow: {
-    marginTop: 18,
-    marginBottom: 10,
+    marginTop: 22,
+    marginBottom: 12,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
   },
   recentHeaderText: {
-    fontSize: 13,
+    fontSize: 18,
     fontWeight: "800",
     color: "rgba(0,0,0,0.55)",
   },
@@ -1959,7 +2197,7 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   recentCard: {
-    borderRadius: 22,
+    borderRadius: 26,
     paddingVertical: 8,
     paddingHorizontal: 8,
     borderCurve: "continuous",
@@ -1992,8 +2230,8 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "space-between",
     paddingVertical: 10,
-    paddingHorizontal: 10,
-    borderRadius: 16,
+    paddingHorizontal: 9,
+    borderRadius: 18,
   },
   recentLeft: {
     flexDirection: "row",
@@ -2003,9 +2241,9 @@ const styles = StyleSheet.create({
     paddingRight: 12,
   },
   recentIcon: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
+    width: 46,
+    height: 46,
+    borderRadius: 23,
     backgroundColor: "rgba(255,255,255,0.35)",
     alignItems: "center",
     justifyContent: "center",
@@ -2016,13 +2254,13 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   recentTitle: {
-    fontSize: 13,
+    fontSize: 16,
     fontWeight: "800",
     color: "rgba(0,0,0,0.65)",
   },
   recentMeta: {
     marginTop: 3,
-    fontSize: 11,
+    fontSize: 12,
     fontWeight: "600",
     color: "rgba(0,0,0,0.38)",
   },
@@ -2030,7 +2268,7 @@ const styles = StyleSheet.create({
     alignItems: "flex-end",
   },
   recentAmount: {
-    fontSize: 13,
+    fontSize: 16,
     fontWeight: "800",
     color: "rgba(0,0,0,0.68)",
   },
@@ -2046,7 +2284,7 @@ const styles = StyleSheet.create({
     borderRadius: 999,
   },
   statusTextLiquid: {
-    fontSize: 11,
+    fontSize: 13,
     fontWeight: "700",
     color: "rgba(0,0,0,0.40)",
   },

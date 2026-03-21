@@ -1,7 +1,4 @@
-import {
-  useEmbeddedEthereumWallet,
-  useEmbeddedSolanaWallet,
-} from "@privy-io/expo";
+import { useEmbeddedEthereumWallet, useEmbeddedSolanaWallet } from "@privy-io/expo";
 import { View, Text, Button } from "react-native";
 
 export default function Wallets() {
@@ -29,12 +26,12 @@ export default function Wallets() {
         }}
       >
         <Button
-          title="Create Ethereum Wallet"
-          onPress={() => createEthereumWallet({ createAdditional: true })}
-        />
-        <Button
           title="Create Solana Wallet"
           onPress={() => createSolanaWallet?.({ createAdditional: true, recoveryMethod: "privy" })}
+        />
+        <Button
+          title="Create Avalanche Wallet"
+          onPress={() => createEthereumWallet?.({ createAdditional: true })}
         />
       </View>
     </View>

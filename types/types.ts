@@ -9,8 +9,8 @@ export interface Transaction {
   id: string;
   signature: string;
   type: 'send' | 'receive';
-  amount: number; // in token units (SOL, USDC, MON, etc)
-  currency: 'SOL' | 'USDC' | 'USDT' | 'MON'; // Currency type
+  amount: number; // in token units (SOL, USDC, USDT, AVAX, etc)
+  currency: 'SOL' | 'USDC' | 'USDT' | 'AVAX'; // Currency type
   chain: ChainType; // Which blockchain this transaction is on
   recipient?: string; // for send transactions
   sender?: string; // for receive transactions
@@ -19,6 +19,6 @@ export interface Transaction {
   status: 'pending' | 'confirmed' | 'failed';
   comment?: string;
   blockTime?: number;
-  fee?: number; // in lamports (Solana) or wei (EVM)
+  fee?: number; // in lamports for Solana, native units for EVM chains
   currencyEquivalent?: string; // For display purposes (e.g., "ARS 1,000")
 }

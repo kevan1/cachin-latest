@@ -19,11 +19,30 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { Connection, PublicKey, Transaction } from "@solana/web3.js";
 import { Token, TOKEN_PROGRAM_ID, ASSOCIATED_TOKEN_PROGRAM_ID, u64 } from "@solana/spl-token";
 import MaterialIcons from "@expo/vector-icons/MaterialIcons";
+import {
+  createPublicClient,
+  encodeFunctionData,
+  formatEther,
+  getAddress,
+  http,
+  isAddress,
+  type Hex,
+} from "viem";
+import { avalancheFuji } from "viem/chains";
 
 import { saveTransaction } from "@/utils/transactionStorage";
 import { Transaction as TransactionType } from "@/types/types";
-import { ChainType } from "@/constants/chains";
-import { useEmbeddedSolanaWallet, usePrivy } from "@privy-io/expo";
+import { ChainType, getChainMetadata, getChainToken } from "@/constants/chains";
+import {
+  useEmbeddedEthereumWallet,
+  useEmbeddedSolanaWallet,
+  usePrivy,
+  useSessionSigners,
+} from "@privy-io/expo";
+import {
+  isDuplicateSessionSignerError,
+  isGaslessAuthorizationRequiredError,
+} from "@/utils/privyGasless";
 import { getSolanaRpcUrl } from "@/utils/solanaRpc";
 import { formatTokenUnits, parseDecimalToUnits } from "@/utils/tokenAmount";
 import { Colors } from "@/constants/theme";
@@ -39,11 +58,27 @@ import {
   getSponsoredSolanaWallet,
   setSponsoredSolanaWallet,
 } from "@/utils/sponsoredWalletStorage";
+import {
+  getEmbeddedSolanaWalletAddress,
+  getSolanaProviderAddress,
+} from "@/utils/privySolanaWallet";
 
 const USDC_MINT_ADDRESS = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
 const USDC_DECIMALS = 6;
 const FX_RATE = 0.86;
 const DUMMY_BLOCKHASH = "11111111111111111111111111111111";
+const ERC20_TRANSFER_ABI = [
+  {
+    type: "function",
+    name: "transfer",
+    stateMutability: "nonpayable",
+    inputs: [
+      { name: "to", type: "address" },
+      { name: "value", type: "uint256" },
+    ],
+    outputs: [{ name: "success", type: "bool" }],
+  },
+] as const;
 
 function firstParam(value: unknown): string {
   if (Array.isArray(value)) return typeof value[0] === "string" ? value[0] : "";
@@ -68,23 +103,38 @@ function formatAddress(address: string): string {
   return `${address.slice(0, 4)}...${address.slice(-4)}`;
 }
 
+function getErrorMessage(error: unknown, fallback: string): string {
+  if (error instanceof Error && error.message) return error.message;
+  if (typeof error === "string" && error.trim().length > 0) return error;
+  return fallback;
+}
+
 export default function SendConfirmScreen() {
   const router = useRouter();
   const params = useLocalSearchParams();
-  const { recipient, address, amount, comment } = params;
+  const { recipient, address, amount, comment, chain, currency } = params;
   const colorScheme = useColorScheme() ?? "light";
   const palette = Colors[colorScheme];
   const insets = useSafeAreaInsets();
+  const activeChain =
+    firstParam(chain) === ChainType.AVALANCHE ? ChainType.AVALANCHE : ChainType.SOLANA;
+  const isAvalancheTransfer = activeChain === ChainType.AVALANCHE;
+  const avalancheUsdcToken = getChainToken(ChainType.AVALANCHE, "usdc");
+  const assetSymbol =
+    firstParam(currency) || (isAvalancheTransfer ? avalancheUsdcToken?.symbol ?? "USDC" : "USDC");
+  const assetDecimals = isAvalancheTransfer
+    ? avalancheUsdcToken?.decimals ?? USDC_DECIMALS
+    : USDC_DECIMALS;
 
   const recipientAddress = firstParam(address);
   const amountString = firstParam(amount);
   const recipientName = firstParam(recipient);
-  const amountUnits = parseDecimalToUnits(amountString, USDC_DECIMALS);
+  const amountUnits = parseDecimalToUnits(amountString, assetDecimals);
   const amountDisplay =
     amountUnits
-      ? formatTokenUnits(amountUnits, USDC_DECIMALS, {
+      ? formatTokenUnits(amountUnits, assetDecimals, {
           minFractionDigits: 0,
-          maxFractionDigits: USDC_DECIMALS,
+          maxFractionDigits: assetDecimals,
           trimTrailingZeros: true,
         })
       : amountString;
@@ -96,9 +146,11 @@ export default function SendConfirmScreen() {
       : "0.00";
 
   const recipientDisplay = recipientName
-    ? isValidSolanaAddress(recipientName)
+    ? !isAvalancheTransfer && isValidSolanaAddress(recipientName)
       ? formatAddress(recipientName)
-      : `@${normalizeUsername(recipientName)}`
+      : isAvalancheTransfer
+        ? formatAddress(recipientName)
+        : `@${normalizeUsername(recipientName)}`
     : recipientAddress
       ? formatAddress(recipientAddress)
       : "recipient";
@@ -108,22 +160,61 @@ export default function SendConfirmScreen() {
   const [lastTransactionId, setLastTransactionId] = useState<string | null>(null);
   const { showChin, hideChin, progress, isOpen } = useChinPopout();
 
-  const { wallets } = useEmbeddedSolanaWallet();
+  const {
+    wallets,
+    create: createSolanaWallet,
+    status: solanaWalletStatus,
+  } = useEmbeddedSolanaWallet();
+  const { wallets: ethereumWallets } = useEmbeddedEthereumWallet();
   const wallet = wallets?.[0];
+  const avalancheWallet = ethereumWallets?.[0];
   const { user } = usePrivy();
+  const { addSessionSigners } = useSessionSigners();
   const [sponsoredWalletAddress, setSponsoredWalletAddress] = useState<string | null>(null);
-  const [sponsoredWalletId, setSponsoredWalletId] = useState<string | null>(null);
-  const walletAddress = sponsoredWalletAddress ?? wallet?.publicKey ?? "";
+  const walletAddress = isAvalancheTransfer
+    ? avalancheWallet?.address ?? ""
+    : sponsoredWalletAddress ?? wallet?.publicKey ?? "";
   const walletDisplay = walletAddress ? formatAddress(walletAddress) : "Not connected";
+  const keyQuorumId = process.env.EXPO_PUBLIC_PRIVY_KEY_QUORUM_ID;
+  const sessionSignerPolicyIds = useMemo(() => {
+    const raw = process.env.EXPO_PUBLIC_PRIVY_GAS_SPONSOR_POLICY_IDS;
+    if (!raw) return [];
+    return raw
+      .split(",")
+      .map((id) => id.trim())
+      .filter(Boolean);
+  }, []);
+
+  const authorizeGaslessForAddress = useCallback(
+    async (address: string) => {
+      if (!keyQuorumId) return;
+
+      try {
+        await addSessionSigners({
+          address,
+          signers: [
+            {
+              signerId: keyQuorumId,
+              policyIds: sessionSignerPolicyIds,
+            },
+          ],
+        });
+      } catch (error) {
+        if (isDuplicateSessionSignerError(error)) {
+          return;
+        }
+        throw error;
+      }
+    },
+    [addSessionSigners, keyQuorumId, sessionSignerPolicyIds]
+  );
 
   useEffect(() => {
     getSponsoredSolanaWallet()
-      .then(({ id, address }) => {
-        setSponsoredWalletId(id);
+      .then(({ address }) => {
         setSponsoredWalletAddress(address);
       })
       .catch(() => {
-        setSponsoredWalletId(null);
         setSponsoredWalletAddress(null);
       });
   }, []);
@@ -148,24 +239,146 @@ export default function SendConfirmScreen() {
       setIsSending(true);
       hideChin();
 
+      if (isAvalancheTransfer) {
+        if (!avalancheWallet?.address) {
+          throw new Error("Your Avalanche wallet is still being prepared. Please try again.");
+        }
+        if (!avalancheUsdcToken) {
+          throw new Error("Avalanche USDC is not configured.");
+        }
+
+        if (!recipientAddress || !isAddress(recipientAddress)) {
+          throw new Error("Recipient address is not a valid Avalanche address.");
+        }
+
+        if (!amountUnits || amountUnits <= 0n) {
+          throw new Error(`Amount "${amountString}" is not valid.`);
+        }
+
+        const fromAddress = getAddress(avalancheWallet.address);
+        const toAddress = getAddress(recipientAddress);
+        const provider = await avalancheWallet.getProvider();
+        const avalancheChainId = getChainMetadata(ChainType.AVALANCHE).chainId ?? avalancheFuji.id;
+        const transferData = encodeFunctionData({
+          abi: ERC20_TRANSFER_ABI,
+          functionName: "transfer",
+          args: [toAddress, amountUnits],
+        });
+        const signature = (await provider.request({
+          method: "eth_sendTransaction",
+          params: [
+            {
+              from: fromAddress,
+              to: avalancheUsdcToken.address,
+              data: transferData,
+              value: "0x0",
+              chainId: `0x${avalancheChainId.toString(16)}`,
+            },
+          ],
+        })) as string;
+
+        const client = createPublicClient({
+          chain: avalancheFuji,
+          transport: http(
+            process.env.EXPO_PUBLIC_AVALANCHE_RPC ||
+              getChainMetadata(ChainType.AVALANCHE).rpcUrl
+          ),
+        });
+        const receipt = await client.waitForTransactionReceipt({
+          hash: signature as Hex,
+        });
+        const feeValue =
+          typeof receipt.effectiveGasPrice === "bigint"
+            ? Number(formatEther(receipt.effectiveGasPrice * receipt.gasUsed))
+            : undefined;
+
+        const newTransaction: TransactionType = {
+          id: signature,
+          signature,
+          type: "send",
+          currency: "USDC",
+          chain: ChainType.AVALANCHE,
+          amount: parseFloat(amountDisplay),
+          recipient: recipientName || toAddress,
+          sender: fromAddress,
+          address: toAddress,
+          timestamp: Date.now(),
+          status: receipt.status === "success" ? "confirmed" : "failed",
+          comment: comment as string | undefined,
+          fee: feeValue,
+        };
+
+        await saveTransaction(newTransaction);
+
+        if (receipt.status !== "success") {
+          throw new Error("The Avalanche transaction was reverted.");
+        }
+
+        setLastTransactionId(signature);
+        setTransactionSent(true);
+        setIsSending(false);
+        return;
+      }
+
       if (!user?.id) {
         Alert.alert("Error", "User not available");
         setIsSending(false);
         return;
       }
 
-      let ensuredWalletId = sponsoredWalletId ?? undefined;
-      let ensuredWalletAddress = sponsoredWalletAddress ?? undefined;
+      let ensuredWalletId: string | undefined;
+      let ensuredWalletAddress =
+        getEmbeddedSolanaWalletAddress(wallets) ?? sponsoredWalletAddress ?? undefined;
+
+      if (!ensuredWalletAddress) {
+        const walletIsBusy =
+          solanaWalletStatus === "creating" ||
+          solanaWalletStatus === "connecting" ||
+          solanaWalletStatus === "reconnecting";
+
+        if (walletIsBusy) {
+          throw new Error("Your Solana wallet is still being prepared. Please try again in a moment.");
+        }
+
+        if (typeof createSolanaWallet !== "function") {
+          throw new Error("No Solana wallet is available for this user.");
+        }
+
+        const provider = await createSolanaWallet({ recoveryMethod: "privy" });
+        ensuredWalletAddress =
+          getSolanaProviderAddress(provider) ??
+          getEmbeddedSolanaWalletAddress(wallets) ??
+          sponsoredWalletAddress ??
+          undefined;
+
+        if (!ensuredWalletAddress) {
+          throw new Error("Created a Solana wallet, but it has not finished syncing yet. Please try again in a moment.");
+        }
+      }
+
+      await authorizeGaslessForAddress(ensuredWalletAddress);
 
       try {
-        const ensured = await ensureSponsoredSolanaWallet({
-          userId: user.id,
-          walletId: ensuredWalletId,
-        });
+        let ensured;
+        try {
+          ensured = await ensureSponsoredSolanaWallet({
+            userId: user.id,
+            walletAddress: ensuredWalletAddress,
+          });
+        } catch (error) {
+          if (isGaslessAuthorizationRequiredError(error)) {
+            await authorizeGaslessForAddress(ensuredWalletAddress);
+            ensured = await ensureSponsoredSolanaWallet({
+              userId: user.id,
+              walletAddress: ensuredWalletAddress,
+            });
+          } else {
+            throw error;
+          }
+        }
         ensuredWalletId = ensured?.walletId ?? ensuredWalletId;
         ensuredWalletAddress =
           ensured?.publicKey ?? ensured?.address ?? ensuredWalletAddress;
-        setSponsoredWalletId(ensuredWalletId ?? null);
         setSponsoredWalletAddress(ensuredWalletAddress ?? null);
         await setSponsoredSolanaWallet({
           id: ensuredWalletId ?? null,
@@ -175,7 +388,10 @@ export default function SendConfirmScreen() {
         console.error("Error ensuring sponsored wallet:", error);
         Alert.alert(
           "Error",
-          "Could not prepare sponsored wallet. Please try again."
+          `Could not prepare sponsored wallet.\n\n${getErrorMessage(
+            error,
+            "Please try again."
+          )}`
         );
         setIsSending(false);
         return;
@@ -321,6 +537,7 @@ export default function SendConfirmScreen() {
         chain: ChainType.SOLANA,
         amount: parseFloat(amountDisplay),
         recipient: recipientName,
+        sender: senderAddress,
         address: recipientAddress,
         timestamp: Date.now(),
         status: "confirmed",
@@ -344,20 +561,30 @@ export default function SendConfirmScreen() {
     amountDisplay,
     amountString,
     amountUnits,
+    avalancheUsdcToken,
+    avalancheWallet,
+    authorizeGaslessForAddress,
     comment,
+    createSolanaWallet,
     hideChin,
+    isAvalancheTransfer,
     recipientAddress,
     recipientName,
+    solanaWalletStatus,
     user?.id,
     sponsoredWalletAddress,
-    sponsoredWalletId,
     walletAddress,
+    wallet?.address,
+    wallet?.publicKey,
+    wallets,
   ]);
 
   const chinLabel = useMemo(() => {
     if (!amountDisplay) return "Swipe to send";
-    return `Swipe to send $${amountDisplay}`;
-  }, [amountDisplay]);
+    return isAvalancheTransfer
+      ? `Swipe to send $${amountDisplay} ${assetSymbol}`
+      : `Swipe to send $${amountDisplay}`;
+  }, [amountDisplay, assetSymbol, isAvalancheTransfer]);
 
   const handleSendPress = useCallback(() => {
     if (isSending) return;
@@ -442,7 +669,7 @@ export default function SendConfirmScreen() {
                   entering={FadeIn.delay(400).duration(500)}
                   style={[styles.successAmount, { color: palette.primaryText }]}
                 >
-                  ${amountDisplay} USDC
+                  {isAvalancheTransfer ? `$${amountDisplay} ${assetSymbol}` : `$${amountDisplay} ${assetSymbol}`}
                 </Animated.Text>
               </View>
 
@@ -504,10 +731,12 @@ export default function SendConfirmScreen() {
                 <MaterialIcons name="send" size={22} color={palette.actionPrimaryText} />
               </View>
               <Text style={[styles.headline, { color: palette.primaryText }]}>
-                Send to {recipientDisplay}
+                {isAvalancheTransfer ? `Send ${assetSymbol} to ${recipientDisplay}` : `Send to ${recipientDisplay}`}
               </Text>
               <Text style={[styles.subheadline, { color: palette.secondaryText }]}>
-                Double-check the details before you send.
+                {isAvalancheTransfer
+                  ? "Double-check the Avalanche Fuji address before you send."
+                  : "Double-check the details before you send."}
               </Text>
 
               <View
@@ -522,10 +751,10 @@ export default function SendConfirmScreen() {
                   </Text>
                 </View>
                 <Text style={[styles.amountText, { color: palette.primaryText }]}>
-                  ${amountDisplay}
+                  {isAvalancheTransfer ? `$${amountDisplay} ${assetSymbol}` : `$${amountDisplay}`}
                 </Text>
                 <Text style={[styles.equivalentText, { color: palette.secondaryText }]}>
-                  ~{equivalentValue}
+                  {isAvalancheTransfer ? "Fuji USDC" : `~${equivalentValue}`}
                 </Text>
               </View>
 

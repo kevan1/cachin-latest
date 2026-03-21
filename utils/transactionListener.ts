@@ -414,8 +414,10 @@ export function startTransactionPolling(
  */
 export async function getMergedTransactions(address: string): Promise<Transaction[]> {
   try {
-    // Get local transactions
-    const localTransactions = await getTransactions();
+    // Keep local history chain-scoped so Avalanche sends do not appear in Solana activity.
+    const localTransactions = (await getTransactions()).filter(
+      (tx) => tx.chain === ChainType.SOLANA
+    );
 
     // Fetch blockchain transactions (reduced limit to avoid rate limiting)
     const blockchainTransactions = await fetchTransactionsFromBlockchain(address, 5);

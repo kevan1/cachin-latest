@@ -4,6 +4,8 @@ import { useState, useEffect } from 'react';
 import { Transaction } from '@/types/types';
 import { getTransactions } from '@/utils/transactionStorage';
 import * as Clipboard from 'expo-clipboard';
+import { formatAmount } from '@/utils/formatAmount';
+import { getExplorerUrl, getChainSymbol, ChainType } from '@/constants/chains';
 
 export default function TransactionDetailScreen() {
   const router = useRouter();
@@ -57,8 +59,7 @@ export default function TransactionDetailScreen() {
 
   const openExplorer = () => {
     if (transaction?.signature) {
-      // Open in Solana Explorer (mainnet)
-      Linking.openURL(`https://explorer.solana.com/tx/${transaction.signature}`);
+      Linking.openURL(getExplorerUrl(transaction.chain, transaction.signature));
     }
   };
 
@@ -101,7 +102,8 @@ export default function TransactionDetailScreen() {
         </Text>
         <Text style={styles.summaryAddress}>{addressDisplay}</Text>
         <Text style={styles.amount}>
-          {transaction.type === 'send' ? '-' : '+'}${transaction.amount.toFixed(2)}
+          {transaction.type === 'send' ? '-' : '+'}$
+          {formatAmount(transaction.amount, { maxFractionDigits: 2 })}
         </Text>
         <View style={styles.statusBadge}>
           <Text style={styles.statusText}>
@@ -137,7 +139,10 @@ export default function TransactionDetailScreen() {
             <View style={styles.detailRow}>
               <Text style={styles.detailLabel}>Network fee</Text>
               <Text style={styles.detailValue}>
-                {(transaction.fee / 1000000000).toFixed(6)} SOL
+                {transaction.chain === ChainType.SOLANA
+                  ? formatAmount(transaction.fee / 1000000000, { maxFractionDigits: 6 })
+                  : formatAmount(transaction.fee, { maxFractionDigits: 6 })}{" "}
+                {getChainSymbol(transaction.chain)}
               </Text>
             </View>
           </>
@@ -301,6 +306,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     backgroundColor: '#E8B5E8',
     borderRadius: 12,
+    borderCurve: 'continuous',
     borderWidth: 3,
     borderColor: '#000000',
     paddingVertical: 18,
@@ -308,10 +314,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 10,
     marginBottom: 15,
-    shadowColor: '#000000',
-    shadowOffset: { width: 4, height: 4 },
-    shadowOpacity: 1,
-    shadowRadius: 0,
+    boxShadow: '4px 4px 0px rgba(0, 0, 0, 1)',
   },
   shareIcon: {
     fontSize: 20,
@@ -324,15 +327,13 @@ const styles = StyleSheet.create({
   closeButtonBottom: {
     backgroundColor: '#FFFFFF',
     borderRadius: 12,
+    borderCurve: 'continuous',
     borderWidth: 3,
     borderColor: '#000000',
     paddingVertical: 18,
     justifyContent: 'center',
     alignItems: 'center',
-    shadowColor: '#000000',
-    shadowOffset: { width: 4, height: 4 },
-    shadowOpacity: 1,
-    shadowRadius: 0,
+    boxShadow: '4px 4px 0px rgba(0, 0, 0, 1)',
   },
   closeButtonText: {
     fontSize: 18,

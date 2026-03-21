@@ -13,17 +13,17 @@ import { GestureHandlerRootView } from "react-native-gesture-handler";
 import Constants from "expo-constants";
 import { PrivyProvider, usePrivy } from "@privy-io/expo";
 import { PrivyElements } from "@privy-io/expo/ui";
+import { avalancheFuji } from "viem/chains";
 import {
   Inter_400Regular,
   Inter_500Medium,
   Inter_600SemiBold,
 } from "@expo-google-fonts/inter";
 import { useFonts } from "expo-font";
-import { monadTestnet } from "@/constants/chains";
 import { Colors } from "@/constants/theme";
 import { useNetworkStatus } from "@/hooks/use-network-status";
 import { HeroUINativeProvider } from "heroui-native";
-import { ChinPopoutOverlay, ChinPopoutProvider } from "@/components/ChinPopout";
+import { ChinPopoutProvider } from "@/components/ChinPopout";
 import { IconSymbol } from "@/components/ui/icon-symbol";
 
 
@@ -353,10 +353,12 @@ export default function RootLayout() {
               <PrivyProvider
                 appId={privyAppId}
                 clientId={privyClientId}
-                supportedChains={[monadTestnet]}
+                supportedChains={[avalancheFuji]}
                 config={{
                   embedded: {
-                    ethereum: { createOnLogin: "all-users" },
+                    ethereum: {
+                      createOnLogin: "users-without-wallets",
+                    },
                   },
                 }}
               >
