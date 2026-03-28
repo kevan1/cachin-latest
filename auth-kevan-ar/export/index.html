@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Cachin Wallet Export</title>
+    <style>
+      :root { color-scheme: light; }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        background: #f5f8ff;
+        color: #111827;
+      }
+      .page {
+        min-height: 100vh;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 24px;
+      }
+      .card {
+        width: 100%;
+        max-width: 520px;
+        background: #ffffff;
+        border: 1px solid #dbe2f0;
+        border-radius: 18px;
+        padding: 24px;
+        box-shadow: 0 16px 40px rgba(20, 32, 62, 0.08);
+      }
+      .title { font-size: 24px; margin: 0 0 8px; }
+      .subtitle { margin: 0 0 20px; color: #4b5563; line-height: 1.5; }
+      .meta {
+        margin: 0;
+        padding: 12px;
+        border-radius: 12px;
+        background: #f8fafc;
+        border: 1px solid #e5e7eb;
+        font-size: 13px;
+        line-height: 1.5;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root">
+      <div class="page">
+        <div class="card">
+          <h1 class="title">Loading export flow...</h1>
+          <p class="subtitle">If this screen stays blank, refresh and try again.</p>
+          <p class="meta">Bootstrapping web export app.</p>
+        </div>
+      </div>
+    </div>
+
+    <script>
+      window.__CACHIN_EXPORT_CONFIG__ = {
+        appId: "",
+        clientId: "",
+        loginMethods: ["passkey"],
+      };
+
+      window.addEventListener("error", function (event) {
+        const message = String(event.message || "Unknown error");
+        const payload = JSON.stringify({ status: "error", error: message });
+        if (window.ReactNativeWebView?.postMessage) {
+          window.ReactNativeWebView.postMessage(payload);
+        }
+        if (window.webkit?.messageHandlers?.exportResult?.postMessage) {
+          window.webkit.messageHandlers.exportResult.postMessage(payload);
+        }
+
+        const root = document.getElementById("root");
+        if (!root) return;
+        root.innerHTML = `
+          <div class="page">
+            <div class="card">
+              <h1 class="title">Web export failed to load</h1>
+              <p class="subtitle">The export app crashed before rendering.</p>
+              <p class="meta">${message}</p>
+            </div>
+          </div>
+        `;
+      });
+    </script>
+    <script defer src="./app.js"></script>
+  </body>
+</html>

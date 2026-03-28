@@ -45,6 +45,9 @@ Update the `app.json` file with your Privy app credentials:
 - Add 'exp' to Allowed app URL schemas in the mobile client in your [Privy Dashboard](https://dashboard.privy.io/apps?page=settings&setting=clients)
 - For Expo Go development, add `host.exp.Exponent` to Allowed app identifiers in your Dashboard
 - For iOS passkey support, configure the `associatedDomains` and `passkeyAssociatedDomain`
+- For mobile key export in WebView, configure `EXPO_PUBLIC_PRIVY_EXPORT_PAGE_URL=https://export.cachin.app`
+- For web export, set a dedicated **web** client id: `EXPO_PUBLIC_PRIVY_EXPORT_CLIENT_ID=<privy_web_client_id>`
+- Add `https://export.cachin.app` to Allowed origins in your Privy client settings
 
 ### 4. Start Development Server
 
@@ -131,3 +134,58 @@ const response = await provider.request({
 - [Privy Documentation](https://docs.privy.io)
 - [Expo SDK](https://www.npmjs.com/package/@privy-io/expo)
 - [Expo Documentation](https://docs.expo.dev/)
+
+## Vercel Backend for Sponsored Solana Transactions
+
+This repo includes production-ready Vercel API routes in a dedicated backend app:
+
+- `POST /api/privy-solana-wallet`
+- `POST /api/privy-solana-sponsor`
+- `POST /api/solana-paymaster`
+
+They live in:
+
+- [`backend/api/privy-solana-wallet.ts`](./backend/api/privy-solana-wallet.ts)
+- [`backend/api/privy-solana-sponsor.ts`](./backend/api/privy-solana-sponsor.ts)
+- [`backend/api/solana-paymaster.ts`](./backend/api/solana-paymaster.ts)
+
+### Deploy
+
+1. Create/link a Vercel project from `./backend`.
+2. Add custom domain `api.cachin.app` to that project.
+3. Configure these Vercel Environment Variables (Production and Preview):
+   - `PRIVY_APP_ID`
+   - `PRIVY_APP_SECRET`
+   - `PRIVY_AUTHORIZATION_KEY`
+   - `PRIVY_KEY_QUORUM_ID`
+   - `PRIVY_GAS_SPONSOR_POLICY_IDS` (optional but recommended)
+   - `SOLANA_CAIP2` (optional; defaults to mainnet value in code)
+   - `PRIVY_DEBUG` (optional, set `true` only for troubleshooting)
+   - `PAYMASTER_SECRET_KEY` (required for `/api/solana-paymaster`)
+   - `PAYMASTER_PUBLIC_KEY` (recommended safety check against wrong key)
+   - `SOLANA_RPC` (optional, defaults to `EXPO_PUBLIC_SOLANA_RPC` or Solana mainnet)
+4. Deploy from `backend/`:
+
+```bash
+cd backend
+vercel deploy --prod --public
+```
+
+### Mobile App Configuration
+
+Set `EXPO_PUBLIC_API_URL=https://api.cachin.app` for app builds.  
+This is already configured in `eas.json` build profiles.
+
+### Quick Test
+
+```bash
+curl -X POST https://api.cachin.app/api/privy-solana-wallet \
+  -H "Content-Type: application/json" \
+  -d '{"userId":"<privy-user-id>"}'
+```
+
+```bash
+curl -X POST https://api.cachin.app/api/solana-paymaster \
+  -H "Content-Type: application/json" \
+  -d '{"transaction":"<base64-serialized-transaction-with-user-signature>"}'
+```

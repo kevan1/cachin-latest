@@ -1,4 +1,10 @@
 {
+  "rewrites": [
+    {
+      "source": "/export",
+      "destination": "/export/index.html"
+    }
+  ],
   "headers": [
     {
       "source": "/.well-known/apple-app-site-association",

@@ -1,4 +1,5 @@
-import "dotenv/config";
+import { config as loadDotenv } from "dotenv";
+import { resolve } from "node:path";
 import {
   AndroidConfig,
   withAndroidManifest,
@@ -9,8 +10,14 @@ import {
 import { mergeContents, removeContents } from "@expo/config-plugins/build/utils/generateCode";
 import type { ConfigContext, ExpoConfig } from "expo/config";
 
+loadDotenv({ path: resolve(__dirname, ".env"), override: false });
+loadDotenv({ path: resolve(__dirname, ".env.local"), override: true });
+
 const normalizeEnvValue = (value?: string) =>
   value?.trim().replace(/^['"]|['"]$/g, "");
+
+const normalizeExtraValue = (value: unknown) =>
+  typeof value === "string" ? normalizeEnvValue(value) : undefined;
 
 const googleMapsApiKey = normalizeEnvValue(
   process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY ?? process.env.GOOGLE_MAPS_API_KEY
@@ -182,6 +189,40 @@ const withGoogleMapsNativeConfig = (config: ExpoConfig, apiKey?: string) => {
 };
 
 export default ({ config }: ConfigContext): ExpoConfig => {
+  const extra = (config.extra ?? {}) as Record<string, unknown>;
+  const privyAppId =
+    normalizeEnvValue(
+      process.env.EXPO_PUBLIC_PRIVY_APP_ID ?? process.env.PRIVY_APP_ID
+    ) ?? normalizeExtraValue(extra.privyAppId);
+  const privyClientId =
+    normalizeEnvValue(process.env.EXPO_PUBLIC_PRIVY_CLIENT_ID) ??
+    normalizeExtraValue(extra.privyClientId);
+  const privyKeyQuorumId =
+    normalizeEnvValue(
+      process.env.EXPO_PUBLIC_PRIVY_KEY_QUORUM_ID ??
+        process.env.PRIVY_KEY_QUORUM_ID
+    ) ?? normalizeExtraValue(extra.privyKeyQuorumId);
+  const privyGasSponsorPolicyIds =
+    normalizeEnvValue(
+      process.env.EXPO_PUBLIC_PRIVY_GAS_SPONSOR_POLICY_IDS ??
+        process.env.PRIVY_GAS_SPONSOR_POLICY_IDS
+    ) ?? normalizeExtraValue(extra.privyGasSponsorPolicyIds);
+  const passkeyAssociatedDomain =
+    normalizeEnvValue(
+      process.env.EXPO_PUBLIC_PASSKEY_ASSOCIATED_DOMAIN ??
+        process.env.PASSKEY_ASSOCIATED_DOMAIN
+    ) ?? normalizeExtraValue(extra.passkeyAssociatedDomain);
+  const privyExportPageUrl =
+    normalizeEnvValue(
+      process.env.EXPO_PUBLIC_PRIVY_EXPORT_PAGE_URL ??
+        process.env.PRIVY_EXPORT_PAGE_URL
+    ) ?? normalizeExtraValue(extra.privyExportPageUrl);
+  const privyExportClientId =
+    normalizeEnvValue(
+      process.env.EXPO_PUBLIC_PRIVY_EXPORT_CLIENT_ID ??
+        process.env.PRIVY_EXPORT_CLIENT_ID
+    ) ?? normalizeExtraValue(extra.privyExportClientId);
+
   if (!googleMapsApiKey) {
     console.warn(
       "EXPO_PUBLIC_GOOGLE_MAPS_API_KEY is not set. Google Maps will fail to load."
@@ -196,12 +237,25 @@ export default ({ config }: ConfigContext): ExpoConfig => {
   const plugins = [...(config.plugins ?? [])].filter((plugin) =>
     Array.isArray(plugin) ? plugin[0] !== "react-native-maps" : plugin !== "react-native-maps"
   );
+  const hasExpoAudioPlugin = plugins.some((plugin) =>
+    Array.isArray(plugin) ? plugin[0] === "expo-audio" : plugin === "expo-audio"
+  );
+  if (!hasExpoAudioPlugin) {
+    plugins.push("expo-audio");
+  }
   const nextConfig: ExpoConfig = {
     ...config,
     plugins,
     extra: {
-      ...(config.extra ?? {}),
+      ...extra,
       ...(apiUrl ? { apiUrl } : {}),
+      ...(privyAppId ? { privyAppId } : {}),
+      ...(privyClientId ? { privyClientId } : {}),
+      ...(privyKeyQuorumId ? { privyKeyQuorumId } : {}),
+      ...(privyGasSponsorPolicyIds ? { privyGasSponsorPolicyIds } : {}),
+      ...(passkeyAssociatedDomain ? { passkeyAssociatedDomain } : {}),
+      ...(privyExportPageUrl ? { privyExportPageUrl } : {}),
+      ...(privyExportClientId ? { privyExportClientId } : {}),
     },
     ios: stripLegacyMapsConfig(config.ios),
     android: stripLegacyMapsConfig(config.android),

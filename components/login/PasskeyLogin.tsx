@@ -2,9 +2,15 @@ import { useState } from "react";
 import { Button, Text } from "react-native";
 
 import { useLoginWithPasskey, useSignupWithPasskey } from "@privy-io/expo/passkey";
+import {
+  getPasskeyRelyingPartyId,
+  getPasskeyRelyingPartyOrigin,
+} from "@/utils/runtimeConfig";
 
 export default function PasskeyLogin() {
   const [error, setError] = useState("");
+  const passkeyRelyingParty = getPasskeyRelyingPartyOrigin() ?? "https://auth.kevan.ar";
+  const passkeyRelyingPartyId = getPasskeyRelyingPartyId() ?? "auth.kevan.ar";
   
   const { loginWithPasskey } = useLoginWithPasskey({
     onError: (err) => {
@@ -33,7 +39,7 @@ export default function PasskeyLogin() {
     setError("");
     try {
       await loginWithPasskey({
-        relyingParty: "https://auth.kevan.ar",
+        relyingParty: passkeyRelyingPartyId,
       });
     } catch (err: any) {
       console.log("Login failed:", err);
@@ -43,7 +49,7 @@ export default function PasskeyLogin() {
   const handleRegisterPasskey = () => {
     setError("");
     signupWithPasskey({
-      relyingParty: "https://auth.kevan.ar",
+      relyingParty: passkeyRelyingPartyId,
     });
   };
 
@@ -57,6 +63,8 @@ export default function PasskeyLogin() {
         title="Login using Passkey"
         onPress={handlePasskeyAuth}
       />
+      <Text selectable>RP id: {passkeyRelyingPartyId}</Text>
+      <Text selectable>RP origin: {passkeyRelyingParty}</Text>
       {error && <Text style={{ color: "red" }}>Error: {error}</Text>}
     </>
   );

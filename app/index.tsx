@@ -20,6 +20,10 @@ import {
   isPasskeySupportedByOs,
   shouldFallbackToEmail,
 } from "@/utils/passkeySupport";
+import {
+  getPasskeyRelyingPartyId,
+  getPasskeyRelyingPartyOrigin,
+} from "@/utils/runtimeConfig";
 import { AlertSheet } from "@/components/AlertSheet";
 
 // Decorative element configuration
@@ -163,8 +167,11 @@ function AnimatedDecoration({ item }: { item: any }) {
 export default function Index() {
   const router = useRouter();
   const { height: screenHeight } = useWindowDimensions();
+  const passkeyRelyingPartyId = getPasskeyRelyingPartyId() ?? "auth.kevan.ar";
+  const passkeyRelyingParty = getPasskeyRelyingPartyOrigin() ?? "https://auth.kevan.ar";
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [lastAttemptAt, setLastAttemptAt] = useState<string | null>(null);
   const [useEmailFallback, setUseEmailFallback] = useState(
     () => !isPasskeySupportedByOs()
   );
@@ -210,7 +217,7 @@ export default function Index() {
     router.push({ pathname: "/email", params: { mode: passkeyAlert.mode } });
   }, [passkeyAlert.mode, router]);
   
-  const { loginWithPasskey } = useLoginWithPasskey({
+  const { loginWithPasskey, state: passkeyLoginState } = useLoginWithPasskey({
     onSuccess: () => {
       console.log('Login successful');
       setError(null);
@@ -256,9 +263,10 @@ export default function Index() {
 
     setLoading(true);
     setError(null);
+    setLastAttemptAt(new Date().toISOString());
     try {
       await loginWithPasskey({
-        relyingParty: "https://auth.kevan.ar",
+        relyingParty: passkeyRelyingPartyId,
       });
     } catch (err: any) {
       console.error('Login error:', err);
@@ -332,11 +340,16 @@ export default function Index() {
                 onPress={handleLogin}
                 disabled={loading}
               >
-                <Text style={styles.secondaryText}>Log In</Text>
+                <Text style={styles.secondaryText}>{loading ? "Signing in..." : "Log In"}</Text>
               </TouchableOpacity>
             </View>
 
             {error ? <Text selectable style={styles.errorText}>{error}</Text> : null}
+            <Text selectable style={styles.debugText}>
+              Passkey debug: rpId={passkeyRelyingPartyId} | origin={passkeyRelyingParty} | state=
+              {passkeyLoginState.status}
+              {lastAttemptAt ? ` | lastAttempt=${lastAttemptAt}` : ""}
+            </Text>
             {useEmailFallback ? (
               <Text style={styles.fallbackText}>
                 Passkeys aren&apos;t supported on this device. Continue with email instead.
@@ -449,6 +462,13 @@ const styles = StyleSheet.create({
     color: "#EF4444",
     textAlign: "center",
     fontWeight: "600",
+  },
+  debugText: {
+    marginTop: 10,
+    color: "#6B7280",
+    textAlign: "center",
+    fontSize: 12,
+    lineHeight: 18,
   },
   fallbackText: {
     marginTop: 10,

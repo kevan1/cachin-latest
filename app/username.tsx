@@ -9,6 +9,10 @@ import {
   isPasskeySupportedByOs,
   shouldFallbackToEmail,
 } from '@/utils/passkeySupport';
+import {
+  getPasskeyRelyingPartyId,
+  getPasskeyRelyingPartyOrigin,
+} from '@/utils/runtimeConfig';
 
 // Icon components
 function CheckmarkIcon({ size = 28, color = '#10B981' }: { size?: number; color?: string }) {
@@ -75,6 +79,8 @@ function ProgressBar({ isActive, isComplete, delay = 0 }: { isActive: boolean; i
 export default function UsernameScreen() {
   const router = useRouter();
   const { width: screenWidth, height: screenHeight } = useWindowDimensions();
+  const passkeyRelyingPartyId = getPasskeyRelyingPartyId() ?? 'auth.kevan.ar';
+  const passkeyRelyingParty = getPasskeyRelyingPartyOrigin() ?? 'https://auth.kevan.ar';
   const [currentStep, setCurrentStep] = useState(0);
   const slideAnim = useRef(new Animated.Value(0)).current;
   const [form, setForm] = useState({ username: '', isValid: false, validationMessage: '' });
@@ -105,7 +111,7 @@ export default function UsernameScreen() {
     router.replace({ pathname: '/email', params: { mode: 'signup' } });
   }, [router, useEmailFallback]);
 
-  const { signupWithPasskey } = useSignupWithPasskey({
+  const { signupWithPasskey, state: passkeySignupState } = useSignupWithPasskey({
     onSuccess: async () => {
       console.log("Passkey registered and logged in successfully");
       setLoading(false);
@@ -180,7 +186,7 @@ export default function UsernameScreen() {
       setLoading(true);
       
       await signupWithPasskey({
-        relyingParty: "https://auth.kevan.ar",
+        relyingParty: passkeyRelyingPartyId,
         username: form.username,
       });
     } catch (error: any) {
@@ -361,6 +367,10 @@ export default function UsernameScreen() {
                     <Text style={styles.continueButtonText}>Setup Passkey</Text>
                   )}
                 </TouchableOpacity>
+                <Text selectable style={styles.debugText}>
+                  Passkey debug: rpId={passkeyRelyingPartyId} | origin={passkeyRelyingParty} |
+                  state={passkeySignupState.status}
+                </Text>
               </View>
             </View>
           </Animated.View>
@@ -523,6 +533,13 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
     fontSize: 18,
     fontWeight: '700',
+  },
+  debugText: {
+    marginTop: 10,
+    color: '#6B7280',
+    textAlign: 'center',
+    fontSize: 12,
+    lineHeight: 18,
   },
   featuresList: {
     gap: 32,

@@ -1,0 +1,21 @@
+{
+  "name": "export-cachin-app",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "build": "esbuild src/main.jsx --bundle --format=iife --platform=browser --target=es2020 --minify --outfile=app.js"
+  },
+  "dependencies": {
+    "@privy-io/react-auth": "^3.18.0",
+    "@solana-program/memo": "^0.11.0",
+    "@solana-program/system": "^0.12.0",
+    "@solana-program/token": "^0.12.0",
+    "@solana/kit": "^6.5.0",
+    "@wallet-standard/app": "^1.1.0",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0"
+  },
+  "devDependencies": {
+    "esbuild": "^0.25.11"
+  }
+}
