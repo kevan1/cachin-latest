@@ -32,6 +32,7 @@ import {
 } from "@/utils/satochipSecureChannel";
 
 type NfcModule = typeof import("react-native-nfc-manager");
+type NfcManagerInstance = NfcModule["default"];
 
 const SATOCHIP_AID = [0x53, 0x61, 0x74, 0x6f, 0x43, 0x68, 0x69, 0x70];
 const CLA = 0xb0;
@@ -307,6 +308,100 @@ async function getNfcModule(): Promise<NfcModule> {
   return import("react-native-nfc-manager");
 }
 
+function getUnknownErrorMessage(error: unknown): string {
+  if (error instanceof Error && error.message) return error.message;
+  if (typeof error === "string") return error;
+  return "";
+}
+
+function mapNfcSessionError(error: unknown, nfcModule: NfcModule): SatochipError | null {
+  if (error instanceof SatochipError) return error;
+
+  const message = getUnknownErrorMessage(error);
+  const normalized = message.toLowerCase();
+  const errorName = error instanceof Error ? error.name.toLowerCase() : "";
+  const nfcError = (nfcModule as unknown as { NfcError?: Record<string, unknown> }).NfcError;
+
+  const isErrorType = (typeName: string) => {
+    const ctor = nfcError?.[typeName];
+    if (typeof ctor !== "function") return false;
+    return error instanceof (ctor as new (...args: never[]) => Error);
+  };
+
+  if (
+    isErrorType("UserCancel") ||
+    errorName === "usercancel" ||
+    normalized.includes("cancelled") ||
+    normalized.includes("canceled")
+  ) {
+    return new SatochipError("NFC scan was canceled.");
+  }
+
+  if (
+    isErrorType("UnsupportedFeature") ||
+    normalized.includes("unsupportedfeature") ||
+    normalized.includes("nfcerror:1") ||
+    normalized.includes("not support in this device") ||
+    normalized.includes("not supported in this device")
+  ) {
+    if (Platform.OS === "ios") {
+      return new SatochipError(
+        "NFC is not available for this app on this iPhone. Install the latest TestFlight build and verify the device supports NFC."
+      );
+    }
+    return new SatochipError("This device does not support NFC tag reading.");
+  }
+
+  if (isErrorType("SystemBusy") || normalized.includes("systembusy")) {
+    return new SatochipError("NFC is busy. Close other NFC apps and try again.");
+  }
+
+  if (isErrorType("Timeout") || normalized.includes("timeout")) {
+    return new SatochipError("NFC timed out. Hold the card near the phone and try again.");
+  }
+
+  if (
+    isErrorType("TagConnectionLost") ||
+    isErrorType("TagNotConnected") ||
+    isErrorType("SessionInvalidated") ||
+    normalized.includes("tagconnectionlost") ||
+    normalized.includes("tagnotconnected") ||
+    normalized.includes("sessioninvalidated")
+  ) {
+    return new SatochipError(
+      "Lost connection to the Satochip card. Keep it near the NFC antenna and try again."
+    );
+  }
+
+  return null;
+}
+
+function createApduTransceiver(NfcManager: NfcManagerInstance): (apdu: number[]) => Promise<number[]> {
+  if (Platform.OS === "ios" && typeof NfcManager.sendCommandAPDUIOS === "function") {
+    return async (apdu) => {
+      const { response, sw1, sw2 } = await NfcManager.sendCommandAPDUIOS(apdu);
+      return [...response, sw1, sw2];
+    };
+  }
+
+  return (apdu) => NfcManager.isoDepHandler.transceive(apdu);
+}
+
+async function syncIosAlertMessage(NfcManager: NfcManagerInstance, alertMessage: string) {
+  if (Platform.OS !== "ios") return;
+  const trimmed = alertMessage.trim();
+  if (!trimmed) return;
+
+  if (typeof NfcManager.setAlertMessageIOS === "function") {
+    await NfcManager.setAlertMessageIOS(trimmed).catch(() => undefined);
+    return;
+  }
+
+  if (typeof NfcManager.setAlertMessage === "function") {
+    await NfcManager.setAlertMessage(trimmed).catch(() => undefined);
+  }
+}
+
 function assertNfcNativeModuleReady() {
   if (NativeModules.NfcManager) {
     return;
@@ -317,7 +412,7 @@ function assertNfcNativeModuleReady() {
   );
 }
 
-async function withIsoDepSession<T>(
+async function withSatochipNfcSession<T>(
   alertMessage: string,
   callback: (transceive: (apdu: number[]) => Promise<number[]>) => Promise<T>
 ): Promise<T> {
@@ -328,7 +423,7 @@ async function withIsoDepSession<T>(
   assertNfcNativeModuleReady();
 
   const nfcModule = await getNfcModule();
-  const NfcManager = nfcModule.default ?? (nfcModule as unknown as NfcModule["default"]);
+  const NfcManager = nfcModule.default ?? (nfcModule as unknown as NfcManagerInstance);
   const { NfcTech } = nfcModule;
 
   if (!NfcManager || typeof NfcManager.start !== "function") {
@@ -354,23 +449,60 @@ async function withIsoDepSession<T>(
     throw error;
   }
 
-  const isSupported = await NfcManager.isSupported();
+  let isSupported = false;
+  try {
+    isSupported = await NfcManager.isSupported();
+  } catch (error) {
+    const mapped = mapNfcSessionError(error, nfcModule);
+    if (mapped) throw mapped;
+    throw new SatochipError(
+      getUnknownErrorMessage(error) || "Failed to verify NFC support on this device."
+    );
+  }
   if (!isSupported) {
+    if (Platform.OS === "ios") {
+      throw new SatochipError(
+        "NFC is not available for this app on this iPhone. Install the latest TestFlight build and verify the device supports NFC."
+      );
+    }
     throw new SatochipError("This device does not support NFC.");
   }
 
-  const isEnabled = await NfcManager.isEnabled().catch(() => true);
+  let isEnabled = true;
+  try {
+    isEnabled = await NfcManager.isEnabled().catch(() => true);
+  } catch (error) {
+    const mapped = mapNfcSessionError(error, nfcModule);
+    if (mapped) throw mapped;
+    isEnabled = true;
+  }
   if (!isEnabled) {
     throw new SatochipError("Turn on NFC on this device, then try again.");
   }
 
-  await NfcManager.requestTechnology(NfcTech.IsoDep, {
-    alertMessage,
-    invalidateAfterFirstRead: false,
-  });
+  try {
+    await NfcManager.requestTechnology(NfcTech.IsoDep, {
+      alertMessage,
+      invalidateAfterFirstRead: false,
+    });
+  } catch (error) {
+    const mapped = mapNfcSessionError(error, nfcModule);
+    if (mapped) throw mapped;
+    if (error instanceof Error) throw error;
+    throw new SatochipError(getUnknownErrorMessage(error) || "Failed to start the NFC session.");
+  }
+
+  await syncIosAlertMessage(NfcManager, alertMessage);
+
+  const transceive = createApduTransceiver(NfcManager);
 
   try {
-    return await callback((apdu) => NfcManager.isoDepHandler.transceive(apdu));
+    return await callback(transceive);
+  } catch (error) {
+    const mapped = mapNfcSessionError(error, nfcModule);
+    if (mapped) throw mapped;
+    if (error instanceof Error) throw error;
+    throw new SatochipError(getUnknownErrorMessage(error) || "Failed during NFC communication.");
   } finally {
     await NfcManager.cancelTechnologyRequest({
       throwOnError: false,
@@ -649,7 +781,7 @@ export async function readSatochipAvalancheAddress(
     throw new SatochipError("Enter your Satochip PIN first.");
   }
 
-  return withIsoDepSession(
+  return withSatochipNfcSession(
     "Hold your Satochip card near the phone to read its Avalanche address.",
     (transceive) => readSatochipAvalancheAddressInternal(transceive, pin.trim())
   );
@@ -690,7 +822,7 @@ export async function sendSatochipAvalancheUsdcTransfer({
     transport: http(rpcUrl),
   });
 
-  return withIsoDepSession(
+  return withSatochipNfcSession(
     "Hold your Satochip card steady while Cachin signs the Fuji USDC transfer.",
     async (rawTransceive) => {
       await selectSatochipApplet(rawTransceive);
@@ -786,7 +918,7 @@ export async function sendSatochipAvalancheUsdcTransfer({
  * Used by the UI to detect whether the card needs setup before prompting for a PIN.
  */
 export async function readSatochipCardStatus(): Promise<SatochipCardStatus> {
-  return withIsoDepSession(
+  return withSatochipNfcSession(
     "Hold your Satochip card near the phone to check its status.",
     async (transceive) => {
       await selectSatochipApplet(transceive);
@@ -812,7 +944,7 @@ export async function setupSatochipCard({
     throw new SatochipError("Choose a PIN of at least 4 characters.");
   }
 
-  return withIsoDepSession(
+  return withSatochipNfcSession(
     "Hold your Satochip card near the phone to set it up.",
     async (rawTransceive) => {
       await selectSatochipApplet(rawTransceive);

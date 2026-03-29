@@ -1,15 +1,30 @@
-import { StyleSheet, ScrollView, TouchableOpacity, View, Text, RefreshControl, Linking, Switch, Animated, useColorScheme, Platform, StatusBar } from "react-native";
+import {
+  StyleSheet,
+  ScrollView,
+  TouchableOpacity,
+  View,
+  Text,
+  RefreshControl,
+  Linking,
+  Switch,
+  Animated,
+  useColorScheme,
+  Platform,
+  StatusBar,
+  type NativeScrollEvent,
+  type NativeSyntheticEvent,
+} from "react-native";
 import { useRouter, useFocusEffect } from "expo-router";
 import * as Haptics from 'expo-haptics';
 import { useState, useEffect, useCallback, useRef, useMemo, type ReactNode } from 'react';
 import * as Clipboard from 'expo-clipboard';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Transaction } from '@/types/types';
 import { getMergedTransactions, startTransactionPolling } from '@/utils/transactionListener';
 import { clearTransactions } from '@/utils/transactionStorage';
 import { getUsernameByAddress } from '@/services/firestoreService';
 import BottomSheet, { BottomSheetView, BottomSheetBackdrop } from '@gorhom/bottom-sheet';
-import { getUsername, saveUsername, getSelectedCurrency, Currency } from '@/utils/userStorage';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import { getUsername, getSelectedCurrency, saveUsername, Currency } from '@/utils/userStorage';
 import { fetchMultiChainBalances } from '@/utils/multiChainBalanceService';
 import { fetchArsPrice } from '@/utils/priceService';
 import { ChainType, getExplorerUrl, getChainSymbol } from '@/constants/chains';
@@ -44,18 +59,27 @@ import { buildSolanaPayUri, createSolanaPayReferences, SOLANA_USDC_MINT } from "
 import {
   isDuplicateSessionSignerError,
   isGaslessAuthorizationRequiredError,
+  isOnDeviceSessionSignerModeError,
 } from "@/utils/privyGasless";
+import {
+  getPrivyGaslessKeyQuorumId,
+  getPrivyGasSponsorPolicyIds,
+} from "@/utils/privyGaslessConfig";
 import { ensureSponsoredSolanaWallet } from "@/utils/privySponsorship";
 import {
   getEmbeddedSolanaWalletAddress,
   getSolanaProviderAddress,
 } from "@/utils/privySolanaWallet";
 import { getSponsoredSolanaWallet, setSponsoredSolanaWallet } from "@/utils/sponsoredWalletStorage";
-import { Image } from "expo-image";
-import { buildAvatarUrl, resolveAvatarSeed } from "@/utils/avatar";
+import {
+  loadThemePreference,
+  saveThemePreference,
+  subscribeThemePreference,
+} from "@/utils/themePreferences";
 
 const MESH_DIMENSION = 3;
 type ReceiveAsset = 'usdc' | 'sol' | 'avax';
+const PENDING_USERNAME_SAVE_KEY = 'pending_username_save';
 
 
 // Icon components using LineIcons style
@@ -143,19 +167,40 @@ export default function HomeScreen() {
   
   // Load saved theme
   useEffect(() => {
-    AsyncStorage.getItem('user_theme').then((saved) => {
-      if (saved) setThemeId(saved);
+    let isMounted = true;
+
+    loadThemePreference()
+      .then((saved) => {
+        if (!isMounted) return;
+        setThemeId(saved);
+      })
+      .catch(() => undefined);
+
+    const unsubscribe = subscribeThemePreference((nextThemeId) => {
+      setThemeId(nextThemeId);
     });
+
+    return () => {
+      isMounted = false;
+      unsubscribe();
+    };
   }, []);
 
   const handleThemeSelect = (id: string) => {
     setThemeId(id);
-    AsyncStorage.setItem('user_theme', id);
+    void saveThemePreference(id);
   };
 
   const currentTheme = THEMES.find(t => t.id === themeId) || THEMES[0];
   const meshColors = colorScheme === "dark" ? currentTheme.colors.dark : currentTheme.colors.light;
-  const supportsMeshGradient = Platform.OS === "ios" && Number(Platform.Version) >= 16;
+  const isIOS = process.env.EXPO_OS === "ios";
+  const iosVersion = (() => {
+    if (!isIOS) return 0;
+    if (typeof Platform.Version === "number") return Platform.Version;
+    if (typeof Platform.Version === "string") return Number.parseFloat(Platform.Version);
+    return 0;
+  })();
+  const supportsMeshGradient = isIOS && Number.isFinite(iosVersion) && iosVersion >= 16;
   
   const insets = useSafeAreaInsets();
   const topInset = Math.max(insets.top, StatusBar.currentHeight ?? 0);
@@ -181,7 +226,6 @@ export default function HomeScreen() {
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [selectedTransaction, setSelectedTransaction] = useState<Transaction | null>(null);
   const [username, setUsername] = useState<string>('User');
-  const [avatarError, setAvatarError] = useState(false);
   const [addressToUsername, setAddressToUsername] = useState<{ [address: string]: string }>({});
   const [isBalanceVisible, setIsBalanceVisible] = useState<boolean>(true);
   const [hideWallet, setHideWallet] = useState(false);
@@ -195,15 +239,8 @@ export default function HomeScreen() {
     useState<AvalancheWalletSource>("privy");
   const [satochipAvalancheAddress, setSatochipAvalancheAddress] = useState<string | null>(null);
 
-  const keyQuorumId = process.env.EXPO_PUBLIC_PRIVY_KEY_QUORUM_ID;
-  const sessionSignerPolicyIds = useMemo(() => {
-    const raw = process.env.EXPO_PUBLIC_PRIVY_GAS_SPONSOR_POLICY_IDS;
-    if (!raw) return [];
-    return raw
-      .split(",")
-      .map((id) => id.trim())
-      .filter(Boolean);
-  }, []);
+  const keyQuorumId = useMemo(() => getPrivyGaslessKeyQuorumId(), []);
+  const sessionSignerPolicyIds = useMemo(() => getPrivyGasSponsorPolicyIds(), []);
 
   useEffect(() => {
     console.log("[Home] EXPO_PUBLIC_PRIVY_KEY_QUORUM_ID:", keyQuorumId);
@@ -256,7 +293,6 @@ export default function HomeScreen() {
     avalancheWalletSource === "satochip"
       ? satochipAvalancheAddress
       : embeddedAvalancheAddress;
-
   const authorizeGaslessForAddress = useCallback(
     async (address: string, options?: { silent?: boolean }) => {
       if (!keyQuorumId) {
@@ -285,6 +321,18 @@ export default function HomeScreen() {
           toast.show("Gasless authorization enabled for this wallet.");
         }
       } catch (error) {
+        if (isOnDeviceSessionSignerModeError(error)) {
+          await addSessionSigners({
+            address,
+            signers: [],
+          });
+
+          if (!options?.silent) {
+            toast.show("Gasless authorization enabled for this wallet.");
+          }
+          return;
+        }
+
         if (isDuplicateSessionSignerError(error)) {
           if (!options?.silent) {
             toast.show("Gasless authorization is already enabled for this wallet.");
@@ -340,6 +388,7 @@ export default function HomeScreen() {
   const receiveSheetRef = useRef<BottomSheet>(null);
   const cryptoReceiveRef = useRef<BottomSheet>(null);
   const fiatReceiveRef = useRef<BottomSheet>(null);
+  const homeScrollRef = useRef<ScrollView>(null);
   const qrScale = useRef(new Animated.Value(1)).current;
   const [fiatCurrency, setFiatCurrency] = useState<'usd' | 'eur'>('usd');
   const snapPoints = useMemo(() => ['75%'], []);
@@ -347,7 +396,6 @@ export default function HomeScreen() {
   const receiveSnapPoints = useMemo(() => ['45%'], []);
   const cryptoReceiveSnapPoints = useMemo(() => ['70%'], []);
   const fiatReceiveSnapPoints = useMemo(() => ['75%'], []);
-  const isIOS = process.env.EXPO_OS === "ios";
   const tabBarHeight = isIOS ? 49 : ANDROID_GLASS_TAB_HEIGHT;
   const sheetBottomPadding = Math.max(24, insets.bottom + tabBarHeight + 12);
   
@@ -443,24 +491,7 @@ export default function HomeScreen() {
     const loadUsername = async () => {
       const solanaAddress = getFullSolanaAddressForUsername();
       console.log('[Home] Loading username for address:', solanaAddress);
-      
-      // Check if there's a pending username save from registration
-      const pendingSave = await AsyncStorage.getItem('pending_username_save');
-      const pendingUsername = await AsyncStorage.getItem('user_username');
-      
-      if (pendingSave === 'true' && pendingUsername && solanaAddress) {
-        console.log('[Home] Found pending username save:', pendingUsername);
-        try {
-          await saveUsername(pendingUsername, solanaAddress);
-          console.log('[Home] ✅ Pending username saved to Firebase:', pendingUsername);
-          await AsyncStorage.removeItem('pending_username_save');
-          setUsername(pendingUsername);
-          return;
-        } catch {
-          console.error('[Home] ❌ Error saving pending username');
-        }
-      }
-      
+
       // Try to get username (will check AsyncStorage first, then Firestore)
       const storedUsername = await getUsername(solanaAddress || undefined);
       console.log('[Home] Retrieved username:', storedUsername);
@@ -473,6 +504,36 @@ export default function HomeScreen() {
       }
     };
     loadUsername();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [solanaWallets, sponsoredWalletAddress]);
+
+  // Complete deferred username sync when wallet hydration was unavailable at signup.
+  useEffect(() => {
+    const syncPendingUsername = async () => {
+      const pendingSync = await AsyncStorage.getItem(PENDING_USERNAME_SAVE_KEY);
+      if (pendingSync !== 'true') {
+        return;
+      }
+
+      const solanaAddress = getFullSolanaAddressForUsername();
+      if (!solanaAddress) {
+        return;
+      }
+
+      const cachedUsername = await getUsername();
+      if (!cachedUsername) {
+        await AsyncStorage.removeItem(PENDING_USERNAME_SAVE_KEY);
+        return;
+      }
+
+      await saveUsername(cachedUsername, solanaAddress);
+      await AsyncStorage.removeItem(PENDING_USERNAME_SAVE_KEY);
+      console.log('[Home] Synced pending username to Firestore');
+    };
+
+    void syncPendingUsername().catch((error) => {
+      console.error('[Home] Failed to sync pending username:', error);
+    });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [solanaWallets, sponsoredWalletAddress]);
 
@@ -663,21 +724,6 @@ export default function HomeScreen() {
       setUsdBalance('0.00');
     }
   };
-
-  const avatarSeed = useMemo(
-    () =>
-      resolveAvatarSeed({
-        username,
-        userId: user?.id,
-        address: fullSolanaAddress,
-      }),
-    [fullSolanaAddress, user?.id, username]
-  );
-  const avatarUri = useMemo(() => buildAvatarUrl(avatarSeed, 96), [avatarSeed]);
-
-  useEffect(() => {
-    setAvatarError(false);
-  }, [avatarUri]);
 
   const solanaPayReferences = useMemo(
     () => (fullSolanaAddress ? createSolanaPayReferences(1) : []),
@@ -948,6 +994,10 @@ export default function HomeScreen() {
     router.push("/satochip-connect");
   }, [router]);
 
+  const goToProfile = useCallback(() => {
+    router.navigate("/profile");
+  }, [router]);
+
   const handleCopyAddress = async () => {
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     const addressToCopy = getSelectedWalletAddress();
@@ -1090,13 +1140,26 @@ export default function HomeScreen() {
     content: ReactNode,
     style: any,
     intensity: number,
-    _interactive = false
+    interactive = false
   ) =>
     (
-      <GlassView style={style} intensity={intensity}>
+      <GlassView
+        style={style}
+        intensity={isIOS ? Math.max(8, intensity - 10) : intensity}
+        interactive={interactive}
+      >
         {content}
       </GlassView>
     );
+
+  const handleHomeScroll = useCallback(
+    (event: NativeSyntheticEvent<NativeScrollEvent>) => {
+      if (!isIOS) return;
+      if (event.nativeEvent.contentOffset.y <= 0) return;
+      homeScrollRef.current?.scrollTo({ x: 0, y: 0, animated: false });
+    },
+    [isIOS]
+  );
 
   const recentCardContent = (
     <>
@@ -1177,7 +1240,7 @@ export default function HomeScreen() {
                 smoothsColors={true}
                 colorSpace="device"
                 isAnimated={true}
-                animationDuration={1800}
+                animationDuration={2400}
                 animationType="sine"
                 style={styles.background}
                 pointerEvents="none"
@@ -1209,32 +1272,33 @@ export default function HomeScreen() {
           </View>
 
           <View style={styles.safeArea}>
-            <View style={[styles.topHeader, { paddingTop: Math.max(6, topInset + 6) }]}>
+            <View
+              style={[
+                styles.topHeader,
+                isIOS ? styles.topHeaderIos : null,
+                { paddingTop: Math.max(6, topInset + 6) },
+              ]}
+            >
               <TouchableOpacity
-                style={styles.headerProfileRow}
+                style={[styles.headerProfileRow, isIOS ? styles.headerProfileRowIos : null]}
                 activeOpacity={0.85}
                 onPress={() => {
                   Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                  router.push("/profile");
+                  goToProfile();
                 }}
               >
-                <GlassView style={styles.headerGlassAvatar} intensity={30}>
-                  {avatarError ? (
-                    <View style={styles.headerProfileFallback}>
-                      <Text style={styles.headerProfileFallbackText}>
-                        {(username || "User").slice(0, 2).toUpperCase()}
-                      </Text>
-                    </View>
-                  ) : (
-                    <Image
-                      source={{ uri: avatarUri }}
-                      style={styles.headerGlassAvatarImage}
-                      contentFit="cover"
-                      onError={() => setAvatarError(true)}
-                    />
-                  )}
+                <GlassView
+                  style={[styles.headerIconButton, isIOS ? styles.headerIconButtonIos : null]}
+                  intensity={isIOS ? 16 : 30}
+                  interactive
+                >
+                  <IconSymbol
+                    name="person.crop.circle"
+                    size={24}
+                    color="rgba(0,0,0,0.72)"
+                  />
                 </GlassView>
-                <Text style={styles.headerGreetingText} numberOfLines={1}>
+                <Text style={[styles.headerGreetingText, isIOS ? styles.headerGreetingTextIos : null]} numberOfLines={1}>
                   Hello, {username || "User"}
                 </Text>
               </TouchableOpacity>
@@ -1248,7 +1312,11 @@ export default function HomeScreen() {
                   pressOpacity={0.7}
                   style={styles.headerIconHit}
                 >
-                  <GlassView style={styles.headerIconButton} intensity={30}>
+                  <GlassView
+                    style={[styles.headerIconButton, isIOS ? styles.headerIconButtonIos : null]}
+                    intensity={isIOS ? 16 : 30}
+                    interactive
+                  >
                     <IconSymbol
                       name="plus"
                       size={22}
@@ -1265,7 +1333,11 @@ export default function HomeScreen() {
                   pressOpacity={0.7}
                   style={styles.headerIconHit}
                 >
-                  <GlassView style={styles.headerIconButton} intensity={30}>
+                  <GlassView
+                    style={[styles.headerIconButton, isIOS ? styles.headerIconButtonIos : null]}
+                    intensity={isIOS ? 16 : 30}
+                    interactive
+                  >
                     <IconSymbol
                       name="paintpalette.fill"
                       size={22}
@@ -1277,6 +1349,7 @@ export default function HomeScreen() {
             </View>
 
             <ScrollView
+              ref={homeScrollRef}
               contentInsetAdjustmentBehavior="automatic"
               contentContainerStyle={[
                 styles.scrollContent,
@@ -1284,6 +1357,8 @@ export default function HomeScreen() {
                 process.env.EXPO_OS !== "ios" ? { paddingTop: androidHeaderOffset } : null,
                 styles.safeAreaContent,
               ]}
+              onScroll={handleHomeScroll}
+              scrollEventThrottle={16}
               refreshControl={
                 <RefreshControl
                   refreshing={isRefreshing}
@@ -1294,7 +1369,7 @@ export default function HomeScreen() {
               showsVerticalScrollIndicator={false}
             >
 
-          <View style={styles.balanceBlock}>
+          <View style={[styles.balanceBlock, isIOS ? styles.balanceBlockIos : null]}>
             <TouchableOpacity
               onPress={handleBalance}
               onLongPress={handleToggleBalanceHidden}
@@ -1302,10 +1377,10 @@ export default function HomeScreen() {
               style={styles.balanceTap}
             >
               {isBalanceVisible ? (
-                <View style={styles.balanceRowLiquid}>
-                  <Text style={styles.balanceCurrencyLiquid}>$</Text>
-                  <Text style={styles.balanceMainLiquid}>{formatUsdParts(usdBalance).dollars}</Text>
-                  <Text style={styles.balanceCentsLiquid}>.{formatUsdParts(usdBalance).cents}</Text>
+                <View style={[styles.balanceRowLiquid, isIOS ? styles.balanceRowLiquidIos : null]}>
+                  <Text style={[styles.balanceCurrencyLiquid, isIOS ? styles.balanceCurrencyLiquidIos : null]}>$</Text>
+                  <Text style={[styles.balanceMainLiquid, isIOS ? styles.balanceMainLiquidIos : null]}>{formatUsdParts(usdBalance).dollars}</Text>
+                  <Text style={[styles.balanceCentsLiquid, isIOS ? styles.balanceCentsLiquidIos : null]}>.{formatUsdParts(usdBalance).cents}</Text>
                 </View>
               ) : (
                 <Text style={styles.balanceHidden}>••••</Text>
@@ -1315,14 +1390,14 @@ export default function HomeScreen() {
               </Text>
             </TouchableOpacity>
 
-            <View style={styles.pillsRow}>
+            <View style={[styles.pillsRow, isIOS ? styles.pillsRowIos : null]}>
               <TouchableOpacity onPress={handleCopyAddress} activeOpacity={0.85}>
                 {renderGlassSurface(
                   <>
                     <Text style={styles.addressPillText}>{getDisplayAddress() ?? "No wallet"}</Text>
                     <IconSymbol name="doc.on.doc" size={16} color="rgba(0,0,0,0.55)" />
                   </>,
-                  styles.addressPill,
+                  [styles.addressPill, isIOS ? styles.addressPillIos : null],
                   28,
                   true
                 )}
@@ -1353,7 +1428,7 @@ export default function HomeScreen() {
               >
                 {renderGlassSurface(
                   <Text style={styles.chainPillText}>{selectedChainLabel}</Text>,
-                  styles.chainPill,
+                  [styles.chainPill, isIOS ? styles.chainPillIos : null],
                   22,
                   true
                 )}
@@ -1429,16 +1504,16 @@ export default function HomeScreen() {
             ) : null}
           </View>
 
-          <View style={styles.actionsRowLiquid}>
+          <View style={[styles.actionsRowLiquid, isIOS ? styles.actionsRowLiquidIos : null]}>
             <TouchableOpacity style={styles.actionHit} activeOpacity={0.9} onPress={handleAdd}>
               {renderGlassSurface(
                 <>
-                  <View style={styles.actionIconCircle}>
+                  <View style={[styles.actionIconCircle, isIOS ? styles.actionIconCircleIos : null]}>
                     <IconSymbol name="plus" size={24} color="rgba(0,0,0,0.72)" />
                   </View>
                   <Text style={styles.actionLabel}>Deposit</Text>
                 </>,
-                styles.actionTile,
+                [styles.actionTile, isIOS ? styles.actionTileIos : null],
                 30,
                 true
               )}
@@ -1447,12 +1522,12 @@ export default function HomeScreen() {
             <TouchableOpacity style={styles.actionHit} activeOpacity={0.9} onPress={handleWithdraw}>
               {renderGlassSurface(
                 <>
-                  <View style={styles.actionIconCircle}>
+                  <View style={[styles.actionIconCircle, isIOS ? styles.actionIconCircleIos : null]}>
                     <IconSymbol name="arrow.up" size={24} color="rgba(0,0,0,0.72)" />
                   </View>
                   <Text style={styles.actionLabel}>Withdraw</Text>
                 </>,
-                styles.actionTile,
+                [styles.actionTile, isIOS ? styles.actionTileIos : null],
                 30,
                 true
               )}
@@ -1461,12 +1536,12 @@ export default function HomeScreen() {
             <TouchableOpacity style={styles.actionHit} activeOpacity={0.9} onPress={handleSend}>
               {renderGlassSurface(
                 <>
-                  <View style={styles.actionIconCircle}>
+                  <View style={[styles.actionIconCircle, isIOS ? styles.actionIconCircleIos : null]}>
                     <IconSymbol name="paperplane.fill" size={24} color="rgba(0,0,0,0.72)" />
                   </View>
                   <Text style={styles.actionLabel}>Send</Text>
                 </>,
-                styles.actionTile,
+                [styles.actionTile, isIOS ? styles.actionTileIos : null],
                 30,
                 true
               )}
@@ -1476,20 +1551,15 @@ export default function HomeScreen() {
           <View style={styles.recentHeaderRow}>
             <Text style={styles.recentHeaderText}>Recent activity</Text>
             <TouchableOpacity onPress={() => {
-                        if (selectedChain === ChainType.AVALANCHE) {
-                          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                          showToast('Avalanche activity is coming soon. Switch to Solana to continue.');
-                          return;
-                        }
                         Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                        router.push("/activity");
+                        goToProfile();
                       }} activeOpacity={0.85}>
-              <IconSymbol name="info.circle" size={18} color="rgba(0,0,0,0.55)" />
+              <IconSymbol name="person.crop.circle" size={20} color="rgba(0,0,0,0.55)" />
             </TouchableOpacity>
           </View>
 
-          <View style={styles.recentCardWrap}>
-            <GlassView style={styles.recentCard} intensity={18}>
+          <View style={[styles.recentCardWrap, isIOS ? styles.recentCardWrapIos : null]}>
+            <GlassView style={[styles.recentCard, isIOS ? styles.recentCardIos : null]} intensity={18}>
               {recentCardContent}
             </GlassView>
           </View>
@@ -2051,7 +2121,7 @@ const styles = StyleSheet.create({
     paddingBottom: 110,
   },
   scrollContentIos: {
-    paddingTop: 112,
+    paddingTop: 102,
   },
   topHeader: {
     position: "absolute",
@@ -2066,6 +2136,10 @@ const styles = StyleSheet.create({
     paddingBottom: 10,
     zIndex: 20,
     elevation: 20,
+  },
+  topHeaderIos: {
+    paddingHorizontal: 16,
+    paddingBottom: 8,
   },
   centerProfileWrap: {
     position: "absolute",
@@ -2084,11 +2158,20 @@ const styles = StyleSheet.create({
     flexShrink: 1,
     maxWidth: "62%",
   },
+  headerProfileRowIos: {
+    gap: 10,
+    maxWidth: "64%",
+  },
   headerGreetingText: {
     fontSize: 19,
     fontWeight: "700",
     color: "rgba(2,44,68,0.92)",
     maxWidth: 180,
+  },
+  headerGreetingTextIos: {
+    fontSize: 18,
+    fontWeight: "700",
+    maxWidth: 190,
   },
   headerRight: {
     flexDirection: "row",
@@ -2117,20 +2200,22 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
-  headerProfileFallback: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: "rgba(255,255,255,0.75)",
-    borderWidth: 1,
-    borderColor: "rgba(0,0,0,0.12)",
+  headerIconButtonIos: {
+    width: 50,
+    height: 50,
+    borderRadius: 25,
+    backgroundColor: "rgba(255,255,255,0.03)",
+    borderColor: "rgba(255,255,255,0.24)",
   },
-  headerProfileFallbackText: {
-    fontSize: 14,
-    fontWeight: "700",
+  headerProfileInitialText: {
+    fontSize: 26,
+    fontWeight: "800",
     color: "rgba(0,0,0,0.72)",
+    lineHeight: 28,
+  },
+  headerProfileInitialTextIos: {
+    fontSize: 28,
+    lineHeight: 30,
   },
   headerGlassAvatar: {
     width: 56,
@@ -2139,10 +2224,20 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
+  headerGlassAvatarIos: {
+    width: 52,
+    height: 52,
+    borderRadius: 26,
+  },
   headerGlassAvatarImage: {
     width: 46,
     height: 46,
     borderRadius: 23,
+  },
+  headerGlassAvatarImageIos: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
   },
   badge: {
     position: "absolute",
@@ -2167,12 +2262,19 @@ const styles = StyleSheet.create({
     paddingTop: 50,
     paddingBottom: 22,
   },
+  balanceBlockIos: {
+    paddingTop: 40,
+    paddingBottom: 20,
+  },
   balanceTap: {
     alignItems: "center",
   },
   balanceRowLiquid: {
     flexDirection: "row",
     alignItems: "flex-end",
+  },
+  balanceRowLiquidIos: {
+    gap: 1,
   },
   balanceCurrencyLiquid: {
     fontSize: 18,
@@ -2181,17 +2283,30 @@ const styles = StyleSheet.create({
     marginBottom: 10,
     marginRight: 4,
   },
+  balanceCurrencyLiquidIos: {
+    fontSize: 16,
+    marginBottom: 8,
+    marginRight: 2,
+  },
   balanceMainLiquid: {
     fontSize: 72,
     fontWeight: "800",
     letterSpacing: 0.2,
     color: "rgba(255,255,255,0.95)",
   },
+  balanceMainLiquidIos: {
+    fontSize: 56,
+    letterSpacing: 0,
+  },
   balanceCentsLiquid: {
     fontSize: 34,
     fontWeight: "800",
     color: "rgba(255,255,255,0.9)",
     marginBottom: 10,
+  },
+  balanceCentsLiquidIos: {
+    fontSize: 30,
+    marginBottom: 8,
   },
   balanceHidden: {
     fontSize: 72,
@@ -2210,6 +2325,10 @@ const styles = StyleSheet.create({
     gap: 10,
     marginTop: 16,
   },
+  pillsRowIos: {
+    gap: 8,
+    marginTop: 14,
+  },
   glassButtonSurface: {
     borderWidth: 1,
     borderColor: "rgba(255,255,255,0.32)",
@@ -2225,6 +2344,12 @@ const styles = StyleSheet.create({
     paddingVertical: 11,
     borderRadius: 999,
   },
+  addressPillIos: {
+    paddingHorizontal: 20,
+    paddingVertical: 10,
+    backgroundColor: "rgba(255,255,255,0.03)",
+    borderColor: "rgba(255,255,255,0.24)",
+  },
   addressPillText: {
     fontSize: 14,
     fontWeight: "700",
@@ -2234,6 +2359,12 @@ const styles = StyleSheet.create({
     paddingHorizontal: 18,
     paddingVertical: 11,
     borderRadius: 999,
+  },
+  chainPillIos: {
+    paddingHorizontal: 18,
+    paddingVertical: 10,
+    backgroundColor: "rgba(255,255,255,0.03)",
+    borderColor: "rgba(255,255,255,0.24)",
   },
   chainPillText: {
     fontSize: 14,
@@ -2348,25 +2479,40 @@ const styles = StyleSheet.create({
     gap: 10,
     marginTop: 14,
   },
+  actionsRowLiquidIos: {
+    gap: 8,
+    marginTop: 12,
+  },
   actionHit: {
     flex: 1,
   },
   actionTile: {
     borderRadius: 24,
-    minHeight: 136,
-    paddingVertical: 14,
+    minHeight: 118,
+    paddingVertical: 12,
     alignItems: "center",
     justifyContent: "center",
-    gap: 10,
+    gap: 9,
+  },
+  actionTileIos: {
+    minHeight: 102,
+    borderRadius: 22,
+    paddingVertical: 10,
+    backgroundColor: "rgba(255,255,255,0.08)",
+    borderColor: "rgba(255,255,255,0.35)",
   },
   actionIconCircle: {
-    width: 50,
-    height: 50,
-    borderRadius: 25,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
     alignItems: "center",
     justifyContent: "center",
     backgroundColor: "rgba(255,255,255,0.35)",
     borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.45)",
+  },
+  actionIconCircleIos: {
+    backgroundColor: "rgba(255,255,255,0.35)",
     borderColor: "rgba(255,255,255,0.45)",
   },
   actionLabel: {
@@ -2389,11 +2535,19 @@ const styles = StyleSheet.create({
   recentCardWrap: {
     marginBottom: 8,
   },
+  recentCardWrapIos: {
+    marginBottom: 16,
+  },
   recentCard: {
     borderRadius: 26,
     paddingVertical: 8,
     paddingHorizontal: 8,
     borderCurve: "continuous",
+  },
+  recentCardIos: {
+    borderRadius: 24,
+    paddingVertical: 7,
+    paddingHorizontal: 7,
   },
   recentCardGlass: {
     borderWidth: 1,

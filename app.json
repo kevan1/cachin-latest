@@ -47,6 +47,14 @@
             "DEFAULT"
           ]
         }
+      ],
+      "permissions": [
+        "android.permission.CAMERA",
+        "android.permission.NFC",
+        "android.permission.RECORD_AUDIO",
+        "android.permission.MODIFY_AUDIO_SETTINGS",
+        "android.permission.FOREGROUND_SERVICE",
+        "android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK"
       ]
     },
     "web": {
@@ -81,6 +89,7 @@
         "react-native-nfc-manager",
         {
           "nfcPermission": "Allow Cachin to interact with nearby Satochip cards over NFC.",
+          "includeNdefEntitlement": false,
           "selectIdentifiers": [
             "5361746F43686970"
           ]
@@ -106,6 +115,12 @@
       "typedRoutes": true,
       "reactCompiler": true
     },
-    "owner": "kevan1"
+    "owner": "kevan1",
+    "runtimeVersion": {
+      "policy": "appVersion"
+    },
+    "updates": {
+      "url": "https://u.expo.dev/3e5e72a6-c0dc-4d3b-adb6-cc5ea4f441ed"
+    }
   }
 }

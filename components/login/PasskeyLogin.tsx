@@ -39,7 +39,7 @@ export default function PasskeyLogin() {
     setError("");
     try {
       await loginWithPasskey({
-        relyingParty: passkeyRelyingPartyId,
+        relyingParty: passkeyRelyingParty,
       });
     } catch (err: any) {
       console.log("Login failed:", err);
@@ -49,7 +49,7 @@ export default function PasskeyLogin() {
   const handleRegisterPasskey = () => {
     setError("");
     signupWithPasskey({
-      relyingParty: passkeyRelyingPartyId,
+      relyingParty: passkeyRelyingParty,
     });
   };
 

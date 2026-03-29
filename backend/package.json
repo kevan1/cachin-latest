@@ -1,0 +1,14 @@
+{
+  "name": "cachin-api-backend",
+  "private": true,
+  "version": "1.0.0",
+  "dependencies": {
+    "@solana/web3.js": "^1.98.4",
+    "bs58": "^6.0.0",
+    "canonicalize": "^2.1.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.18.13",
+    "typescript": "^5.9.3"
+  }
+}

@@ -54,14 +54,77 @@ class ErrorBoundary extends Component<
   }
 }
 
-const privyAppId =
-  process.env.EXPO_PUBLIC_PRIVY_APP_ID ||
-  Constants.expoConfig?.extra?.privyAppId ||
-  "";
-const privyClientId =
-  process.env.EXPO_PUBLIC_PRIVY_CLIENT_ID ||
-  Constants.expoConfig?.extra?.privyClientId ||
-  "";
+type ExtraConfig = Record<string, unknown>;
+type ManifestLike = { extra?: ExtraConfig | null } | null | undefined;
+type ConstantsWithLegacyManifests = typeof Constants & {
+  manifest?: ManifestLike;
+  manifest2?: ManifestLike;
+};
+
+const constantsWithLegacyManifests = Constants as ConstantsWithLegacyManifests;
+
+function normalizeConfigValue(value: unknown): string {
+  if (typeof value !== "string") return "";
+  return value.trim().replace(/^['"]|['"]$/g, "");
+}
+
+function asRecord(value: unknown): ExtraConfig {
+  if (value && typeof value === "object") {
+    return value as ExtraConfig;
+  }
+  return {};
+}
+
+function pickFirstNonEmpty(...values: unknown[]): string {
+  for (const value of values) {
+    const normalized = normalizeConfigValue(value);
+    if (normalized) return normalized;
+  }
+  return "";
+}
+
+const expoExtra = asRecord(Constants.expoConfig?.extra);
+const manifestExtra = asRecord(constantsWithLegacyManifests.manifest?.extra);
+const manifest2Extra = asRecord(constantsWithLegacyManifests.manifest2?.extra);
+const manifest2ExpoClientExtra = asRecord(asRecord(manifest2Extra.expoClient).extra);
+
+const envPrivyAppId = pickFirstNonEmpty(
+  process.env.EXPO_PUBLIC_PRIVY_APP_ID,
+  process.env.PRIVY_APP_ID
+);
+const envPrivyClientId = pickFirstNonEmpty(process.env.EXPO_PUBLIC_PRIVY_CLIENT_ID);
+
+const privyAppId = pickFirstNonEmpty(
+  envPrivyAppId,
+  expoExtra.privyAppId,
+  manifestExtra.privyAppId,
+  manifest2Extra.privyAppId,
+  manifest2ExpoClientExtra.privyAppId
+);
+const privyClientId = pickFirstNonEmpty(
+  envPrivyClientId,
+  expoExtra.privyClientId,
+  manifestExtra.privyClientId,
+  manifest2Extra.privyClientId,
+  manifest2ExpoClientExtra.privyClientId
+);
+
+const privyConfigDiagnostics = {
+  envAppIdLength: envPrivyAppId.length,
+  envClientIdLength: envPrivyClientId.length,
+  expoExtraAppIdLength: normalizeConfigValue(expoExtra.privyAppId).length,
+  expoExtraClientIdLength: normalizeConfigValue(expoExtra.privyClientId).length,
+  manifestExtraAppIdLength: normalizeConfigValue(manifestExtra.privyAppId).length,
+  manifestExtraClientIdLength: normalizeConfigValue(manifestExtra.privyClientId).length,
+  manifest2ExtraAppIdLength: normalizeConfigValue(manifest2Extra.privyAppId).length,
+  manifest2ExtraClientIdLength: normalizeConfigValue(manifest2Extra.privyClientId).length,
+  manifest2ExpoClientAppIdLength: normalizeConfigValue(
+    manifest2ExpoClientExtra.privyAppId
+  ).length,
+  manifest2ExpoClientClientIdLength: normalizeConfigValue(
+    manifest2ExpoClientExtra.privyClientId
+  ).length,
+};
 
 function OfflineScreen({ onRetry }: { onRetry: () => void }) {
   const colorScheme = useColorScheme() ?? "light";
@@ -94,9 +157,11 @@ function OfflineScreen({ onRetry }: { onRetry: () => void }) {
 function MissingPrivyConfigScreen({
   appId,
   clientId,
+  diagnostics,
 }: {
   appId: string;
   clientId: string;
+  diagnostics: typeof privyConfigDiagnostics;
 }) {
   const colorScheme = useColorScheme() ?? "light";
   const palette = Colors[colorScheme];
@@ -121,6 +186,25 @@ function MissingPrivyConfigScreen({
         </Text>
         <Text style={[styles.configCode, { color: palette.primaryText }]}>
           EXPO_PUBLIC_PRIVY_CLIENT_ID (length: {clientId.length})
+        </Text>
+        <Text style={[styles.configCode, { color: palette.secondaryText }]}>
+          env app/client lengths: {diagnostics.envAppIdLength}/{diagnostics.envClientIdLength}
+        </Text>
+        <Text style={[styles.configCode, { color: palette.secondaryText }]}>
+          expoConfig extra app/client: {diagnostics.expoExtraAppIdLength}/
+          {diagnostics.expoExtraClientIdLength}
+        </Text>
+        <Text style={[styles.configCode, { color: palette.secondaryText }]}>
+          manifest extra app/client: {diagnostics.manifestExtraAppIdLength}/
+          {diagnostics.manifestExtraClientIdLength}
+        </Text>
+        <Text style={[styles.configCode, { color: palette.secondaryText }]}>
+          manifest2 extra app/client: {diagnostics.manifest2ExtraAppIdLength}/
+          {diagnostics.manifest2ExtraClientIdLength}
+        </Text>
+        <Text style={[styles.configCode, { color: palette.secondaryText }]}>
+          manifest2 expoClient.extra app/client: {diagnostics.manifest2ExpoClientAppIdLength}/
+          {diagnostics.manifest2ExpoClientClientIdLength}
         </Text>
       </View>
       <Text style={[styles.stateSubtitle, { color: palette.secondaryText }]}>
@@ -191,6 +275,16 @@ function AppNavigator() {
       <Stack.Screen name="email" options={{ headerShown: false }} />
       <Stack.Screen name="(main)" options={{ headerShown: false }} />
       <Stack.Screen
+        name="card-setup-onboarding"
+        options={{
+          headerShown: false,
+          presentation: "fullScreenModal",
+          animation: "slide_from_right",
+          gestureEnabled: true,
+          contentStyle: { backgroundColor: "#00050D" },
+        }}
+      />
+      <Stack.Screen
         name="send-amount"
         options={{
           headerShown: true,
@@ -230,12 +324,12 @@ function AppNavigator() {
           headerStyle: { backgroundColor: "transparent" },
           headerBlurEffect,
           headerRight: renderSheetCloseButton,
-          presentation: "formSheet",
-          sheetAllowedDetents: "fitToContents",
-          sheetLargestUndimmedDetentIndex: "last",
-          sheetGrabberVisible: false,
-          sheetCornerRadius: 28,
-          contentStyle: { backgroundColor: "transparent" },
+          presentation: isIOS ? "fullScreenModal" : "formSheet",
+          sheetAllowedDetents: isIOS ? undefined : "fitToContents",
+          sheetLargestUndimmedDetentIndex: isIOS ? undefined : "last",
+          sheetGrabberVisible: isIOS ? undefined : false,
+          sheetCornerRadius: isIOS ? undefined : 28,
+          contentStyle: { backgroundColor: isIOS ? "#FFFFFF" : "transparent" },
         }}
       />
       <Stack.Screen
@@ -324,6 +418,10 @@ function AppNavigator() {
         }}
       />
       <Stack.Screen
+        name="activity"
+        options={{ headerShown: false, animation: "slide_from_right" }}
+      />
+      <Stack.Screen
         name="profile"
         options={{ headerShown: false, animation: "slide_from_left" }}
       />
@@ -366,7 +464,11 @@ export default function RootLayout() {
         >
           <ErrorBoundary>
             {!hasPrivyConfig ? (
-              <MissingPrivyConfigScreen appId={privyAppId} clientId={privyClientId} />
+              <MissingPrivyConfigScreen
+                appId={privyAppId}
+                clientId={privyClientId}
+                diagnostics={privyConfigDiagnostics}
+              />
             ) : (
               <PrivyProvider
                 appId={privyAppId}

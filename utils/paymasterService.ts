@@ -77,6 +77,7 @@ export function getPaymasterApiUrl(): string {
   const extra = getExtraConfig();
   return (
     process.env.EXPO_PUBLIC_PAYMASTER_API_URL ||
+    process.env.EXPO_PUBLIC_PAYMASTER_BACKEND_URL ||
     process.env.EXPO_PUBLIC_API_URL ||
     extra.paymasterApiUrl ||
     extra.paymaster?.apiUrl ||

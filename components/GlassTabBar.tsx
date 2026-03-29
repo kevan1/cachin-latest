@@ -6,11 +6,11 @@ import { useEffect, type ReactNode } from "react";
 import { Pressable, StyleSheet, Text, View, useWindowDimensions } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import Animated, { useAnimatedStyle, useSharedValue, withSpring, withTiming } from "react-native-reanimated";
+import { getThemeTabColors, type ThemeTabColors } from "@/constants/themes";
 
 export const ANDROID_GLASS_TAB_HEIGHT = 80;
 
-const ACTIVE_COLOR = "#5C5AF6";
-const INACTIVE_COLOR = "#5A677C";
+const DEFAULT_TAB_COLORS = getThemeTabColors("blue");
 const BAR_HORIZONTAL_MARGIN = 14;
 const BAR_MAX_WIDTH = 960;
 const BAR_INSET = 6;
@@ -25,6 +25,10 @@ const TAB_VISUALS: Record<string, TabVisual> = {
   home: {
     label: "Home",
     icon: (color) => <MaterialIcons name="home-filled" size={30} color={color} />,
+  },
+  card: {
+    label: "Card",
+    icon: (color) => <Ionicons name="card-outline" size={25} color={color} />,
   },
   scanner: {
     label: "Scan",
@@ -46,6 +50,8 @@ function TabButton({
   onLongPress,
   accessibilityLabel,
   testID,
+  activeColor,
+  inactiveColor,
 }: {
   label: string;
   icon: ReactNode;
@@ -54,6 +60,8 @@ function TabButton({
   onLongPress: () => void;
   accessibilityLabel?: string;
   testID?: string;
+  activeColor: string;
+  inactiveColor: string;
 }) {
   const progress = useSharedValue(isFocused ? 1 : 0);
 
@@ -88,7 +96,7 @@ function TabButton({
           style={[
             styles.tabLabel,
             {
-              color: isFocused ? ACTIVE_COLOR : INACTIVE_COLOR,
+              color: isFocused ? activeColor : inactiveColor,
               fontWeight: isFocused ? "700" : "600",
             },
           ]}
@@ -100,7 +108,12 @@ function TabButton({
   );
 }
 
-export function GlassTabBar({ state, descriptors, navigation }: BottomTabBarProps) {
+export function GlassTabBar({
+  state,
+  descriptors,
+  navigation,
+  tabColors = DEFAULT_TAB_COLORS,
+}: BottomTabBarProps & { tabColors?: ThemeTabColors }) {
   const insets = useSafeAreaInsets();
   const { width } = useWindowDimensions();
   const visibleRoutes = state.routes.filter(
@@ -161,6 +174,7 @@ export function GlassTabBar({ state, descriptors, navigation }: BottomTabBarProp
             styles.activePill,
             {
               width: itemWidth,
+              backgroundColor: tabColors.activePill,
             },
             activePillStyle,
           ]}
@@ -206,12 +220,14 @@ export function GlassTabBar({ state, descriptors, navigation }: BottomTabBarProp
             >
               <TabButton
                 label={tabVisual.label}
-                icon={tabVisual.icon(isFocused ? ACTIVE_COLOR : INACTIVE_COLOR)}
+                icon={tabVisual.icon(isFocused ? tabColors.active : tabColors.inactive)}
                 isFocused={isFocused}
                 onPress={onPress}
                 onLongPress={onLongPress}
                 accessibilityLabel={options.tabBarAccessibilityLabel}
                 testID={options.tabBarButtonTestID}
+                activeColor={tabColors.active}
+                inactiveColor={tabColors.inactive}
               />
             </View>
           );
@@ -249,7 +265,7 @@ const styles = StyleSheet.create({
     bottom: BAR_INSET,
     left: BAR_INSET,
     borderRadius: 32,
-    backgroundColor: "rgba(162,182,195,0.42)",
+    backgroundColor: DEFAULT_TAB_COLORS.activePill,
   },
   tabSlot: {
     height: "100%",

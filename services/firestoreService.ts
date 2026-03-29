@@ -4,6 +4,10 @@ import { db } from '@/config/firebase';
 // Collection name
 const USERS_COLLECTION = 'users';
 
+function normalizeUsername(username: string): string {
+  return username.trim().toLowerCase();
+}
+
 // User data interface
 export interface UserData {
   username: string;
@@ -25,20 +29,23 @@ export async function saveUserToFirestore(
   userData: Partial<UserData>
 ): Promise<void> {
   try {
+    const normalizedUserData = userData.username
+      ? { ...userData, username: normalizeUsername(userData.username) }
+      : userData;
     const userRef = doc(db, USERS_COLLECTION, solanaAddress);
     const docSnap = await getDoc(userRef);
 
     if (docSnap.exists()) {
       // Update existing user
       await updateDoc(userRef, {
-        ...userData,
+        ...normalizedUserData,
         updatedAt: serverTimestamp(),
       });
       console.log('[Firestore] User updated:', solanaAddress);
     } else {
       // Create new user
       await setDoc(userRef, {
-        ...userData,
+        ...normalizedUserData,
         solanaAddress,
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
@@ -88,7 +95,8 @@ export async function updateUsernameInFirestore(
   username: string
 ): Promise<void> {
   try {
-    await saveUserToFirestore(solanaAddress, { username });
+    const normalizedUsername = normalizeUsername(username);
+    await saveUserToFirestore(solanaAddress, { username: normalizedUsername });
     console.log('[Firestore] Username updated for:', solanaAddress);
   } catch (error) {
     console.error('[Firestore] Error updating username:', error);
@@ -176,11 +184,12 @@ export async function getUserByUsername(
       console.log('[Firestore] Empty username provided');
       return null;
     }
+    const normalizedUsername = normalizeUsername(username);
 
     const usersRef = collection(db, USERS_COLLECTION);
     const q = query(
       usersRef,
-      where('username', '==', username.toLowerCase())
+      where('username', '==', normalizedUsername)
     );
 
     const querySnapshot = await getDocs(q);

@@ -16,10 +16,11 @@ import Animated, {
   useAnimatedStyle,
 } from "react-native-reanimated";
 import { useRouter, useLocalSearchParams, useFocusEffect } from "expo-router";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Connection, PublicKey, Transaction } from "@solana/web3.js";
 import { Token, TOKEN_PROGRAM_ID, ASSOCIATED_TOKEN_PROGRAM_ID, u64 } from "@solana/spl-token";
 import MaterialIcons from "@expo/vector-icons/MaterialIcons";
+import * as Haptics from "expo-haptics";
 import {
   createPublicClient,
   encodeFunctionData,
@@ -43,7 +44,12 @@ import {
 import {
   isDuplicateSessionSignerError,
   isGaslessAuthorizationRequiredError,
+  isOnDeviceSessionSignerModeError,
 } from "@/utils/privyGasless";
+import {
+  getPrivyGaslessKeyQuorumId,
+  getPrivyGasSponsorPolicyIds,
+} from "@/utils/privyGaslessConfig";
 import { getSolanaRpcUrl } from "@/utils/solanaRpc";
 import { formatTokenUnits, parseDecimalToUnits } from "@/utils/tokenAmount";
 import { Colors } from "@/constants/theme";
@@ -174,6 +180,12 @@ export default function SendConfirmScreen() {
   const [satochipAvalancheAddress, setSatochipAvalancheAddress] = useState<string | null>(null);
   const [satochipPin, setSatochipPin] = useState("");
   const { showChin, hideChin, progress, isOpen } = useChinPopout();
+  const successChimePlayerRef = useRef<{
+    play: () => void;
+    seekTo?: (seconds: number) => Promise<void> | void;
+    remove?: () => void;
+  } | null>(null);
+  const hasPlayedSuccessFeedback = useRef(false);
 
   const {
     wallets,
@@ -193,15 +205,8 @@ export default function SendConfirmScreen() {
       : avalancheWallet?.address ?? ""
     : sponsoredWalletAddress ?? wallet?.publicKey ?? "";
   const walletDisplay = walletAddress ? formatAddress(walletAddress) : "Not connected";
-  const keyQuorumId = process.env.EXPO_PUBLIC_PRIVY_KEY_QUORUM_ID;
-  const sessionSignerPolicyIds = useMemo(() => {
-    const raw = process.env.EXPO_PUBLIC_PRIVY_GAS_SPONSOR_POLICY_IDS;
-    if (!raw) return [];
-    return raw
-      .split(",")
-      .map((id) => id.trim())
-      .filter(Boolean);
-  }, []);
+  const keyQuorumId = useMemo(() => getPrivyGaslessKeyQuorumId(), []);
+  const sessionSignerPolicyIds = useMemo(() => getPrivyGasSponsorPolicyIds(), []);
 
   const authorizeGaslessForAddress = useCallback(
     async (address: string) => {
@@ -218,6 +223,14 @@ export default function SendConfirmScreen() {
           ],
         });
       } catch (error) {
+        if (isOnDeviceSessionSignerModeError(error)) {
+          await addSessionSigners({
+            address,
+            signers: [],
+          });
+          return;
+        }
+
         if (isDuplicateSessionSignerError(error)) {
           return;
         }
@@ -703,6 +716,61 @@ export default function SendConfirmScreen() {
     };
   }, [hideChin]);
 
+  useEffect(() => {
+    let cancelled = false;
+
+    const loadConfirmationSound = async () => {
+      try {
+        const expoAudio = await import("expo-audio");
+        await expoAudio.setAudioModeAsync({ playsInSilentMode: true });
+        const player = expoAudio.createAudioPlayer(
+          require("../assets/sounds/confirmation-chime.wav")
+        );
+
+        if (cancelled) {
+          player.remove?.();
+          return;
+        }
+
+        successChimePlayerRef.current = player;
+      } catch {
+        // If the native module is not present in this build, keep running without sound.
+        successChimePlayerRef.current = null;
+      }
+    };
+
+    void loadConfirmationSound();
+
+    return () => {
+      cancelled = true;
+      successChimePlayerRef.current?.remove?.();
+      successChimePlayerRef.current = null;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!transactionSent) {
+      hasPlayedSuccessFeedback.current = false;
+      return;
+    }
+    if (hasPlayedSuccessFeedback.current) {
+      return;
+    }
+
+    hasPlayedSuccessFeedback.current = true;
+    void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {
+      // Haptics are best effort.
+    });
+
+    const player = successChimePlayerRef.current;
+    if (player?.seekTo) {
+      void Promise.resolve(player.seekTo(0)).catch(() => {
+        // Ignore seek errors and try playing anyway.
+      });
+    }
+    player?.play();
+  }, [transactionSent]);
+
   return (
     <View style={styles.container}>
       <Animated.View
@@ -719,16 +787,21 @@ export default function SendConfirmScreen() {
             styles.containerContent,
             {
               paddingTop: insets.top + 12,
-              paddingBottom: (isOpen ? footerHeightOpen : footerHeightClosed) + 16,
+              paddingBottom: transactionSent
+                ? insets.bottom + 24
+                : (isOpen ? footerHeightOpen : footerHeightClosed) + 16,
             },
           ]}
+          scrollEnabled={!transactionSent}
+          bounces={!transactionSent}
+          alwaysBounceVertical={!transactionSent}
           showsVerticalScrollIndicator={false}
         >
           {transactionSent ? (
             <>
               <View style={styles.header}>
                 <View style={styles.headerSpacer} />
-                <Text style={[styles.title, { color: palette.primaryText }]}>Sent</Text>
+                <Text style={[styles.title, { color: palette.primaryText }]}>Transfer sent</Text>
                 <TouchableOpacity
                   accessibilityRole="button"
                   onPress={handleClose}
@@ -761,11 +834,48 @@ export default function SendConfirmScreen() {
                   entering={FadeIn.delay(400).duration(500)}
                   style={[styles.successAmount, { color: palette.primaryText }]}
                 >
-                  {isAvalancheTransfer ? `$${amountDisplay} ${assetSymbol}` : `$${amountDisplay} ${assetSymbol}`}
+                  {isAvalancheTransfer
+                    ? `$${amountDisplay} ${assetSymbol}`
+                    : `$${amountDisplay} ${assetSymbol}`}
                 </Animated.Text>
+
+                <View
+                  style={[
+                    styles.successDetailCard,
+                    {
+                      backgroundColor: palette.surface,
+                      borderColor: palette.borderSubtle,
+                    },
+                  ]}
+                >
+                  <View style={styles.successDetailRow}>
+                    <Text style={[styles.successDetailLabel, { color: palette.secondaryText }]}>
+                      Recipient
+                    </Text>
+                    <Text style={[styles.successDetailValue, { color: palette.primaryText }]}>
+                      {recipientDisplay}
+                    </Text>
+                  </View>
+                  <View style={styles.successDetailRow}>
+                    <Text style={[styles.successDetailLabel, { color: palette.secondaryText }]}>
+                      From
+                    </Text>
+                    <Text style={[styles.successDetailValue, { color: palette.primaryText }]}>
+                      {walletDisplay}
+                    </Text>
+                  </View>
+                  <View style={styles.successDetailRow}>
+                    <Text style={[styles.successDetailLabel, { color: palette.secondaryText }]}>
+                      Status
+                    </Text>
+                    <Text style={[styles.successDetailValue, { color: palette.success }]}>
+                      Confirmed
+                    </Text>
+                  </View>
+                </View>
               </View>
 
-              <View style={styles.footer}>
+              <View style={styles.successActions}>
                 <TouchableOpacity
                   accessibilityRole="button"
                   onPress={handleClose}
@@ -926,55 +1036,57 @@ export default function SendConfirmScreen() {
             </>
           )}
         </ScrollView>
-        <View style={[styles.footer, styles.footerPinned, isOpen && styles.footerChinOpen]}>
-          <TouchableOpacity
-            accessibilityRole="button"
-            onPress={() => {
-              hideChin();
-              router.back();
-            }}
-            style={[
-              styles.secondaryButton,
-              { backgroundColor: palette.actionSecondary },
-            ]}
-          >
-            <Text
-              style={[
-                styles.secondaryButtonText,
-                { color: palette.actionSecondaryText },
-              ]}
-            >
-              Cancel
-            </Text>
-          </TouchableOpacity>
-          {isOpen ? null : (
+        {transactionSent ? null : (
+          <View style={[styles.footer, styles.footerPinned, isOpen && styles.footerChinOpen]}>
             <TouchableOpacity
               accessibilityRole="button"
-              onPress={handleSendPress}
-              disabled={isSending}
+              onPress={() => {
+                hideChin();
+                router.back();
+              }}
               style={[
-                styles.primaryButton,
-                {
-                  backgroundColor: palette.actionPrimary,
-                  opacity: isSending ? 0.6 : 1,
-                },
+                styles.secondaryButton,
+                { backgroundColor: palette.actionSecondary },
               ]}
             >
-              {isSending ? (
-                <ActivityIndicator color={palette.actionPrimaryText} />
-              ) : (
-                <Text
-                  style={[
-                    styles.primaryButtonText,
-                    { color: palette.actionPrimaryText },
-                  ]}
-                >
-                  Send
-                </Text>
-              )}
+              <Text
+                style={[
+                  styles.secondaryButtonText,
+                  { color: palette.actionSecondaryText },
+                ]}
+              >
+                Cancel
+              </Text>
             </TouchableOpacity>
-          )}
-        </View>
+            {isOpen ? null : (
+              <TouchableOpacity
+                accessibilityRole="button"
+                onPress={handleSendPress}
+                disabled={isSending}
+                style={[
+                  styles.primaryButton,
+                  {
+                    backgroundColor: palette.actionPrimary,
+                    opacity: isSending ? 0.6 : 1,
+                  },
+                ]}
+              >
+                {isSending ? (
+                  <ActivityIndicator color={palette.actionPrimaryText} />
+                ) : (
+                  <Text
+                    style={[
+                      styles.primaryButtonText,
+                      { color: palette.actionPrimaryText },
+                    ]}
+                  >
+                    Send
+                  </Text>
+                )}
+              </TouchableOpacity>
+            )}
+          </View>
+        )}
       </Animated.View>
 
       <ChinPopoutOverlay
@@ -1165,8 +1277,10 @@ const styles = StyleSheet.create({
   successContainer: {
     flex: 1,
     alignItems: "center",
-    justifyContent: "center",
-    marginBottom: 40,
+    justifyContent: "flex-start",
+    paddingTop: 56,
+    paddingBottom: 20,
+    gap: 10,
   },
   successTitle: {
     fontSize: 18,
@@ -1176,5 +1290,34 @@ const styles = StyleSheet.create({
   successAmount: {
     fontSize: 36,
     fontWeight: "700",
+    marginBottom: 6,
+  },
+  successDetailCard: {
+    marginTop: 18,
+    width: "100%",
+    borderWidth: 1,
+    borderRadius: 18,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    gap: 10,
+  },
+  successDetailRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 12,
+  },
+  successDetailLabel: {
+    fontSize: 13,
+  },
+  successDetailValue: {
+    fontSize: 13,
+    fontWeight: "600",
+    flexShrink: 1,
+  },
+  successActions: {
+    gap: 12,
+    marginTop: 12,
+    marginBottom: 8,
   },
 });

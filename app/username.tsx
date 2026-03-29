@@ -2,6 +2,8 @@ import { useState, useEffect, useRef } from 'react';
 import { StyleSheet, View, Text, TextInput, TouchableOpacity, Alert, Animated, ActivityIndicator, ScrollView, useWindowDimensions } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useSignupWithPasskey } from '@privy-io/expo/passkey';
+import { useEmbeddedSolanaWallet } from '@privy-io/expo';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import Svg, { Path } from 'react-native-svg';
 import {
   checkPasskeySupport,
@@ -9,6 +11,8 @@ import {
   isPasskeySupportedByOs,
   shouldFallbackToEmail,
 } from '@/utils/passkeySupport';
+import { saveUsername } from '@/utils/userStorage';
+import { getUserByUsername } from '@/services/firestoreService';
 import {
   getPasskeyRelyingPartyId,
   getPasskeyRelyingPartyOrigin,
@@ -84,13 +88,16 @@ export default function UsernameScreen() {
   const [currentStep, setCurrentStep] = useState(0);
   const slideAnim = useRef(new Animated.Value(0)).current;
   const [form, setForm] = useState({ username: '', isValid: false, validationMessage: '' });
+  const selectedUsernameRef = useRef('');
   const [useEmailFallback, setUseEmailFallback] = useState(
     () => !isPasskeySupportedByOs()
   );
   const didRedirectRef = useRef(false);
+  const { wallets: solanaWallets } = useEmbeddedSolanaWallet();
   
   // Passkey setup state
   const [loading, setLoading] = useState(false);
+  const [checkingUsername, setCheckingUsername] = useState(false);
 
   useEffect(() => {
     let isMounted = true;
@@ -111,12 +118,43 @@ export default function UsernameScreen() {
     router.replace({ pathname: '/email', params: { mode: 'signup' } });
   }, [router, useEmailFallback]);
 
+  const getAuthenticatedSolanaAddress = (authUser?: unknown): string | undefined => {
+    const linkedAccounts = (authUser as {
+      linkedAccounts?: {
+        type?: string;
+        chainType?: string;
+        address?: string;
+      }[];
+    })?.linkedAccounts;
+    const solanaLinkedAccount = linkedAccounts?.find(
+      (account) => account?.type === 'wallet' && account?.chainType === 'solana'
+    );
+    return solanaLinkedAccount?.address ?? solanaWallets[0]?.publicKey;
+  };
+
   const { signupWithPasskey, state: passkeySignupState } = useSignupWithPasskey({
-    onSuccess: async () => {
+    onSuccess: async (authUser) => {
       console.log("Passkey registered and logged in successfully");
-      setLoading(false);
-      // Navigate to main app
-      router.replace('/(main)/home');
+      try {
+        const usernameToSave = selectedUsernameRef.current;
+        const solanaAddress = getAuthenticatedSolanaAddress(authUser);
+
+        if (usernameToSave) {
+          if (solanaAddress) {
+            await saveUsername(usernameToSave, solanaAddress);
+            await AsyncStorage.removeItem('pending_username_save');
+          } else {
+            await saveUsername(usernameToSave);
+            await AsyncStorage.setItem('pending_username_save', 'true');
+          }
+        }
+      } catch (error) {
+        console.error('Error saving username after passkey signup:', error);
+      } finally {
+        setLoading(false);
+        // Navigate to main app
+        router.replace('/(main)/home');
+      }
     },
     onError: (err) => {
       console.log('Signup error:', JSON.stringify(err, null, 2));
@@ -161,19 +199,39 @@ export default function UsernameScreen() {
     setForm({ username: text, isValid: true, validationMessage: 'Username looks good' });
   };
 
-  const handleNext = () => {
+  const handleNext = async () => {
+    if (checkingUsername) {
+      return;
+    }
     if (!form.isValid) {
       Alert.alert('Invalid Username', 'Username must be at least 3 characters and contain only letters, numbers, and underscores.');
       return;
     }
-    // Animate to next step (passkey setup)
-    setCurrentStep(1);
-    Animated.spring(slideAnim, {
-      toValue: -screenWidth,
-      useNativeDriver: true,
-      tension: 65,
-      friction: 11,
-    }).start();
+
+    try {
+      setCheckingUsername(true);
+      const normalizedUsername = form.username.trim().toLowerCase();
+      const existingUser = await getUserByUsername(normalizedUsername);
+
+      if (existingUser) {
+        Alert.alert('Username Unavailable', 'That username is already taken. Please choose a different one.');
+        return;
+      }
+
+      // Animate to next step (passkey setup)
+      setCurrentStep(1);
+      Animated.spring(slideAnim, {
+        toValue: -screenWidth,
+        useNativeDriver: true,
+        tension: 65,
+        friction: 11,
+      }).start();
+    } catch (error) {
+      console.error('Error checking username uniqueness:', error);
+      Alert.alert('Unable to Verify Username', 'Please try again.');
+    } finally {
+      setCheckingUsername(false);
+    }
   };
   
   const handleSetupPasskey = async () => {
@@ -184,9 +242,10 @@ export default function UsernameScreen() {
 
     try {
       setLoading(true);
+      selectedUsernameRef.current = form.username;
       
       await signupWithPasskey({
-        relyingParty: passkeyRelyingPartyId,
+        relyingParty: passkeyRelyingParty,
         username: form.username,
       });
     } catch (error: any) {
@@ -291,12 +350,16 @@ export default function UsernameScreen() {
 
                 {/* Continue Button */}
                 <TouchableOpacity
-                  style={[styles.continueButton, !form.isValid && styles.continueButtonDisabled]}
+                  style={[styles.continueButton, (!form.isValid || checkingUsername) && styles.continueButtonDisabled]}
                   onPress={handleNext}
                   activeOpacity={0.8}
-                  disabled={!form.isValid}
+                  disabled={!form.isValid || checkingUsername}
                 >
-                  <Text style={styles.continueButtonText}>Continue</Text>
+                  {checkingUsername ? (
+                    <ActivityIndicator color="#FFFFFF" />
+                  ) : (
+                    <Text style={styles.continueButtonText}>Continue</Text>
+                  )}
                 </TouchableOpacity>
               </View>
             </View>

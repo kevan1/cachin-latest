@@ -1,6 +1,5 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { 
-  saveUserToFirestore, 
   getUserFromFirestore, 
   updateUsernameInFirestore 
 } from '@/services/firestoreService';
@@ -47,14 +46,20 @@ export async function saveUsername(
   solanaAddress?: string
 ): Promise<void> {
   try {
+    const normalizedUsername = username.trim().toLowerCase();
+    if (!normalizedUsername) {
+      console.warn('[UserStorage] Ignoring empty username save request');
+      return;
+    }
+
     // Save to AsyncStorage for quick local access
-    await AsyncStorage.setItem(USERNAME_KEY, username);
-    console.log('[UserStorage] Username saved to AsyncStorage:', username);
+    await AsyncStorage.setItem(USERNAME_KEY, normalizedUsername);
+    console.log('[UserStorage] Username saved to AsyncStorage:', normalizedUsername);
     
     // If we have a Solana address, also save to Firestore
     if (solanaAddress) {
       await AsyncStorage.setItem(SOLANA_ADDRESS_KEY, solanaAddress);
-      await updateUsernameInFirestore(solanaAddress, username);
+      await updateUsernameInFirestore(solanaAddress, normalizedUsername);
       console.log('[UserStorage] Username saved to Firestore for address:', solanaAddress);
     } else {
       console.log('[UserStorage] No Solana address provided, skipping Firestore sync');

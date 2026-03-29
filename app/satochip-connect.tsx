@@ -2,7 +2,6 @@ import { useEffect, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
-  KeyboardAvoidingView,
   Platform,
   ScrollView,
   StyleSheet,
@@ -80,8 +79,9 @@ export default function SatochipConnectScreen() {
         [{ text: "Done", onPress: () => router.back() }]
       );
     } catch (error) {
-      console.error("[SatochipConnect] Setup failed", error);
-      Alert.alert("Setup failed", getSatochipErrorMessage(error));
+      const message = getSatochipErrorMessage(error);
+      console.warn("[SatochipConnect] Setup failed:", message);
+      Alert.alert("Setup failed", message);
     } finally {
       setIsSettingUp(false);
     }
@@ -110,8 +110,9 @@ export default function SatochipConnectScreen() {
         [{ text: "Done", onPress: () => router.back() }]
       );
     } catch (error) {
-      console.error("[SatochipConnect] Failed to connect card", error);
-      Alert.alert("Could not connect Satochip", getSatochipErrorMessage(error));
+      const message = getSatochipErrorMessage(error);
+      console.warn("[SatochipConnect] Failed to connect card:", message);
+      Alert.alert("Could not connect Satochip", message);
     } finally {
       setIsConnecting(false);
     }
@@ -123,12 +124,12 @@ export default function SatochipConnectScreen() {
   };
 
   return (
-    <KeyboardAvoidingView
-      behavior={Platform.OS === "ios" ? "padding" : undefined}
-      style={[styles.container, { backgroundColor: palette.background }]}
-    >
+    <View style={[styles.container, { backgroundColor: palette.background }]}>
       <ScrollView
+        style={styles.scroll}
         contentInsetAdjustmentBehavior="automatic"
+        automaticallyAdjustKeyboardInsets={Platform.OS === "ios"}
+        keyboardDismissMode={Platform.OS === "ios" ? "interactive" : "on-drag"}
         contentContainerStyle={styles.content}
         keyboardShouldPersistTaps="handled"
       >
@@ -286,8 +287,8 @@ export default function SatochipConnectScreen() {
                 ]}
               />
               <Text style={[styles.helper, { color: palette.secondaryText }]}>
-                Hold the card near the phone after tapping connect. Android devices with NFC are
-                the primary target for this flow.
+                Hold the card near the phone after tapping connect. Keep it steady until the NFC
+                prompt completes.
               </Text>
             </View>
 
@@ -343,7 +344,7 @@ export default function SatochipConnectScreen() {
           </>
         )}
       </ScrollView>
-    </KeyboardAvoidingView>
+    </View>
   );
 }
 
@@ -351,9 +352,14 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
   },
+  scroll: {
+    flex: 1,
+  },
   content: {
+    flexGrow: 1,
     padding: 20,
     gap: 16,
+    paddingBottom: 28,
   },
   hero: {
     borderWidth: 1,

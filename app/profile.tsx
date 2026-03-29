@@ -1,10 +1,10 @@
-import { StyleSheet, View, Text, TouchableOpacity, Alert, Switch, Share, ActionSheetIOS, ScrollView } from 'react-native';
-import { Image } from 'expo-image';
+import { StyleSheet, View, Text, TouchableOpacity, Alert, Switch, Share, ActionSheetIOS, ScrollView, ActivityIndicator } from 'react-native';
 import * as Clipboard from 'expo-clipboard';
+import * as Application from 'expo-application';
+import * as Updates from 'expo-updates';
 import { useRouter } from 'expo-router';
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect } from 'react';
 import { getUsername, clearUsername, Currency, getSelectedCurrency, saveSelectedCurrency } from '@/utils/userStorage';
-import { buildAvatarUrl, resolveAvatarSeed } from '@/utils/avatar';
 import { usePrivy } from '@privy-io/expo';
 import Svg, { Path } from 'react-native-svg';
 
@@ -86,19 +86,18 @@ export default function ProfileScreen() {
   const router = useRouter();
   const { logout, user } = usePrivy();
   const [username, setUsername] = useState<string>('User');
-  const [avatarError, setAvatarError] = useState(false);
   const [showFullName, setShowFullName] = useState(true);
   const [currency, setCurrency] = useState<Currency>('USD');
-
-  const avatarSeed = useMemo(
-    () => resolveAvatarSeed({ username, userId: user?.id }),
-    [username, user?.id]
-  );
-  const avatarUri = useMemo(() => buildAvatarUrl(avatarSeed, 120), [avatarSeed]);
-
-  useEffect(() => {
-    setAvatarError(false);
-  }, [avatarUri]);
+  const [isCheckingUpdates, setIsCheckingUpdates] = useState(false);
+  const [updateStatus, setUpdateStatus] = useState('Not checked yet');
+  const [lastCheckedAt, setLastCheckedAt] = useState<Date | null>(null);
+  const [updateId, setUpdateId] = useState<string | null>(Updates.updateId ?? null);
+  const usernameInitial = (username.trim()[0] ?? 'U').toUpperCase();
+  const appVersion = Application.nativeApplicationVersion ?? 'dev';
+  const buildVersion = Application.nativeBuildVersion ?? 'dev';
+  const updatesChannel = Updates.channel ?? 'unknown';
+  const runtimeVersion = Updates.runtimeVersion ?? 'unknown';
+  const updateIdLabel = updateId ? `${updateId.slice(0, 8)}...` : 'embedded';
 
   useEffect(() => {
     const loadUsername = async () => {
@@ -237,6 +236,62 @@ export default function ProfileScreen() {
     }
   };
 
+  const handleCheckForUpdates = async () => {
+    if (isCheckingUpdates) return;
+
+    try {
+      setIsCheckingUpdates(true);
+
+      if (!Updates.isEnabled) {
+        const message = 'Updates are disabled in this build.';
+        setUpdateStatus(message);
+        Alert.alert('Updates unavailable', message);
+        return;
+      }
+
+      setUpdateStatus('Checking...');
+      const result = await Updates.checkForUpdateAsync();
+      setLastCheckedAt(new Date());
+
+      if (!result.isAvailable) {
+        setUpdateStatus('Up to date');
+        setUpdateId(Updates.updateId ?? null);
+        Alert.alert('Up to date', 'This app is already on the latest OTA update.');
+        return;
+      }
+
+      setUpdateStatus('Downloading update...');
+      const fetched = await Updates.fetchUpdateAsync();
+      const nextUpdateId = (fetched as { manifest?: { id?: string } }).manifest?.id ?? null;
+      if (nextUpdateId) {
+        setUpdateId(nextUpdateId);
+      }
+      setUpdateStatus('Update ready (restart required)');
+
+      Alert.alert(
+        'Update ready',
+        'A new version was downloaded. Restart now to apply it?',
+        [
+          { text: 'Later', style: 'cancel' },
+          {
+            text: 'Restart now',
+            onPress: () => {
+              void Updates.reloadAsync();
+            },
+          },
+        ]
+      );
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unknown update error';
+      setUpdateStatus(`Check failed: ${message}`);
+      Alert.alert('Update check failed', message);
+    } finally {
+      setIsCheckingUpdates(false);
+    }
+  };
+
+  const lastCheckedLabel = lastCheckedAt ? lastCheckedAt.toLocaleString() : 'Never';
+
   return (
     <ScrollView
       contentInsetAdjustmentBehavior="automatic"
@@ -250,16 +305,7 @@ export default function ProfileScreen() {
           <Text style={styles.backIcon}>‹</Text>
         </TouchableOpacity>
         <View style={styles.avatar}>
-          {avatarError ? (
-            <Text style={styles.avatarText}>{username.slice(0, 2).toUpperCase()}</Text>
-          ) : (
-            <Image
-              source={{ uri: avatarUri }}
-              style={styles.avatarImage}
-              contentFit="cover"
-              onError={() => setAvatarError(true)}
-            />
-          )}
+          <Text style={styles.avatarText}>{usernameInitial}</Text>
         </View>
       </View>
 
@@ -322,6 +368,79 @@ export default function ProfileScreen() {
             />
           </View>
 
+        </View>
+
+        <View style={styles.menuSection}>
+          <View style={styles.menuItem}>
+            <View style={styles.menuLeft}>
+              <Text style={styles.menuText}>App version</Text>
+            </View>
+            <Text style={styles.metaValue}>{appVersion} ({buildVersion})</Text>
+          </View>
+
+          <View style={styles.divider} />
+
+          <View style={styles.menuItem}>
+            <View style={styles.menuLeft}>
+              <Text style={styles.menuText}>OTA channel</Text>
+            </View>
+            <Text style={styles.metaValue}>{updatesChannel}</Text>
+          </View>
+
+          <View style={styles.divider} />
+
+          <View style={styles.menuItem}>
+            <View style={styles.menuLeft}>
+              <Text style={styles.menuText}>Runtime</Text>
+            </View>
+            <Text style={styles.metaValue}>{runtimeVersion}</Text>
+          </View>
+
+          <View style={styles.divider} />
+
+          <View style={styles.menuItem}>
+            <View style={styles.menuLeft}>
+              <Text style={styles.menuText}>Update ID</Text>
+            </View>
+            <Text style={styles.metaValue}>{updateIdLabel}</Text>
+          </View>
+
+          <View style={styles.divider} />
+
+          <View style={styles.menuItem}>
+            <View style={styles.menuLeft}>
+              <Text style={styles.menuText}>Update status</Text>
+            </View>
+            <Text style={styles.metaValue}>{updateStatus}</Text>
+          </View>
+
+          <View style={styles.divider} />
+
+          <View style={styles.menuItem}>
+            <View style={styles.menuLeft}>
+              <Text style={styles.menuText}>Last check</Text>
+            </View>
+            <Text style={styles.metaValue}>{lastCheckedLabel}</Text>
+          </View>
+
+          <View style={styles.divider} />
+
+          <TouchableOpacity
+            style={styles.menuItem}
+            onPress={() => {
+              void handleCheckForUpdates();
+            }}
+            disabled={isCheckingUpdates}
+          >
+            <View style={styles.menuLeft}>
+              <Text style={styles.menuText}>Check for updates</Text>
+            </View>
+            {isCheckingUpdates ? (
+              <ActivityIndicator color="#000000" />
+            ) : (
+              <Text style={styles.chevron}>›</Text>
+            )}
+          </TouchableOpacity>
         </View>
 
         <View style={styles.menuSection}>
@@ -405,10 +524,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     overflow: 'hidden',
   },
-  avatarImage: {
-    width: '100%',
-    height: '100%',
-  },
   avatarText: {
     fontSize: 20,
     fontWeight: 'bold',
@@ -475,6 +590,13 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: '#000000',
     fontWeight: '500',
+  },
+  metaValue: {
+    fontSize: 14,
+    color: '#666666',
+    fontWeight: '600',
+    maxWidth: '48%',
+    textAlign: 'right',
   },
   chevron: {
     fontSize: 28,

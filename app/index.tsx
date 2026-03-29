@@ -266,7 +266,7 @@ export default function Index() {
     setLastAttemptAt(new Date().toISOString());
     try {
       await loginWithPasskey({
-        relyingParty: passkeyRelyingPartyId,
+        relyingParty: passkeyRelyingParty,
       });
     } catch (err: any) {
       console.error('Login error:', err);
