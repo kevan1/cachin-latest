@@ -7,7 +7,6 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import Svg, { Path } from 'react-native-svg';
 import {
   formatPasskeyError,
-  isPasskeySupportedByOs,
   shouldFallbackToEmail,
 } from '@/utils/passkeySupport';
 import { saveUsername } from '@/utils/userStorage';
@@ -95,9 +94,7 @@ export default function UsernameScreen() {
   const slideAnim = useRef(new Animated.Value(0)).current;
   const [form, setForm] = useState({ username: '', isValid: false, validationMessage: '' });
   const selectedUsernameRef = useRef('');
-  const [useEmailFallback, setUseEmailFallback] = useState(
-    () => !isPasskeySupportedByOs()
-  );
+  const [useEmailFallback, setUseEmailFallback] = useState(false);
   const { wallets: solanaWallets } = useEmbeddedSolanaWallet();
   const { user: authenticatedUser } = usePrivy();
   
