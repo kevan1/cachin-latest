@@ -1729,9 +1729,9 @@ export default function HomeScreen() {
             <Text style={styles.recentHeaderText}>Recent activity</Text>
             <TouchableOpacity onPress={() => {
                         Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                        goToProfile();
+                        router.push('/activity');
                       }} activeOpacity={0.85}>
-              <IconSymbol name="person.crop.circle" size={20} color="rgba(0,0,0,0.55)" />
+              <IconSymbol name="chevron.right" size={20} color="rgba(0,0,0,0.55)" />
             </TouchableOpacity>
           </View>
 
