@@ -329,6 +329,9 @@ export default function UsernameScreen() {
 
       if (isCompletionFlow) {
         if (!authenticatedUser) {
+          // Completion mode should never advance to the passkey step.
+          setCurrentStep(0);
+          slideAnim.setValue(0);
           setUsernameAvailability('available');
           Alert.alert(
             'Still signing you in',
@@ -371,7 +374,7 @@ export default function UsernameScreen() {
 
       setUsernameAvailability('available');
 
-      // Animate to next step (passkey setup) for non-completion onboarding only
+      // Non-completion onboarding continues to passkey setup.
       setCurrentStep(1);
       Animated.spring(slideAnim, {
         toValue: -screenWidth,
