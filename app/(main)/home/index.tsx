@@ -435,6 +435,7 @@ export default function HomeScreen() {
   const cryptoReceiveRef = useRef<BottomSheet>(null);
   const fiatReceiveRef = useRef<BottomSheet>(null);
   const homeScrollRef = useRef<ScrollView>(null);
+  const refreshInFlightRef = useRef(false);
   const qrScale = useRef(new Animated.Value(1)).current;
   const pullProgress = useSharedValue(0);
   const pullRefreshTriggered = useSharedValue(false);
@@ -891,7 +892,9 @@ export default function HomeScreen() {
     const fullAddress = getFullSolanaAddress();
     const avalancheAddress = getFullAvalancheAddress();
     if (!fullAddress && !avalancheAddress) return;
+    if (refreshInFlightRef.current) return;
 
+    refreshInFlightRef.current = true;
     setIsRefreshing(true);
     try {
       // Clear cache to force fresh fetch
@@ -904,6 +907,7 @@ export default function HomeScreen() {
     } finally {
       setIsRefreshing(false);
       setBalanceRefreshTick((current) => current + 1);
+      refreshInFlightRef.current = false;
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [fetchBalance, fetchTransactions]);
@@ -1288,9 +1292,8 @@ export default function HomeScreen() {
   }, []);
 
   const triggerPullRefresh = useCallback(() => {
-    if (isRefreshing) return;
     void onRefresh();
-  }, [isRefreshing, onRefresh]);
+  }, [onRefresh]);
 
   const handleHomeScroll = useAnimatedScrollHandler(
     {
@@ -1300,14 +1303,8 @@ export default function HomeScreen() {
         if (offsetY < 0 && !isRefreshing) {
           const nextProgress = Math.min(Math.abs(offsetY) / 80, 1.2);
           pullProgress.value = nextProgress;
-
-          if (nextProgress >= 1.1 && !pullRefreshTriggered.value) {
-            pullRefreshTriggered.value = true;
-            runOnJS(triggerPullRefresh)();
-          }
-        } else if (!isRefreshing) {
+        } else if (!isRefreshing && !pullRefreshTriggered.value) {
           pullProgress.value = withTiming(0, { duration: 120 });
-          pullRefreshTriggered.value = false;
         }
 
         if (!isIOS) return;
@@ -1321,12 +1318,28 @@ export default function HomeScreen() {
       },
       onEndDrag: () => {
         if (isRefreshing) return;
+
+        homeScrollClampTriggered.value = false;
+
+        if (pullProgress.value >= 1.1 && !pullRefreshTriggered.value) {
+          pullRefreshTriggered.value = true;
+          runOnJS(triggerPullRefresh)();
+          return;
+        }
+
         pullProgress.value = withTiming(0, { duration: 160 });
+        pullRefreshTriggered.value = false;
+      },
+      onMomentumBegin: () => {
+        if (isRefreshing) return;
+        if (pullRefreshTriggered.value) return;
+        pullProgress.value = withTiming(0, { duration: 140 });
         pullRefreshTriggered.value = false;
         homeScrollClampTriggered.value = false;
       },
       onMomentumEnd: () => {
         if (isRefreshing) return;
+        if (pullRefreshTriggered.value) return;
         pullProgress.value = withTiming(0, { duration: 160 });
         pullRefreshTriggered.value = false;
         homeScrollClampTriggered.value = false;
