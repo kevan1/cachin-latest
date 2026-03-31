@@ -1,5 +1,4 @@
 import { Platform } from "react-native";
-import { isSupported as isPasskeySupported } from "react-native-passkeys";
 
 const getErrorMessage = (error: unknown): string => {
   if (typeof error === "string") return error;
@@ -27,12 +26,7 @@ export const isPasskeySupportedByOs = (): boolean => {
 };
 
 export const checkPasskeySupport = async (): Promise<boolean> => {
-  if (!isPasskeySupportedByOs()) return false;
-  try {
-    return await isPasskeySupported();
-  } catch {
-    return false;
-  }
+  return isPasskeySupportedByOs();
 };
 
 const getNormalizedPasskeyError = (error: unknown): string =>
@@ -48,7 +42,6 @@ export const shouldFallbackToEmail = (error: unknown): boolean => {
   if (!message) return false;
   return (
     isAndroidCredentialDecryptError(message) ||
-    message.includes("biometric") ||
     message.includes("authorizationerror") ||
     message.includes("authenticationservices") ||
     message.includes("error 1001") ||

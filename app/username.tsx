@@ -6,7 +6,6 @@ import { useEmbeddedSolanaWallet, usePrivy } from '@privy-io/expo';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import Svg, { Path } from 'react-native-svg';
 import {
-  checkPasskeySupport,
   formatPasskeyError,
   isPasskeySupportedByOs,
   shouldFallbackToEmail,
@@ -99,7 +98,6 @@ export default function UsernameScreen() {
   const [useEmailFallback, setUseEmailFallback] = useState(
     () => !isPasskeySupportedByOs()
   );
-  const didRedirectRef = useRef(false);
   const { wallets: solanaWallets } = useEmbeddedSolanaWallet();
   const { user: authenticatedUser } = usePrivy();
   
@@ -111,29 +109,6 @@ export default function UsernameScreen() {
   >('idle');
   const usernameAvailabilityRequestRef = useRef(0);
   const usernameAvailabilityDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  useEffect(() => {
-    if (isCompletionFlow) return;
-
-    let isMounted = true;
-    checkPasskeySupport().then((supported) => {
-      if (!isMounted) return;
-      if (!supported) {
-        setUseEmailFallback(true);
-      }
-    });
-    return () => {
-      isMounted = false;
-    };
-  }, [isCompletionFlow]);
-
-  useEffect(() => {
-    if (isCompletionFlow) return;
-
-    if (!useEmailFallback || didRedirectRef.current) return;
-    didRedirectRef.current = true;
-    router.replace({ pathname: '/email', params: { mode: 'signup' } });
-  }, [isCompletionFlow, router, useEmailFallback]);
 
   const getAuthenticatedSolanaAddresses = (authUser?: unknown): string[] => {
     const linkedAccounts = (authUser as {
@@ -218,7 +193,7 @@ export default function UsernameScreen() {
       const message = formatPasskeyError(
         err,
         'Unable to complete passkey setup.',
-        'Enable Face ID/Touch ID or a device passcode to set up passkeys.'
+        'Use Face ID, Touch ID, or your device passcode to set up passkeys.'
       );
       Alert.alert(
         "Registration Error",
@@ -352,7 +327,16 @@ export default function UsernameScreen() {
         return;
       }
 
-      if (isCompletionFlow && authenticatedUser) {
+      if (isCompletionFlow) {
+        if (!authenticatedUser) {
+          setUsernameAvailability('available');
+          Alert.alert(
+            'Still signing you in',
+            'We are finishing your account setup. Please wait a few seconds and try again.'
+          );
+          return;
+        }
+
         if (currentUserSolanaAddresses.length === 0) {
           Alert.alert(
             'Wallet not available',
@@ -387,7 +371,7 @@ export default function UsernameScreen() {
 
       setUsernameAvailability('available');
 
-      // Animate to next step (passkey setup)
+      // Animate to next step (passkey setup) for non-completion onboarding only
       setCurrentStep(1);
       Animated.spring(slideAnim, {
         toValue: -screenWidth,
@@ -429,7 +413,7 @@ export default function UsernameScreen() {
       const message = formatPasskeyError(
         error,
         'Unable to complete passkey setup.',
-        'Enable Face ID/Touch ID or a device passcode to set up passkeys.'
+        'Use Face ID, Touch ID, or your device passcode to set up passkeys.'
       );
       Alert.alert(
         "Registration Error",

@@ -4,16 +4,19 @@ import {
   TouchableOpacity,
   View,
   Text,
-  RefreshControl,
   Linking,
   Switch,
   Animated,
   useColorScheme,
   Platform,
   StatusBar,
-  type NativeScrollEvent,
-  type NativeSyntheticEvent,
 } from "react-native";
+import ReAnimated, {
+  runOnJS,
+  useAnimatedScrollHandler,
+  useSharedValue,
+  withTiming,
+} from "react-native-reanimated";
 import { useRouter, useFocusEffect } from "expo-router";
 import * as Haptics from 'expo-haptics';
 import { useState, useEffect, useCallback, useRef, useMemo, type ReactNode } from 'react';
@@ -35,7 +38,7 @@ import {
   saveAvalancheWalletSource,
   type AvalancheWalletSource,
 } from "@/utils/satochipStorage";
-import { THEMES, MESH_POINTS } from '@/constants/themes';
+import { THEMES, MESH_POINTS, getThemeTabColors } from '@/constants/themes';
 import { ThemeSelectorSheet } from '@/components/ThemeSelectorSheet';
 import Svg, { Path } from 'react-native-svg';
 import {
@@ -50,6 +53,7 @@ import QRCode from 'react-native-qrcode-svg';
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { LinearGradient } from "expo-linear-gradient";
 import { GlassView } from "@/components/ui/GlassView";
+import { PullToRefreshLoader } from "@/components/ui/PullToRefreshLoader";
 import { ANDROID_GLASS_TAB_HEIGHT } from "@/components/GlassTabBar";
 import { IconSymbol } from "@/components/ui/icon-symbol";
 import { AnimatedBalanceText } from "@/components/ui/AnimatedBalanceText";
@@ -200,6 +204,7 @@ export default function HomeScreen() {
 
   const currentTheme = THEMES.find(t => t.id === themeId) || THEMES[0];
   const meshColors = colorScheme === "dark" ? currentTheme.colors.dark : currentTheme.colors.light;
+  const pullToRefreshColor = getThemeTabColors(themeId).active;
   const isIOS = process.env.EXPO_OS === "ios";
   const iosVersion = (() => {
     if (!isIOS) return 0;
@@ -431,6 +436,9 @@ export default function HomeScreen() {
   const fiatReceiveRef = useRef<BottomSheet>(null);
   const homeScrollRef = useRef<ScrollView>(null);
   const qrScale = useRef(new Animated.Value(1)).current;
+  const pullProgress = useSharedValue(0);
+  const pullRefreshTriggered = useSharedValue(false);
+  const homeScrollClampTriggered = useSharedValue(false);
   const [fiatCurrency, setFiatCurrency] = useState<'usd' | 'eur'>('usd');
   const snapPoints = useMemo(() => ['75%'], []);
   const sendSnapPoints = useMemo(() => ['45%'], []);
@@ -880,7 +888,6 @@ export default function HomeScreen() {
   
   // Handle pull to refresh
   const onRefresh = useCallback(async () => {
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     const fullAddress = getFullSolanaAddress();
     const avalancheAddress = getFullAvalancheAddress();
     if (!fullAddress && !avalancheAddress) return;
@@ -900,6 +907,13 @@ export default function HomeScreen() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [fetchBalance, fetchTransactions]);
+
+  useEffect(() => {
+    if (isRefreshing) return;
+    pullProgress.value = withTiming(0, { duration: 180 });
+    pullRefreshTriggered.value = false;
+    homeScrollClampTriggered.value = false;
+  }, [homeScrollClampTriggered, isRefreshing, pullProgress, pullRefreshTriggered]);
   
   // Fetch balance and transactions when wallet address is available
   useEffect(() => {
@@ -1269,13 +1283,56 @@ export default function HomeScreen() {
       </GlassView>
     );
 
-  const handleHomeScroll = useCallback(
-    (event: NativeSyntheticEvent<NativeScrollEvent>) => {
-      if (!isIOS) return;
-      if (event.nativeEvent.contentOffset.y <= 0) return;
-      homeScrollRef.current?.scrollTo({ x: 0, y: 0, animated: false });
+  const lockHomeScrollToTop = useCallback(() => {
+    homeScrollRef.current?.scrollTo({ x: 0, y: 0, animated: false });
+  }, []);
+
+  const triggerPullRefresh = useCallback(() => {
+    if (isRefreshing) return;
+    void onRefresh();
+  }, [isRefreshing, onRefresh]);
+
+  const handleHomeScroll = useAnimatedScrollHandler(
+    {
+      onScroll: (event) => {
+        const offsetY = event.contentOffset.y;
+
+        if (offsetY < 0 && !isRefreshing) {
+          const nextProgress = Math.min(Math.abs(offsetY) / 80, 1.2);
+          pullProgress.value = nextProgress;
+
+          if (nextProgress >= 1.1 && !pullRefreshTriggered.value) {
+            pullRefreshTriggered.value = true;
+            runOnJS(triggerPullRefresh)();
+          }
+        } else if (!isRefreshing) {
+          pullProgress.value = withTiming(0, { duration: 120 });
+          pullRefreshTriggered.value = false;
+        }
+
+        if (!isIOS) return;
+
+        if (offsetY > 0 && !homeScrollClampTriggered.value) {
+          homeScrollClampTriggered.value = true;
+          runOnJS(lockHomeScrollToTop)();
+        } else if (offsetY <= 0) {
+          homeScrollClampTriggered.value = false;
+        }
+      },
+      onEndDrag: () => {
+        if (isRefreshing) return;
+        pullProgress.value = withTiming(0, { duration: 160 });
+        pullRefreshTriggered.value = false;
+        homeScrollClampTriggered.value = false;
+      },
+      onMomentumEnd: () => {
+        if (isRefreshing) return;
+        pullProgress.value = withTiming(0, { duration: 160 });
+        pullRefreshTriggered.value = false;
+        homeScrollClampTriggered.value = false;
+      },
     },
-    [isIOS]
+    [homeScrollClampTriggered, isIOS, isRefreshing, lockHomeScrollToTop, pullProgress, pullRefreshTriggered, triggerPullRefresh]
   );
 
   const recentCardContent = (
@@ -1465,26 +1522,27 @@ export default function HomeScreen() {
               </View>
             </View>
 
-            <ScrollView
-              ref={homeScrollRef}
-              contentInsetAdjustmentBehavior="automatic"
-              contentContainerStyle={[
-                styles.scrollContent,
-                process.env.EXPO_OS === "ios" ? styles.scrollContentIos : null,
-                process.env.EXPO_OS !== "ios" ? { paddingTop: androidHeaderOffset } : null,
-                styles.safeAreaContent,
-              ]}
-              onScroll={handleHomeScroll}
-              scrollEventThrottle={16}
-              refreshControl={
-                <RefreshControl
-                  refreshing={isRefreshing}
-                  onRefresh={onRefresh}
-                  tintColor="#FFFFFF"
-                />
-              }
-              showsVerticalScrollIndicator={false}
-            >
+            <View style={styles.homeScrollContainer}>
+              <PullToRefreshLoader
+                progress={pullProgress}
+                refreshing={isRefreshing}
+                color={pullToRefreshColor}
+                style={styles.pullToRefreshLoader}
+              />
+              <ReAnimated.ScrollView
+                ref={homeScrollRef}
+                contentInsetAdjustmentBehavior="automatic"
+                contentContainerStyle={[
+                  styles.scrollContent,
+                  process.env.EXPO_OS === "ios" ? styles.scrollContentIos : null,
+                  process.env.EXPO_OS !== "ios" ? { paddingTop: androidHeaderOffset } : null,
+                  styles.safeAreaContent,
+                ]}
+                onScroll={handleHomeScroll}
+                scrollEventThrottle={16}
+                showsVerticalScrollIndicator={false}
+                overScrollMode="always"
+              >
 
           <View style={[styles.balanceBlock, isIOS ? styles.balanceBlockIos : null]}>
             <TouchableOpacity
@@ -1682,7 +1740,8 @@ export default function HomeScreen() {
               {recentCardContent}
             </GlassView>
           </View>
-            </ScrollView>
+              </ReAnimated.ScrollView>
+            </View>
           </View>
       
       {/* Transaction Detail Bottom Sheet */}
@@ -2228,6 +2287,16 @@ const styles = StyleSheet.create({
   },
   safeArea: {
     flex: 1,
+  },
+  homeScrollContainer: {
+    flex: 1,
+  },
+  pullToRefreshLoader: {
+    position: "absolute",
+    top: 10,
+    left: 0,
+    right: 0,
+    zIndex: 24,
   },
   safeAreaContent: {
     flexGrow: 1,

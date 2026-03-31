@@ -2,6 +2,15 @@ import React from "react";
 import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from "react-native";
 import { IconSymbol, type IconSymbolName } from "@/components/ui/icon-symbol";
 
+const CATEGORIES = ["Coffee", "Burger", "Bar", "Supermarket", "Clothes", "Kiosko"] as const;
+
+export type MerchantCategory = (typeof CATEGORIES)[number];
+
+type MapFilterChipsProps = {
+  selectedCategory: MerchantCategory | null;
+  onCategoryChange: (category: MerchantCategory | null) => void;
+};
+
 interface FilterChipProps {
   label: string;
   icon?: IconSymbolName;
@@ -37,7 +46,10 @@ const FilterChip: React.FC<FilterChipProps> = ({
   );
 };
 
-export const MapFilterChips: React.FC = () => {
+export const MapFilterChips: React.FC<MapFilterChipsProps> = ({
+  selectedCategory,
+  onCategoryChange,
+}) => {
   return (
     <ScrollView
       horizontal
@@ -48,10 +60,18 @@ export const MapFilterChips: React.FC = () => {
       <TouchableOpacity style={styles.filterButton}>
         <IconSymbol name="slider.horizontal.3" size={18} color="#000" />
       </TouchableOpacity>
-      
-      <FilterChip label="Ordenar" hasDropdown onPress={() => {}} />
-      <FilterChip label="Categorías" hasDropdown onPress={() => {}} />
-      <FilterChip label="Barrios" hasDropdown onPress={() => {}} />
+
+      {CATEGORIES.map((category) => {
+        const isActive = selectedCategory === category;
+        return (
+          <FilterChip
+            key={category}
+            label={category}
+            active={isActive}
+            onPress={() => onCategoryChange(isActive ? null : category)}
+          />
+        );
+      })}
     </ScrollView>
   );
 };

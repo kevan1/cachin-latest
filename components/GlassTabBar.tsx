@@ -34,7 +34,7 @@ const TAB_VISUALS: Record<string, TabVisual> = {
     label: "Scan",
     icon: (color) => <Ionicons name="qr-code-outline" size={25} color={color} />,
   },
-  supermarkets: {
+  map: {
     label: "Map",
     icon: (color) => <Ionicons name="map-outline" size={25} color={color} />,
   },

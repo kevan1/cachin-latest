@@ -57,8 +57,7 @@ export default function TabLayout() {
         <Tabs.Screen name="card" options={{ title: "Card" }} />
         <Tabs.Screen name="scanner" options={{ title: "Scan" }} />
         <Tabs.Screen name="camera-view" options={{ href: null }} />
-        <Tabs.Screen name="supermarkets" options={{ title: "Map" }} />
-        <Tabs.Screen name="explore" options={{ href: null }} />
+        <Tabs.Screen name="map" options={{ title: "Map" }} />
         <Tabs.Screen name="index" options={{ href: null }} />
       </Tabs>
     );
@@ -151,7 +150,7 @@ export default function TabLayout() {
         <NativeTabs.Trigger.Label>Scan</NativeTabs.Trigger.Label>
       </NativeTabs.Trigger>
 
-      <NativeTabs.Trigger name="supermarkets">
+      <NativeTabs.Trigger name="map">
         <NativeTabs.Trigger.Icon
           sf={{ default: "map", selected: "map.fill" }}
           src={{
