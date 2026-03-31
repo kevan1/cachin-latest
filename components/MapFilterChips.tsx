@@ -1,14 +1,27 @@
 import React from "react";
-import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from "react-native";
+import {
+  ScrollView,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
+} from "react-native";
 import { IconSymbol, type IconSymbolName } from "@/components/ui/icon-symbol";
 
-const CATEGORIES = ["Coffee", "Burger", "Bar", "Supermarket", "Clothes", "Kiosko"] as const;
+const CATEGORIES = [
+  "Coffee",
+  "Burger",
+  "Bar",
+  "Supermarket",
+  "Clothes",
+  "Kiosko",
+] as const;
 
 export type MerchantCategory = (typeof CATEGORIES)[number];
 
 type MapFilterChipsProps = {
-  selectedCategory: MerchantCategory | null;
-  onCategoryChange: (category: MerchantCategory | null) => void;
+  activeCategory: string | null;
+  onCategoryPress: (category: string | null) => void;
 };
 
 interface FilterChipProps {
@@ -38,17 +51,21 @@ const FilterChip: React.FC<FilterChipProps> = ({
       )}
       <Text style={[styles.label, active && styles.activeLabel]}>{label}</Text>
       {hasDropdown && (
-         <View style={{marginLeft: 4}}>
-           <IconSymbol name="chevron.down" size={14} color={active ? "#FFF" : "#000"} />
-         </View>
+        <View style={{ marginLeft: 4 }}>
+          <IconSymbol
+            name="chevron.down"
+            size={14}
+            color={active ? "#FFF" : "#000"}
+          />
+        </View>
       )}
     </TouchableOpacity>
   );
 };
 
 export const MapFilterChips: React.FC<MapFilterChipsProps> = ({
-  selectedCategory,
-  onCategoryChange,
+  activeCategory,
+  onCategoryPress,
 }) => {
   return (
     <ScrollView
@@ -61,14 +78,16 @@ export const MapFilterChips: React.FC<MapFilterChipsProps> = ({
         <IconSymbol name="slider.horizontal.3" size={18} color="#000" />
       </TouchableOpacity>
 
+      <FilterChip label="Ordenar" hasDropdown />
+
       {CATEGORIES.map((category) => {
-        const isActive = selectedCategory === category;
+        const isActive = activeCategory === category;
         return (
           <FilterChip
             key={category}
             label={category}
             active={isActive}
-            onPress={() => onCategoryChange(isActive ? null : category)}
+            onPress={() => onCategoryPress(isActive ? null : category)}
           />
         );
       })}
@@ -84,7 +103,7 @@ const styles = StyleSheet.create({
   container: {
     paddingHorizontal: 16,
     gap: 8,
-    alignItems: 'center',
+    alignItems: "center",
   },
   chip: {
     flexDirection: "row",
@@ -111,13 +130,13 @@ const styles = StyleSheet.create({
     color: "#FFF",
   },
   filterButton: {
-      width: 36,
-      height: 36,
-      borderRadius: 18,
-      backgroundColor: "#FFF",
-      justifyContent: "center",
-      alignItems: "center",
-      borderCurve: "continuous",
-      boxShadow: "0 2px 4px rgba(0, 0, 0, 0.1)",
-  }
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: "#FFF",
+    justifyContent: "center",
+    alignItems: "center",
+    borderCurve: "continuous",
+    boxShadow: "0 2px 4px rgba(0, 0, 0, 0.1)",
+  },
 });

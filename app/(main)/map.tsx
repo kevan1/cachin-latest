@@ -3,14 +3,15 @@ import BottomSheet, { BottomSheetScrollView } from "@gorhom/bottom-sheet";
 import { Image } from "expo-image";
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
-  Linking,
   PermissionsAndroid,
   Platform,
   Pressable,
+  StyleProp,
   StyleSheet,
   Text,
   TextInput,
   View,
+  ViewStyle,
 } from "react-native";
 import MapView, { Marker, PROVIDER_GOOGLE, UrlTile } from "react-native-maps";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -158,7 +159,7 @@ const LOCATIONS: MapLocation[] = [
 ];
 
 type MapSearchBarProps = SearchBarProps & {
-  topOffset: number;
+  style?: StyleProp<ViewStyle>;
 };
 
 const SearchBar: React.FC<MapSearchBarProps> = ({
@@ -167,10 +168,10 @@ const SearchBar: React.FC<MapSearchBarProps> = ({
   value,
   onFocus,
   onBlur,
-  topOffset,
+  style,
 }) => {
   return (
-    <View style={[searchStyles.container, { top: topOffset }]}>
+    <View style={[searchStyles.container, style]}>
       <GlassView style={searchStyles.searchContainer} intensity={24}>
         <View style={searchStyles.leadingIconPadding}>
           <IconSymbol name="magnifyingglass" color="#8E8E93" size={20} />
@@ -330,16 +331,6 @@ const LocationCard = ({
   location: MapLocation;
   onClose: () => void;
 }) => {
-  const openMaps = () => {
-    const isIos = process.env.EXPO_OS === "ios";
-    const scheme = isIos ? "maps:0,0?q=" : "geo:0,0?q=";
-    const latLng = `${location.coordinate.latitude},${location.coordinate.longitude}`;
-    const label = location.title;
-    const url = isIos ? `${scheme}${label}@${latLng}` : `${scheme}${latLng}(${label})`;
-
-    void Linking.openURL(url);
-  };
-
   const tone = getStatusTone(location.openStatus);
   const isJevi = location.id.startsWith("jevi-") || location.category === "Kiosko";
 
@@ -390,47 +381,17 @@ const LocationCard = ({
         <View style={locationCardStyles.content}>
           <Text style={locationCardStyles.title}>{location.title}</Text>
 
-          <View style={locationCardStyles.metaRow}>
-            <View style={locationCardStyles.categoryTag}>
-              <Text style={locationCardStyles.categoryTagText}>{location.category}</Text>
-            </View>
-            <Text style={locationCardStyles.ratingText}>★ {location.rating.toFixed(1)}</Text>
+          <View style={locationCardStyles.detailsRow}>
+            <Text style={locationCardStyles.ratingText}>⭐ {location.rating}</Text>
             <Text style={locationCardStyles.distanceText}>🏃 {location.distance}</Text>
+            <View style={locationCardStyles.categoryBadge}>
+              <Text style={locationCardStyles.categoryText}>{location.category}</Text>
+            </View>
           </View>
 
-          <View
-            style={[
-              locationCardStyles.openStatusBadge,
-              tone === "open" && locationCardStyles.openStatusBadgeOpen,
-              tone === "closing" && locationCardStyles.openStatusBadgeClosing,
-              tone === "closed" && locationCardStyles.openStatusBadgeClosed,
-            ]}
-          >
-            <Text
-              style={[
-                locationCardStyles.openStatusBadgeText,
-                tone === "open" && locationCardStyles.openStatusBadgeTextOpen,
-                tone === "closing" && locationCardStyles.openStatusBadgeTextClosing,
-                tone === "closed" && locationCardStyles.openStatusBadgeTextClosed,
-              ]}
-            >
-              {location.openStatus}
-            </Text>
-          </View>
-
-          <View style={locationCardStyles.actionsRow}>
-            <Pressable style={locationCardStyles.directionsButton} onPress={openMaps}>
-              <IconSymbol name="location.fill" size={18} color="#FFFFFF" />
-              <Text style={locationCardStyles.directionsButtonText}>Cómo llegar</Text>
-            </Pressable>
-
-            {location.acceptsCachin ? (
-              <Pressable style={locationCardStyles.payButton}>
-                <IconSymbol name="creditcard" size={16} color="#FFFFFF" />
-                <Text style={locationCardStyles.payButtonText}>Pagar con Cachin</Text>
-              </Pressable>
-            ) : null}
-          </View>
+          <Pressable style={locationCardStyles.payButton} onPress={() => {}}>
+            <Text style={locationCardStyles.payButtonText}>Pagar con Cachin</Text>
+          </Pressable>
         </View>
       </View>
     </View>
@@ -534,97 +495,44 @@ const locationCardStyles = StyleSheet.create({
     fontWeight: "700",
     color: "#000",
   },
-  metaRow: {
+  detailsRow: {
     flexDirection: "row",
     alignItems: "center",
     flexWrap: "wrap",
     gap: 8,
   },
-  categoryTag: {
-    backgroundColor: "#EEF2FF",
-    borderRadius: 999,
-    paddingHorizontal: 10,
-    paddingVertical: 5,
-  },
-  categoryTagText: {
-    fontSize: 12,
-    fontWeight: "700",
-    color: "#3730A3",
-  },
   ratingText: {
     fontSize: 13,
-    fontWeight: "700",
-    color: "#111827",
+    fontWeight: "600",
+    color: "#000",
   },
   distanceText: {
     fontSize: 13,
     fontWeight: "600",
     color: "#4B5563",
   },
-  openStatusBadge: {
-    borderRadius: 10,
-    paddingHorizontal: 10,
-    paddingVertical: 8,
-    backgroundColor: "#F8FAFC",
+  categoryBadge: {
+    backgroundColor: "#F1F5F9",
+    borderRadius: 6,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
   },
-  openStatusBadgeText: {
-    fontSize: 14,
-    fontWeight: "800",
-    color: "#0F172A",
-  },
-  openStatusBadgeOpen: {
-    backgroundColor: "#DCFCE7",
-  },
-  openStatusBadgeTextOpen: {
-    color: "#166534",
-  },
-  openStatusBadgeClosing: {
-    backgroundColor: "#FFEDD5",
-  },
-  openStatusBadgeTextClosing: {
-    color: "#9A3412",
-  },
-  openStatusBadgeClosed: {
-    backgroundColor: "#FFE4E6",
-  },
-  openStatusBadgeTextClosed: {
-    color: "#9F1239",
-  },
-  actionsRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 8,
-  },
-  directionsButton: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: "#111827",
-    borderRadius: 999,
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-    gap: 6,
-  },
-  directionsButtonText: {
-    color: "#FFFFFF",
-    fontSize: 13,
-    fontWeight: "700",
+  categoryText: {
+    fontSize: 12,
+    fontWeight: "600",
+    color: "#64748B",
   },
   payButton: {
-    flex: 1,
-    flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: "#000",
-    borderRadius: 999,
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-    gap: 6,
+    backgroundColor: "#10A5F5",
+    borderRadius: 12,
+    paddingVertical: 12,
   },
   payButtonText: {
-    color: "#FFF",
-    fontSize: 13,
-    fontWeight: "800",
+    color: "#FFFFFF",
+    fontSize: 14,
+    fontWeight: "700",
   },
 });
 
@@ -758,69 +666,38 @@ const Maps: React.FC = (): React.ReactElement => {
   const isAndroid = Platform.OS === "android";
 
   const [searchText, setSearchText] = useState("");
-  const [selectedCategory, setSelectedCategory] = useState<MerchantCategory | null>(null);
+  const [activeCategory, setActiveCategory] = useState<string | null>(null);
   const [selectedLocationId, setSelectedLocationId] = useState<string | null>(null);
-  const [locationPermissionGranted, setLocationPermissionGranted] = useState(
-    Platform.OS !== "android"
-  );
 
-  const googleMapsKey = process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY?.trim().replace(/^['"]|['"]$/g, "");
+  const googleMapsKey = process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY
+    ?.trim()
+    .replace(/^['"]|['"]$/g, "");
   const hasAndroidGoogleMapsKey =
     !isAndroid || /^AIza[A-Za-z0-9_-]{35}$/.test(googleMapsKey ?? "");
 
   useEffect(() => {
-    let isMounted = true;
+    if (!isAndroid) {
+      return;
+    }
 
-    const requestLocationPermission = async () => {
-      if (Platform.OS !== "android") {
-        return;
+    void PermissionsAndroid.request(
+      PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION,
+      {
+        title: "Acceder a tu ubicación",
+        message: "Necesitamos tu ubicación para mostrarte comercios cercanos.",
+        buttonPositive: "Permitir",
+        buttonNegative: "Ahora no",
       }
-
-      try {
-        const result = await PermissionsAndroid.request(
-          PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION,
-          {
-            title: "Acceder a tu ubicación",
-            message:
-              "Necesitamos tu ubicación para mostrarte comercios y referencias cercanas.",
-            buttonPositive: "Permitir",
-            buttonNegative: "Ahora no",
-          }
-        );
-
-        if (isMounted) {
-          setLocationPermissionGranted(result === PermissionsAndroid.RESULTS.GRANTED);
-        }
-      } catch {
-        if (isMounted) {
-          setLocationPermissionGranted(false);
-        }
-      }
-    };
-
-    void requestLocationPermission();
-
-    return () => {
-      isMounted = false;
-    };
-  }, []);
+    );
+  }, [isAndroid]);
 
   const filteredLocations = useMemo(() => {
-    const query = searchText.trim().toLowerCase();
+    if (activeCategory) {
+      return LOCATIONS.filter((location) => location.category === activeCategory);
+    }
 
-    return LOCATIONS.filter((location) => {
-      const matchesCategory = selectedCategory
-        ? location.category === selectedCategory
-        : true;
-      const matchesSearch =
-        query.length === 0 ||
-        `${location.title} ${location.address} ${location.category}`
-          .toLowerCase()
-          .includes(query);
-
-      return matchesCategory && matchesSearch;
-    });
-  }, [searchText, selectedCategory]);
+    return LOCATIONS;
+  }, [activeCategory]);
 
   const selectedLocation = useMemo(
     () => filteredLocations.find((location) => location.id === selectedLocationId) ?? null,
@@ -846,7 +723,7 @@ const Maps: React.FC = (): React.ReactElement => {
   return (
     <View style={styles.container}>
       <SearchBar
-        topOffset={insets.top + 10}
+        style={{ top: insets.top + 8 }}
         onFocus={() => undefined}
         placeholder="Buscá en Buenos Aires"
         value={searchText}
@@ -855,8 +732,8 @@ const Maps: React.FC = (): React.ReactElement => {
 
       <View style={[styles.filterChipsContainer, { top: insets.top + 72 }]}>
         <MapFilterChips
-          selectedCategory={selectedCategory}
-          onCategoryChange={setSelectedCategory}
+          activeCategory={activeCategory}
+          onCategoryPress={setActiveCategory}
         />
       </View>
 
@@ -910,14 +787,6 @@ const Maps: React.FC = (): React.ReactElement => {
         <View style={[styles.warningBanner, { top: insets.top + 130 }]}>
           <Text style={styles.warningText}>
             Android Google Maps key inválida. Mostrando mapa base OpenStreetMap.
-          </Text>
-        </View>
-      )}
-
-      {isAndroid && !locationPermissionGranted && (
-        <View style={[styles.warningBanner, { top: insets.top + 178 }]}>
-          <Text style={styles.warningText}>
-            Activá el permiso de ubicación para ver tu posición en el mapa.
           </Text>
         </View>
       )}
