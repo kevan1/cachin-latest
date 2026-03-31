@@ -6,8 +6,8 @@ import {
 import { Stack, Redirect, useSegments, useRouter } from "expo-router";
 import { StatusBar } from "expo-status-bar";
 import "react-native-reanimated";
-import { Component, ReactNode, ErrorInfo } from "react";
-import { StyleSheet, Text, TouchableOpacity, View, useColorScheme } from "react-native";
+import { Component, ReactNode, ErrorInfo, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { ActivityIndicator, StyleSheet, Text, TouchableOpacity, View, useColorScheme } from "react-native";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 
 import Constants from "expo-constants";
@@ -25,6 +25,10 @@ import { useNetworkStatus } from "@/hooks/use-network-status";
 import { HeroUINativeProvider } from "heroui-native";
 import { ChinPopoutProvider } from "@/components/ChinPopout";
 import { IconSymbol } from "@/components/ui/icon-symbol";
+import { getUserFromFirestore } from "@/services/firestoreService";
+import { clearUsername } from "@/utils/userStorage";
+import { clearSponsoredSolanaWallet } from "@/utils/sponsoredWalletStorage";
+import { clearTransactions } from "@/utils/transactionStorage";
 
 
 class ErrorBoundary extends Component<
@@ -214,16 +218,141 @@ function MissingPrivyConfigScreen({
   );
 }
 
+function MissingUsernameScreen({
+  onContinue,
+  onLogout,
+}: {
+  onContinue: () => void;
+  onLogout: () => void;
+}) {
+  const colorScheme = useColorScheme() ?? "light";
+  const palette = Colors[colorScheme];
+
+  return (
+    <View style={[styles.stateContainer, { backgroundColor: palette.background }]}>
+      <View style={[styles.badge, { borderColor: palette.buttonBorder }]}>
+        <View style={[styles.badgeDot, { backgroundColor: palette.primary }]} />
+        <Text style={[styles.badgeText, { color: palette.secondaryText }]}>
+          Username required
+        </Text>
+      </View>
+      <Text style={[styles.stateTitle, { color: palette.primaryText }]}>
+        Complete your username to continue
+      </Text>
+      <Text style={[styles.stateSubtitle, { color: palette.secondaryText }]}>
+        We detected this account still has a placeholder username from beta onboarding.
+      </Text>
+      <Text style={[styles.stateSubtitle, { color: palette.secondaryText }]}>
+        Choose a unique username to finish setup and unlock the app.
+      </Text>
+      <TouchableOpacity
+        accessibilityRole="button"
+        onPress={onContinue}
+        style={[
+          styles.retryButton,
+          { backgroundColor: palette.primary, borderColor: palette.buttonBorder },
+        ]}
+      >
+        <Text style={styles.retryText}>Complete Now</Text>
+      </TouchableOpacity>
+      <TouchableOpacity
+        accessibilityRole="button"
+        onPress={onLogout}
+        style={[styles.secondaryActionButton, { borderColor: palette.buttonBorder }]}
+      >
+        <Text style={[styles.secondaryActionText, { color: palette.primaryText }]}>
+          Sign Out
+        </Text>
+      </TouchableOpacity>
+    </View>
+  );
+}
+
+function UsernameGateCheckingScreen() {
+  const colorScheme = useColorScheme() ?? "light";
+  const palette = Colors[colorScheme];
+
+  return (
+    <View style={[styles.stateContainer, { backgroundColor: palette.background }]}>
+      <View style={[styles.badge, { borderColor: palette.buttonBorder }]}>
+        <View style={[styles.badgeDot, { backgroundColor: palette.primary }]} />
+        <Text style={[styles.badgeText, { color: palette.secondaryText }]}>
+          Verifying profile
+        </Text>
+      </View>
+      <Text style={[styles.stateTitle, { color: palette.primaryText }]}>
+        Checking your username
+      </Text>
+      <Text style={[styles.stateSubtitle, { color: palette.secondaryText }]}>
+        Hold on a second while we confirm your account setup.
+      </Text>
+      <ActivityIndicator size="small" color={palette.primary} style={styles.gateSpinner} />
+    </View>
+  );
+}
 
 function AppNavigator() {
-  const { user, isReady } = usePrivy();
+  const { user, isReady, logout } = usePrivy();
   const { isConnected, refresh } = useNetworkStatus();
   const segments = useSegments();
   const router = useRouter();
+  const [usernameGateStatus, setUsernameGateStatus] = useState<
+    "checking" | "required" | "ok"
+  >("ok");
+  const lastResolvedGateKeyRef = useRef<string | null>(null);
+  const hasResolvedGateOnceRef = useRef(false);
+  const hasAuthenticatedUser = Boolean(user?.id);
+  const inAuthGroup = segments[0] === '(main)';
+  const isUsernameScreen = segments[0] === "username";
+  const isUnauthScreen =
+    segments.length === 0 ||
+    segments[0] === "index" ||
+    segments[0] === "email";
   const isIOS = process.env.EXPO_OS === "ios";
   const colorScheme = useColorScheme() ?? "light";
   const headerBlurEffect =
     colorScheme === "dark" ? "systemMaterialDark" : "systemMaterialLight";
+  const solanaAddressesForGate = useMemo(() => {
+    const rawUser = user as {
+      linkedAccounts?: {
+        type?: string;
+        chainType?: string;
+        chain_type?: string;
+        address?: string | null;
+      }[];
+      linked_accounts?: {
+        type?: string;
+        chainType?: string;
+        chain_type?: string;
+        address?: string | null;
+      }[];
+    } | null;
+
+    const linkedAccounts = rawUser?.linkedAccounts ?? rawUser?.linked_accounts ?? [];
+    const uniqueAddresses = new Set<string>();
+
+    for (const account of linkedAccounts) {
+      const isSolanaWallet =
+        account?.type === "wallet" &&
+        (account.chainType === "solana" || account.chain_type === "solana");
+      const normalizedAddress = account?.address?.trim();
+      if (!isSolanaWallet || !normalizedAddress) continue;
+      uniqueAddresses.add(normalizedAddress);
+    }
+
+    return Array.from(uniqueAddresses).sort((a, b) => a.localeCompare(b));
+  }, [user]);
+  const addressesSignature = solanaAddressesForGate.join(",");
+  const gateContext = isUsernameScreen ? "username" : "app";
+  const gateKey = user?.id
+    ? `${user.id}:${addressesSignature || "no-solana"}:${gateContext}`
+    : "guest";
+  const resolvedUsernameGateStatus =
+    lastResolvedGateKeyRef.current === gateKey
+      ? usernameGateStatus
+      : hasResolvedGateOnceRef.current
+        ? usernameGateStatus
+        : "checking";
 
   const renderSheetCloseButton = () => (
     <TouchableOpacity
@@ -246,28 +375,142 @@ function AppNavigator() {
     </TouchableOpacity>
   );
 
+  const handleGateLogout = useCallback(async () => {
+    try {
+      await clearUsername();
+      await clearSponsoredSolanaWallet(user?.id);
+      await clearTransactions();
+      await logout();
+      router.replace("/");
+    } catch (error) {
+      console.error("[AppNavigator] Failed to logout from username gate", error);
+    }
+  }, [logout, router, user?.id]);
+
+  useEffect(() => {
+    let isCancelled = false;
+
+    const resolveUsernameGate = async () => {
+      if (!isReady) return;
+
+      if (!hasAuthenticatedUser) {
+        lastResolvedGateKeyRef.current = gateKey;
+        hasResolvedGateOnceRef.current = true;
+        if (!isCancelled) setUsernameGateStatus("ok");
+        return;
+      }
+
+      if (lastResolvedGateKeyRef.current === gateKey) {
+        return;
+      }
+
+      try {
+        if (solanaAddressesForGate.length === 0) {
+          // Do not hard-block when linked wallets are still hydrating.
+          lastResolvedGateKeyRef.current = gateKey;
+          hasResolvedGateOnceRef.current = true;
+          if (!isCancelled) setUsernameGateStatus("ok");
+          return;
+        }
+
+        if (!isCancelled && !hasResolvedGateOnceRef.current) {
+          setUsernameGateStatus("checking");
+        }
+
+        if (__DEV__) {
+          console.log("[UsernameGate] Checking linked Solana addresses", {
+            userId: user?.id,
+            addresses: solanaAddressesForGate,
+          });
+        }
+
+        let hasValidUsername = false;
+        for (const address of solanaAddressesForGate) {
+          const firestoreUser = await getUserFromFirestore(address);
+          const normalizedUsername = firestoreUser?.username?.trim().toLowerCase() ?? "";
+          const isPlaceholder =
+            !normalizedUsername ||
+            normalizedUsername === "user" ||
+            normalizedUsername.startsWith("user-");
+
+          if (!isPlaceholder) {
+            if (__DEV__) {
+              console.log("[UsernameGate] Found valid username", {
+                address,
+                username: normalizedUsername,
+              });
+            }
+            hasValidUsername = true;
+            break;
+          }
+        }
+
+        if (__DEV__ && !hasValidUsername) {
+          console.log("[UsernameGate] No valid username found for linked addresses", {
+            userId: user?.id,
+            addresses: solanaAddressesForGate,
+          });
+        }
+
+        lastResolvedGateKeyRef.current = gateKey;
+        hasResolvedGateOnceRef.current = true;
+        if (!isCancelled) {
+          setUsernameGateStatus(hasValidUsername ? "ok" : "required");
+        }
+      } catch (error) {
+        console.error("[AppNavigator] Failed to resolve username gate", error);
+        lastResolvedGateKeyRef.current = gateKey;
+        hasResolvedGateOnceRef.current = true;
+        if (!isCancelled) {
+          // Avoid trapping users behind the gate on transient Firestore errors.
+          setUsernameGateStatus("ok");
+        }
+      }
+    };
+
+    void resolveUsernameGate();
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [gateKey, hasAuthenticatedUser, isReady, solanaAddressesForGate, user?.id]);
+
   if (isConnected === false) {
     return <OfflineScreen onRetry={refresh} />;
   }
-  
-  const inAuthGroup = segments[0] === '(main)';
-  const isUnauthScreen =
-    segments.length === 0 ||
-    segments[0] === "index" ||
-    segments[0] === "username" ||
-    segments[0] === "email";
-  
+
   // Redirect logic
   if (isReady && !user && inAuthGroup) {
     // User is not logged in but trying to access protected routes
     return <Redirect href="/" />;
   }
-  
-  if (isReady && user && isUnauthScreen) {
-    // User is logged in but on unauthenticated screens (index/username)
+
+  if (
+    isReady &&
+    user &&
+    resolvedUsernameGateStatus === "checking" &&
+    !isUsernameScreen &&
+    !inAuthGroup
+  ) {
+    return <UsernameGateCheckingScreen />;
+  }
+
+  if (isReady && user && resolvedUsernameGateStatus === "required" && !isUsernameScreen) {
+    return (
+      <MissingUsernameScreen
+        onContinue={() =>
+          router.replace({ pathname: "/username", params: { mode: "complete" } })
+        }
+        onLogout={handleGateLogout}
+      />
+    );
+  }
+
+  if (isReady && user && resolvedUsernameGateStatus === "ok" && (isUnauthScreen || isUsernameScreen)) {
+    // User is logged in but on unauthenticated screens (index/email/username)
     return <Redirect href="/(main)/home" />;
   }
-  
+
   return (
     <Stack screenOptions={{ headerShown: false }}>
       <Stack.Screen name="index" options={{ headerShown: false }} />
@@ -547,6 +790,18 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: "700",
   },
+  secondaryActionButton: {
+    marginTop: 10,
+    paddingHorizontal: 18,
+    paddingVertical: 12,
+    borderRadius: 14,
+    borderWidth: 1,
+    backgroundColor: "transparent",
+  },
+  secondaryActionText: {
+    fontSize: 15,
+    fontWeight: "600",
+  },
   configList: {
     marginTop: 12,
     marginBottom: 8,
@@ -556,5 +811,8 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: "600",
     marginVertical: 2,
+  },
+  gateSpinner: {
+    marginTop: 16,
   },
 });

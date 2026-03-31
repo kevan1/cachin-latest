@@ -1,7 +1,7 @@
 import { StyleSheet, View, Text, TouchableOpacity, ScrollView } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useEffect, useMemo, useState } from 'react';
-import { useEmbeddedEthereumWallet, useEmbeddedSolanaWallet } from '@privy-io/expo';
+import { useEmbeddedEthereumWallet, useEmbeddedSolanaWallet, usePrivy } from '@privy-io/expo';
 
 import { ChainType } from '@/constants/chains';
 import { type ChainFilter } from '@/utils/chainStorage';
@@ -25,6 +25,7 @@ const EMPTY_BALANCES: MultiChainBalances = {
 export default function BalanceScreen() {
   const router = useRouter();
   const params = useLocalSearchParams();
+  const { user, isReady } = usePrivy();
   const { wallets: solanaWallets } = useEmbeddedSolanaWallet();
   const { wallets: ethereumWallets } = useEmbeddedEthereumWallet();
 
@@ -50,14 +51,21 @@ export default function BalanceScreen() {
       : ethereumWallets?.[0]?.address ?? null;
 
   useEffect(() => {
-    getSponsoredSolanaWallet()
+    if (!isReady) return;
+
+    if (!user?.id) {
+      setSponsoredWalletAddress(null);
+      return;
+    }
+
+    getSponsoredSolanaWallet(user.id)
       .then(({ address }) => {
         setSponsoredWalletAddress(address);
       })
       .catch(() => {
         setSponsoredWalletAddress(null);
       });
-  }, []);
+  }, [isReady, user?.id]);
 
   useEffect(() => {
     Promise.all([loadAvalancheWalletSource(), loadSatochipAvalancheAddress()])

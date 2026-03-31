@@ -40,10 +40,12 @@ export async function fetchTransactionsFromBlockchain(
           // Get from local storage instead of fetching
           const localTxs = await getTransactions();
           const localTx = localTxs.find(tx => tx.signature === sigInfo.signature);
-          if (localTx) {
+          const hasResolvedCounterparty = Boolean(localTx?.address?.trim());
+          if (localTx && hasResolvedCounterparty) {
             transactions.push(localTx);
             continue;
           }
+          // Local cache exists but missing counterparty; continue and refetch chain data.
         }
 
         // Add delay between requests to avoid rate limiting (500ms)
@@ -221,6 +223,12 @@ function parseTokenTransfer(
       if (!postBalance.uiTokenAmount) {
         continue;
       }
+
+      // Parse only the token account owned by the current wallet.
+      const owner = postBalance.owner?.trim();
+      if (!owner || owner !== walletAddress) {
+        continue;
+      }
       
       console.log('Token found:', postBalance.mint, 'decimals:', postBalance.uiTokenAmount.decimals);
       
@@ -244,8 +252,6 @@ function parseTokenTransfer(
         continue;
       }
 
-      // Get the owner of this token account
-      const owner = postBalance.owner;
       const type: 'send' | 'receive' = amountChange < 0 ? 'send' : 'receive';
 
       // Find the other party
@@ -256,33 +262,43 @@ function parseTokenTransfer(
           const correspondingPre = preTokenBalances.find(
             (pre) => pre.accountIndex === pb.accountIndex
           );
-          if (!pb.uiTokenAmount || !correspondingPre?.uiTokenAmount) return false;
-          const change = pb.uiTokenAmount.uiAmount - correspondingPre.uiTokenAmount.uiAmount;
+          if (!pb.uiTokenAmount) return false;
+          const postUiAmount = pb.uiTokenAmount.uiAmount || 0;
+          const preUiAmount = correspondingPre?.uiTokenAmount?.uiAmount || 0;
+          const change = postUiAmount - preUiAmount;
           const recipientIsUSDC = USDC_MINTS.includes(pb.mint) || pb.uiTokenAmount.decimals === 6;
           return change > 0 && recipientIsUSDC && idx !== i;
         });
-        otherPartyAddress = recipientBalance?.owner || '';
+        const recipientOwner = recipientBalance?.owner?.trim();
+        otherPartyAddress =
+          recipientOwner && recipientOwner !== walletAddress ? recipientOwner : '';
       } else {
         // Find account with negative change
         const senderBalance = postTokenBalances.find((pb, idx) => {
           const correspondingPre = preTokenBalances.find(
             (pre) => pre.accountIndex === pb.accountIndex
           );
-          if (!pb.uiTokenAmount || !correspondingPre?.uiTokenAmount) return false;
-          const change = pb.uiTokenAmount.uiAmount - correspondingPre.uiTokenAmount.uiAmount;
+          if (!pb.uiTokenAmount) return false;
+          const postUiAmount = pb.uiTokenAmount.uiAmount || 0;
+          const preUiAmount = correspondingPre?.uiTokenAmount?.uiAmount || 0;
+          const change = postUiAmount - preUiAmount;
           const senderIsUSDC = USDC_MINTS.includes(pb.mint) || pb.uiTokenAmount.decimals === 6;
-          return change < 0 && senderIsUSDC && idx !== i;
+          const senderOwner = pb.owner?.trim();
+          return change < 0 && senderIsUSDC && idx !== i && senderOwner !== walletAddress;
         });
-        otherPartyAddress = senderBalance?.owner || '';
+        otherPartyAddress = senderBalance?.owner?.trim() || '';
         
         // Fallback: try to get authority/signer from transaction instructions
         if (!otherPartyAddress && tx.transaction?.message) {
           const instructions = tx.transaction.message.instructions;
           for (const instruction of instructions) {
-            if ('parsed' in instruction && instruction.parsed?.type === 'transfer') {
-              const source = instruction.parsed.info?.source;
-              const authority = instruction.parsed.info?.authority;
-              if (authority) {
+            if (
+              'parsed' in instruction &&
+              (instruction.parsed?.type === 'transfer' ||
+                instruction.parsed?.type === 'transferChecked')
+            ) {
+              const authority = instruction.parsed.info?.authority?.trim();
+              if (authority && authority !== walletAddress) {
                 otherPartyAddress = authority;
                 break;
               }
@@ -430,9 +446,30 @@ export async function getMergedTransactions(address: string): Promise<Transactio
       mergedMap.set(tx.signature, tx);
     });
 
-    // Add/update with blockchain transactions (they have more accurate data)
+    // Add/update with blockchain transactions, but keep local counterparty
+    // when parser cannot resolve address fields from chain data.
     blockchainTransactions.forEach(tx => {
-      mergedMap.set(tx.signature, tx);
+      const existing = mergedMap.get(tx.signature);
+
+      if (!existing) {
+        mergedMap.set(tx.signature, tx);
+        return;
+      }
+
+      const normalizedChainAddress = tx.address?.trim() ?? '';
+      const normalizedExistingAddress = existing.address?.trim() ?? '';
+      const normalizedChainSender = tx.sender?.trim() ?? '';
+      const normalizedExistingSender = existing.sender?.trim() ?? '';
+      const normalizedChainRecipient = tx.recipient?.trim() ?? '';
+      const normalizedExistingRecipient = existing.recipient?.trim() ?? '';
+
+      mergedMap.set(tx.signature, {
+        ...existing,
+        ...tx,
+        address: normalizedChainAddress || normalizedExistingAddress,
+        sender: normalizedChainSender || normalizedExistingSender,
+        recipient: normalizedChainRecipient || normalizedExistingRecipient,
+      });
     });
 
     // Convert back to array and sort by timestamp (newest first)

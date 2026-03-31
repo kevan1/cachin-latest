@@ -52,6 +52,7 @@ import { LinearGradient } from "expo-linear-gradient";
 import { GlassView } from "@/components/ui/GlassView";
 import { ANDROID_GLASS_TAB_HEIGHT } from "@/components/GlassTabBar";
 import { IconSymbol } from "@/components/ui/icon-symbol";
+import { AnimatedBalanceText } from "@/components/ui/AnimatedBalanceText";
 import { PlatformPressable } from "@react-navigation/elements";
 import { useToast } from "heroui-native";
 import { MeshGradientView } from "@wilmxre/react-native-mesh-gradient/src";
@@ -80,6 +81,12 @@ import {
 const MESH_DIMENSION = 3;
 type ReceiveAsset = 'usdc' | 'sol' | 'avax';
 const PENDING_USERNAME_SAVE_KEY = 'pending_username_save';
+type LinkedSolanaAccountLike = {
+  type?: string;
+  chain_type?: string;
+  chainType?: string;
+  address?: string | null;
+};
 
 
 // Icon components using LineIcons style
@@ -224,6 +231,7 @@ export default function HomeScreen() {
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [isLoadingTransactions, setIsLoadingTransactions] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const [balanceRefreshTick, setBalanceRefreshTick] = useState(0);
   const [selectedTransaction, setSelectedTransaction] = useState<Transaction | null>(null);
   const [username, setUsername] = useState<string>('User');
   const [addressToUsername, setAddressToUsername] = useState<{ [address: string]: string }>({});
@@ -241,6 +249,13 @@ export default function HomeScreen() {
 
   const keyQuorumId = useMemo(() => getPrivyGaslessKeyQuorumId(), []);
   const sessionSignerPolicyIds = useMemo(() => getPrivyGasSponsorPolicyIds(), []);
+
+  useEffect(() => {
+    setUsername('User');
+    setTransactions([]);
+    setAddressToUsername({});
+    setUsdBalance('0.00');
+  }, [user?.id]);
 
   useEffect(() => {
     console.log("[Home] EXPO_PUBLIC_PRIVY_KEY_QUORUM_ID:", keyQuorumId);
@@ -285,6 +300,32 @@ export default function HomeScreen() {
   const embeddedSolanaAddress = useMemo(() => {
     return getEmbeddedSolanaWalletAddress(solanaWallets);
   }, [solanaWallets]);
+  const linkedSolanaAddresses = useMemo(() => {
+    const rawUser = user as {
+      linked_accounts?: LinkedSolanaAccountLike[];
+      linkedAccounts?: LinkedSolanaAccountLike[];
+    } | null;
+    const linkedAccounts = rawUser?.linked_accounts ?? rawUser?.linkedAccounts ?? [];
+
+    return linkedAccounts
+      .filter(
+        (account) =>
+          account?.type === 'wallet' &&
+          (account.chain_type === 'solana' || account.chainType === 'solana')
+      )
+      .map((account) => account.address?.trim())
+      .filter((address): address is string => !!address);
+  }, [user]);
+  const ownExternalSolanaAddresses = useMemo(() => {
+    const managedAddresses = new Set(
+      [embeddedSolanaAddress, sponsoredWalletAddress].filter(
+        (address): address is string => !!address
+      )
+    );
+    return new Set(
+      linkedSolanaAddresses.filter((address) => !managedAddresses.has(address))
+    );
+  }, [embeddedSolanaAddress, linkedSolanaAddresses, sponsoredWalletAddress]);
 
   const embeddedAvalancheAddress = useMemo(() => {
     return ethereumWallets[0]?.address ?? null;
@@ -425,13 +466,41 @@ export default function HomeScreen() {
   );
 
   useEffect(() => {
-    getSponsoredSolanaWallet()
-      .then(({ id, address }) => {
+    let isCancelled = false;
+
+    const hydrateSponsoredWallet = async () => {
+      if (!isReady) return;
+
+      setSponsoredWalletLoaded(false);
+      setSponsoredWalletId(null);
+      setSponsoredWalletAddress(null);
+
+      if (!user?.id) {
+        if (!isCancelled) setSponsoredWalletLoaded(true);
+        return;
+      }
+
+      try {
+        const { id, address } = await getSponsoredSolanaWallet(user.id);
+        if (isCancelled) return;
         setSponsoredWalletId(id);
         setSponsoredWalletAddress(address);
-      })
-      .finally(() => setSponsoredWalletLoaded(true));
-  }, []);
+      } catch (error) {
+        if (isCancelled) return;
+        console.error("[Home] Failed to load sponsored wallet from storage", error);
+        setSponsoredWalletId(null);
+        setSponsoredWalletAddress(null);
+      } finally {
+        if (!isCancelled) setSponsoredWalletLoaded(true);
+      }
+    };
+
+    void hydrateSponsoredWallet();
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [isReady, user?.id]);
 
   // Load currency and prices on focus
   useFocusEffect(
@@ -492,8 +561,13 @@ export default function HomeScreen() {
       const solanaAddress = getFullSolanaAddressForUsername();
       console.log('[Home] Loading username for address:', solanaAddress);
 
-      // Try to get username (will check AsyncStorage first, then Firestore)
-      const storedUsername = await getUsername(solanaAddress || undefined);
+      if (!solanaAddress) {
+        setUsername('User');
+        return;
+      }
+
+      // Try to get username for the active Solana address.
+      const storedUsername = await getUsername(solanaAddress);
       console.log('[Home] Retrieved username:', storedUsername);
       
       if (storedUsername && !storedUsername.startsWith('user-')) {
@@ -501,11 +575,12 @@ export default function HomeScreen() {
         console.log('[Home] Username set to:', storedUsername);
       } else {
         console.log('[Home] No username found, using default "User"');
+        setUsername('User');
       }
     };
     loadUsername();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [solanaWallets, sponsoredWalletAddress]);
+  }, [solanaWallets, sponsoredWalletAddress, user?.id]);
 
   // Complete deferred username sync when wallet hydration was unavailable at signup.
   useEffect(() => {
@@ -520,7 +595,7 @@ export default function HomeScreen() {
         return;
       }
 
-      const cachedUsername = await getUsername();
+      const cachedUsername = await getUsername(solanaAddress);
       if (!cachedUsername) {
         await AsyncStorage.removeItem(PENDING_USERNAME_SAVE_KEY);
         return;
@@ -535,7 +610,7 @@ export default function HomeScreen() {
       console.error('[Home] Failed to sync pending username:', error);
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [solanaWallets, sponsoredWalletAddress]);
+  }, [solanaWallets, sponsoredWalletAddress, user?.id]);
 
   const walletInitAttempted = useRef(false);
   const walletCreationAttempted = useRef(false);
@@ -638,7 +713,7 @@ export default function HomeScreen() {
       const nextAddress = wallet?.publicKey ?? wallet?.address ?? null;
       setSponsoredWalletId(nextId);
       setSponsoredWalletAddress(nextAddress);
-      await setSponsoredSolanaWallet({ id: nextId, address: nextAddress });
+      await setSponsoredSolanaWallet({ id: nextId, address: nextAddress }, user.id);
     };
 
     void prepareSponsoredWallet().catch((error) => {
@@ -809,18 +884,20 @@ export default function HomeScreen() {
     const fullAddress = getFullSolanaAddress();
     const avalancheAddress = getFullAvalancheAddress();
     if (!fullAddress && !avalancheAddress) return;
-    
+
     setIsRefreshing(true);
-    // Clear cache to force fresh fetch
-    await clearTransactions();
-    const refreshTasks: Promise<unknown>[] = [
-      fetchBalance(true),
-    ];
-    if (fullAddress) {
-      refreshTasks.push(fetchTransactions(fullAddress));
+    try {
+      // Clear cache to force fresh fetch
+      await clearTransactions();
+      const refreshTasks: Promise<unknown>[] = [fetchBalance(true)];
+      if (fullAddress) {
+        refreshTasks.push(fetchTransactions(fullAddress));
+      }
+      await Promise.all(refreshTasks);
+    } finally {
+      setIsRefreshing(false);
+      setBalanceRefreshTick((current) => current + 1);
     }
-    await Promise.all(refreshTasks);
-    setIsRefreshing(false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [fetchBalance, fetchTransactions]);
   
@@ -828,7 +905,12 @@ export default function HomeScreen() {
   useEffect(() => {
     const fullAddress = getFullSolanaAddress();
     const avalancheAddress = getFullAvalancheAddress();
-    if (!fullAddress && !avalancheAddress) return;
+    if (!fullAddress && !avalancheAddress) {
+      setUsdBalance('0.00');
+      setTransactions([]);
+      setAddressToUsername({});
+      return;
+    }
 
     // Initial fetch
     fetchBalance();
@@ -860,16 +942,41 @@ export default function HomeScreen() {
   }, [fullAvalancheAddress, solanaWallets, selectedChain, sponsoredWalletAddress]);
   
   // Format transaction for display
-  const formatTransaction = (tx: Transaction) => {
-    // Check if we have a username for this address
-    let addressDisplay = tx.address || 'Unknown';
-    if (addressToUsername[tx.address]) {
-      addressDisplay = addressToUsername[tx.address];
-    } else if (tx.address && tx.address.length >= 12) {
-      // Show shortened address if no username
-      addressDisplay = `${tx.address.slice(0, 6)}...${tx.address.slice(-6)}`;
+  const getDisplayNameForAddress = (address?: string | null) => {
+    if (!address || address.trim() === '') {
+      return 'Unknown';
     }
-    
+
+    if (ownExternalSolanaAddresses.has(address)) {
+      return 'External wallet';
+    }
+
+    if (addressToUsername[address]) {
+      return addressToUsername[address];
+    }
+
+    if (address.length >= 12) {
+      return `${address.slice(0, 6)}...${address.slice(-6)}`;
+    }
+
+    return address;
+  };
+
+  const getCounterpartyValue = (tx: Transaction) => {
+    const normalizedAddress = tx.address?.trim();
+    if (normalizedAddress) {
+      return normalizedAddress;
+    }
+
+    const fallbackParty =
+      tx.type === 'send' ? tx.recipient?.trim() : tx.sender?.trim();
+    return fallbackParty || '';
+  };
+
+  const formatTransaction = (tx: Transaction) => {
+    const counterpartyValue = getCounterpartyValue(tx);
+    const addressDisplay = getDisplayNameForAddress(counterpartyValue);
+
     return {
       id: tx.id,
       type: tx.type,
@@ -889,6 +996,16 @@ export default function HomeScreen() {
     const dollars = whole.replace(/\B(?=(\d{3})+(?!\d))/g, ",");
     return { dollars, cents: cents ?? "00" };
   };
+
+  const usdBalanceParts = useMemo(() => formatUsdParts(usdBalance), [usdBalance]);
+  const formattedUsdBalance = useMemo(
+    () => `$${usdBalanceParts.dollars}.${usdBalanceParts.cents}`,
+    [usdBalanceParts]
+  );
+  const usdBalanceNumericValue = useMemo(() => {
+    const parsed = Number.parseFloat(usdBalance);
+    return Number.isFinite(parsed) ? parsed : 0;
+  }, [usdBalance]);
 
   const getSecondaryBalanceText = () => {
     if (!isBalanceVisible) return "Tap to view balance";
@@ -1377,11 +1494,13 @@ export default function HomeScreen() {
               style={styles.balanceTap}
             >
               {isBalanceVisible ? (
-                <View style={[styles.balanceRowLiquid, isIOS ? styles.balanceRowLiquidIos : null]}>
-                  <Text style={[styles.balanceCurrencyLiquid, isIOS ? styles.balanceCurrencyLiquidIos : null]}>$</Text>
-                  <Text style={[styles.balanceMainLiquid, isIOS ? styles.balanceMainLiquidIos : null]}>{formatUsdParts(usdBalance).dollars}</Text>
-                  <Text style={[styles.balanceCentsLiquid, isIOS ? styles.balanceCentsLiquidIos : null]}>.{formatUsdParts(usdBalance).cents}</Text>
-                </View>
+                <AnimatedBalanceText
+                  value={formattedUsdBalance}
+                  animatedValue={usdBalanceNumericValue}
+                  animationTrigger={balanceRefreshTick}
+                  containerStyle={styles.balanceAnimatedValueHost}
+                  textStyle={styles.balanceAnimatedValueText}
+                />
               ) : (
                 <Text style={styles.balanceHidden}>••••</Text>
               )}
@@ -1584,7 +1703,7 @@ export default function HomeScreen() {
                 <View style={styles.summaryLeft}>
                   <View style={styles.detailAvatar}>
                     <Text style={styles.detailAvatarText}>
-                      {getInitials(selectedTransaction.address)}
+                      {getInitials(getCounterpartyValue(selectedTransaction))}
                     </Text>
                   </View>
                 </View>
@@ -1592,10 +1711,7 @@ export default function HomeScreen() {
                   <Text style={styles.summaryTitle}>
                     {selectedTransaction.type === 'send' ? '↗ Sent to ' : '↙ Received from '}
                     <Text style={styles.summaryAddressInline}>
-                      {addressToUsername[selectedTransaction.address] || 
-                       (selectedTransaction.address && selectedTransaction.address.length >= 12
-                        ? `${selectedTransaction.address.slice(0, 6)}...${selectedTransaction.address.slice(-6)}`
-                        : selectedTransaction.address || 'Unknown')}
+                      {getDisplayNameForAddress(getCounterpartyValue(selectedTransaction))}
                     </Text>
                   </Text>
                   <Text style={styles.detailAmount}>
@@ -2307,6 +2423,16 @@ const styles = StyleSheet.create({
   balanceCentsLiquidIos: {
     fontSize: 30,
     marginBottom: 8,
+  },
+  balanceAnimatedValueHost: {
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  balanceAnimatedValueText: {
+    fontSize: 56,
+    fontWeight: "800",
+    letterSpacing: 0,
+    color: "#FFFFFF",
   },
   balanceHidden: {
     fontSize: 72,

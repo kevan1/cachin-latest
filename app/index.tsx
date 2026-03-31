@@ -227,7 +227,13 @@ export default function Index() {
     },
   });
 
-  if (!isReady) return null;
+  if (!isReady) {
+    return (
+      <View style={[styles.container, styles.loadingScreen]}>
+        <Text style={styles.loadingText}>Loading account...</Text>
+      </View>
+    );
+  }
 
   if (user) {
     return <Redirect href="/(main)/home" />;
@@ -485,5 +491,14 @@ const styles = StyleSheet.create({
   link: {
     color: "#111827",
     textDecorationLine: "underline",
+  },
+  loadingScreen: {
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  loadingText: {
+    color: "#6B7280",
+    fontSize: 16,
+    fontWeight: "600",
   },
 });

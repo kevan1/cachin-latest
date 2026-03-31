@@ -2,20 +2,45 @@ import { StyleSheet, View, Text, TouchableOpacity, ScrollView, Alert, Share } fr
 import { useRouter } from 'expo-router';
 import { useEffect, useState, useMemo } from 'react';
 import * as Clipboard from 'expo-clipboard';
+import { usePrivy } from '@privy-io/expo';
 import { getUsername } from '@/utils/userStorage';
 
 export default function InviteScreen() {
   const router = useRouter();
+  const { user } = usePrivy();
   const [username, setUsername] = useState<string>('User');
   const [points] = useState<number>(2693);
 
   useEffect(() => {
+    const rawUser = user as {
+      linkedAccounts?: {
+        type?: string;
+        chainType?: string;
+        chain_type?: string;
+        address?: string | null;
+      }[];
+      linked_accounts?: {
+        type?: string;
+        chainType?: string;
+        chain_type?: string;
+        address?: string | null;
+      }[];
+    } | null;
+
+    const linkedAccounts = rawUser?.linkedAccounts ?? rawUser?.linked_accounts ?? [];
+    const solanaAccount = linkedAccounts.find(
+      (account) =>
+        account?.type === 'wallet' &&
+        (account.chainType === 'solana' || account.chain_type === 'solana')
+    );
+    const solanaAddress = solanaAccount?.address?.trim() || undefined;
+
     const load = async () => {
-      const stored = await getUsername();
+      const stored = await getUsername(solanaAddress);
       if (stored && !stored.startsWith('user-')) setUsername(stored);
     };
-    load();
-  }, []);
+    void load();
+  }, [user]);
 
   const inviteCode = useMemo(() => {
     const base = (username || 'USER').toUpperCase();

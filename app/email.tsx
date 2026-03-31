@@ -57,7 +57,7 @@ export default function EmailOnboardingScreen() {
       setError(null);
     },
     onLoginSuccess: async () => {
-      router.replace("/(main)/home");
+      router.replace({ pathname: "/username", params: { mode: "complete" } });
     },
     onError: (err) => {
       setError(getErrorMessage(err) || "Unable to continue with email.");

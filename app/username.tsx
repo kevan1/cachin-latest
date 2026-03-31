@@ -1,8 +1,8 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useMemo } from 'react';
 import { StyleSheet, View, Text, TextInput, TouchableOpacity, Alert, Animated, ActivityIndicator, ScrollView, useWindowDimensions } from 'react-native';
-import { useRouter } from 'expo-router';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useSignupWithPasskey } from '@privy-io/expo/passkey';
-import { useEmbeddedSolanaWallet } from '@privy-io/expo';
+import { useEmbeddedSolanaWallet, usePrivy } from '@privy-io/expo';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import Svg, { Path } from 'react-native-svg';
 import {
@@ -12,7 +12,11 @@ import {
   shouldFallbackToEmail,
 } from '@/utils/passkeySupport';
 import { saveUsername } from '@/utils/userStorage';
-import { getUserByUsername } from '@/services/firestoreService';
+import {
+  getUserByUsername,
+  getUserFromFirestore,
+  updateUsernameInFirestore,
+} from '@/services/firestoreService';
 import {
   getPasskeyRelyingPartyId,
   getPasskeyRelyingPartyOrigin,
@@ -82,6 +86,9 @@ function ProgressBar({ isActive, isComplete, delay = 0 }: { isActive: boolean; i
 
 export default function UsernameScreen() {
   const router = useRouter();
+  const { mode } = useLocalSearchParams<{ mode?: string | string[] }>();
+  const modeValue = Array.isArray(mode) ? mode[0] : mode;
+  const isCompletionFlow = modeValue === 'complete';
   const { width: screenWidth, height: screenHeight } = useWindowDimensions();
   const passkeyRelyingPartyId = getPasskeyRelyingPartyId() ?? 'auth.kevan.ar';
   const passkeyRelyingParty = getPasskeyRelyingPartyOrigin() ?? 'https://auth.kevan.ar';
@@ -94,12 +101,20 @@ export default function UsernameScreen() {
   );
   const didRedirectRef = useRef(false);
   const { wallets: solanaWallets } = useEmbeddedSolanaWallet();
+  const { user: authenticatedUser } = usePrivy();
   
   // Passkey setup state
   const [loading, setLoading] = useState(false);
   const [checkingUsername, setCheckingUsername] = useState(false);
+  const [usernameAvailability, setUsernameAvailability] = useState<
+    'idle' | 'checking' | 'available' | 'taken' | 'error'
+  >('idle');
+  const usernameAvailabilityRequestRef = useRef(0);
+  const usernameAvailabilityDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
+    if (isCompletionFlow) return;
+
     let isMounted = true;
     checkPasskeySupport().then((supported) => {
       if (!isMounted) return;
@@ -110,38 +125,74 @@ export default function UsernameScreen() {
     return () => {
       isMounted = false;
     };
-  }, []);
+  }, [isCompletionFlow]);
 
   useEffect(() => {
+    if (isCompletionFlow) return;
+
     if (!useEmailFallback || didRedirectRef.current) return;
     didRedirectRef.current = true;
     router.replace({ pathname: '/email', params: { mode: 'signup' } });
-  }, [router, useEmailFallback]);
+  }, [isCompletionFlow, router, useEmailFallback]);
 
-  const getAuthenticatedSolanaAddress = (authUser?: unknown): string | undefined => {
+  const getAuthenticatedSolanaAddresses = (authUser?: unknown): string[] => {
     const linkedAccounts = (authUser as {
       linkedAccounts?: {
         type?: string;
         chainType?: string;
+        chain_type?: string;
         address?: string;
       }[];
-    })?.linkedAccounts;
-    const solanaLinkedAccount = linkedAccounts?.find(
-      (account) => account?.type === 'wallet' && account?.chainType === 'solana'
-    );
-    return solanaLinkedAccount?.address ?? solanaWallets[0]?.publicKey;
+      linked_accounts?: {
+        type?: string;
+        chainType?: string;
+        chain_type?: string;
+        address?: string;
+      }[];
+    })?.linkedAccounts ?? (authUser as {
+      linked_accounts?: {
+        type?: string;
+        chainType?: string;
+        chain_type?: string;
+        address?: string;
+      }[];
+    })?.linked_accounts;
+    const addresses = new Set<string>();
+
+    for (const account of linkedAccounts ?? []) {
+      const isSolanaWallet =
+        account?.type === 'wallet' &&
+        (account?.chainType === 'solana' || account?.chain_type === 'solana');
+      const address = account?.address?.trim();
+      if (!isSolanaWallet || !address) continue;
+      addresses.add(address);
+    }
+
+    const embeddedAddress = solanaWallets[0]?.publicKey?.trim();
+    if (embeddedAddress) {
+      addresses.add(embeddedAddress);
+    }
+
+    return Array.from(addresses);
   };
+  const currentUserSolanaAddresses = getAuthenticatedSolanaAddresses(authenticatedUser);
 
   const { signupWithPasskey, state: passkeySignupState } = useSignupWithPasskey({
     onSuccess: async (authUser) => {
       console.log("Passkey registered and logged in successfully");
       try {
         const usernameToSave = selectedUsernameRef.current;
-        const solanaAddress = getAuthenticatedSolanaAddress(authUser);
+        const solanaAddresses = getAuthenticatedSolanaAddresses(authUser);
 
         if (usernameToSave) {
-          if (solanaAddress) {
-            await saveUsername(usernameToSave, solanaAddress);
+          if (solanaAddresses.length > 0) {
+            const normalizedUsername = usernameToSave.trim().toLowerCase();
+            await Promise.all(
+              solanaAddresses.map((address) =>
+                updateUsernameInFirestore(address, normalizedUsername)
+              )
+            );
+            await saveUsername(normalizedUsername, solanaAddresses[0]);
             await AsyncStorage.removeItem('pending_username_save');
           } else {
             await saveUsername(usernameToSave);
@@ -177,7 +228,10 @@ export default function UsernameScreen() {
   });
 
   const handleUsernameChange = (text: string) => {
+    const normalizedText = text.trim().toLowerCase();
+
     if (text.length < 3) {
+      setUsernameAvailability('idle');
       setForm({
         username: text,
         isValid: false,
@@ -187,20 +241,93 @@ export default function UsernameScreen() {
     }
 
     if (text.length > 20) {
+      setUsernameAvailability('idle');
       setForm({ username: text, isValid: false, validationMessage: 'Username must be less than 20 characters' });
       return;
     }
 
     if (!/^[a-zA-Z0-9_]+$/.test(text)) {
+      setUsernameAvailability('idle');
       setForm({ username: text, isValid: false, validationMessage: 'Only letters, numbers, and underscores allowed' });
       return;
     }
 
-    setForm({ username: text, isValid: true, validationMessage: 'Username looks good' });
+    if (normalizedText === 'user' || normalizedText.startsWith('user-')) {
+      setUsernameAvailability('idle');
+      setForm({
+        username: text,
+        isValid: false,
+        validationMessage: 'This username is reserved. Please choose another one.',
+      });
+      return;
+    }
+
+    setUsernameAvailability('checking');
+    setForm({ username: text, isValid: true, validationMessage: '' });
   };
 
+  useEffect(() => {
+    if (currentStep !== 0) return;
+
+    if (usernameAvailabilityDebounceRef.current) {
+      clearTimeout(usernameAvailabilityDebounceRef.current);
+      usernameAvailabilityDebounceRef.current = null;
+    }
+
+    if (!form.isValid) {
+      setUsernameAvailability('idle');
+      return;
+    }
+
+    const candidate = form.username.trim().toLowerCase();
+    if (!candidate) {
+      setUsernameAvailability('idle');
+      return;
+    }
+
+    setUsernameAvailability('checking');
+    const requestId = ++usernameAvailabilityRequestRef.current;
+
+    usernameAvailabilityDebounceRef.current = setTimeout(async () => {
+      try {
+        const existingUser = await getUserByUsername(candidate);
+        if (requestId !== usernameAvailabilityRequestRef.current) return;
+        setUsernameAvailability(existingUser ? 'taken' : 'available');
+      } catch (error) {
+        if (requestId !== usernameAvailabilityRequestRef.current) return;
+        console.error('Error checking username availability while typing:', error);
+        setUsernameAvailability('error');
+      }
+    }, 450);
+
+    return () => {
+      if (usernameAvailabilityDebounceRef.current) {
+        clearTimeout(usernameAvailabilityDebounceRef.current);
+        usernameAvailabilityDebounceRef.current = null;
+      }
+    };
+  }, [currentStep, form.isValid, form.username]);
+
+  const availabilityMessage = useMemo(() => {
+    if (!form.isValid || form.username.trim().length < 3) return '';
+    if (usernameAvailability === 'checking') return 'Checking username availability...';
+    if (usernameAvailability === 'available') return 'Username is available';
+    if (usernameAvailability === 'taken') return 'That username is already taken';
+    if (usernameAvailability === 'error') return 'Unable to verify username right now';
+    return '';
+  }, [form.isValid, form.username, usernameAvailability]);
+
+  const isContinueDisabled =
+    !form.isValid ||
+    checkingUsername ||
+    usernameAvailability === 'checking' ||
+    usernameAvailability === 'taken';
+
+  const isUsernameConfirmedAvailable =
+    form.isValid && form.username.trim().length >= 3 && usernameAvailability === 'available';
+
   const handleNext = async () => {
-    if (checkingUsername) {
+    if (checkingUsername || usernameAvailability === 'checking') {
       return;
     }
     if (!form.isValid) {
@@ -208,15 +335,57 @@ export default function UsernameScreen() {
       return;
     }
 
+    if (usernameAvailability === 'taken') {
+      Alert.alert('Username Unavailable', 'That username is already taken. Please choose a different one.');
+      return;
+    }
+
     try {
       setCheckingUsername(true);
+      setUsernameAvailability('checking');
       const normalizedUsername = form.username.trim().toLowerCase();
       const existingUser = await getUserByUsername(normalizedUsername);
 
       if (existingUser) {
+        setUsernameAvailability('taken');
         Alert.alert('Username Unavailable', 'That username is already taken. Please choose a different one.');
         return;
       }
+
+      if (isCompletionFlow && authenticatedUser) {
+        if (currentUserSolanaAddresses.length === 0) {
+          Alert.alert(
+            'Wallet not available',
+            'We could not detect your Solana wallet yet. Please try again in a few seconds.'
+          );
+          return;
+        }
+
+        await Promise.all(
+          currentUserSolanaAddresses.map((address) =>
+            updateUsernameInFirestore(address, normalizedUsername)
+          )
+        );
+
+        const verificationResults = await Promise.all(
+          currentUserSolanaAddresses.map((address) => getUserFromFirestore(address))
+        );
+        const isPersisted = verificationResults.some(
+          (record) => record?.username?.trim().toLowerCase() === normalizedUsername
+        );
+
+        if (!isPersisted) {
+          throw new Error('Username write could not be verified in Firestore');
+        }
+
+        await saveUsername(normalizedUsername, currentUserSolanaAddresses[0]);
+        await AsyncStorage.removeItem('pending_username_save');
+        setUsernameAvailability('available');
+        router.replace('/(main)/home');
+        return;
+      }
+
+      setUsernameAvailability('available');
 
       // Animate to next step (passkey setup)
       setCurrentStep(1);
@@ -228,6 +397,7 @@ export default function UsernameScreen() {
       }).start();
     } catch (error) {
       console.error('Error checking username uniqueness:', error);
+      setUsernameAvailability('error');
       Alert.alert('Unable to Verify Username', 'Please try again.');
     } finally {
       setCheckingUsername(false);
@@ -300,11 +470,17 @@ export default function UsernameScreen() {
           
           {/* Progress indicator */}
           <View style={styles.progressContainer}>
-            <ProgressBar isActive={currentStep === 0} isComplete={currentStep > 0} delay={0} />
-            <ProgressBar isActive={currentStep === 1} delay={0} />
-            <View style={styles.verificationCircle}>
-              <Text style={styles.verificationMark}>✓</Text>
-            </View>
+            {isCompletionFlow ? (
+              <ProgressBar isActive isComplete delay={0} />
+            ) : (
+              <>
+                <ProgressBar isActive={currentStep === 0} isComplete={currentStep > 0} delay={0} />
+                <ProgressBar isActive={currentStep === 1} delay={0} />
+                <View style={styles.verificationCircle}>
+                  <Text style={styles.verificationMark}>✓</Text>
+                </View>
+              </>
+            )}
           </View>
           
           <TouchableOpacity style={styles.helpButton}>
@@ -318,9 +494,13 @@ export default function UsernameScreen() {
             {/* Step 1: Username */}
             <View style={[styles.carouselSlide, { width: screenWidth }]}>
               <View style={styles.content}>
-                <Text style={styles.title}>How should we call you?</Text>
+                <Text style={styles.title}>
+                  {isCompletionFlow ? 'Choose your username' : 'How should we call you?'}
+                </Text>
                 <Text style={styles.subtitle}>
-                  Choose your username. It&apos;ll be your ID to send and receive money.
+                  {isCompletionFlow
+                    ? 'Pick a unique username to finish setup and continue.'
+                    : 'Choose your username. It&apos;ll be your ID to send and receive money.'}
                 </Text>
 
                 {/* Username Input */}
@@ -335,30 +515,45 @@ export default function UsernameScreen() {
                     autoCorrect={false}
                     autoFocus={currentStep === 0}
                   />
-                  {form.isValid && form.username.length > 0 && (
+                  {usernameAvailability === 'checking' && form.isValid ? (
+                    <ActivityIndicator size="small" color="#6B7280" style={styles.inputStatusIndicator} />
+                  ) : isUsernameConfirmedAvailable ? (
                     <Text style={styles.checkmark}>✓</Text>
-                  )}
+                  ) : null}
                 </View>
                 
-                {form.validationMessage && (
-                  <Text style={[styles.validationMessage, form.isValid && styles.validationSuccess]}>
-                    {form.validationMessage}
+                {form.validationMessage ? (
+                  <Text style={styles.validationMessage}>{form.validationMessage}</Text>
+                ) : availabilityMessage ? (
+                  <Text
+                    style={[
+                      styles.validationMessage,
+                      usernameAvailability === 'available'
+                        ? styles.validationSuccess
+                        : usernameAvailability === 'checking'
+                          ? styles.validationNeutral
+                          : styles.validationError,
+                    ]}
+                  >
+                    {availabilityMessage}
                   </Text>
-                )}
+                ) : null}
 
                 <View style={styles.spacer} />
 
                 {/* Continue Button */}
                 <TouchableOpacity
-                  style={[styles.continueButton, (!form.isValid || checkingUsername) && styles.continueButtonDisabled]}
+                  style={[styles.continueButton, isContinueDisabled && styles.continueButtonDisabled]}
                   onPress={handleNext}
                   activeOpacity={0.8}
-                  disabled={!form.isValid || checkingUsername}
+                  disabled={isContinueDisabled}
                 >
                   {checkingUsername ? (
                     <ActivityIndicator color="#FFFFFF" />
                   ) : (
-                    <Text style={styles.continueButtonText}>Continue</Text>
+                    <Text style={styles.continueButtonText}>
+                      {isCompletionFlow ? 'Save username' : 'Continue'}
+                    </Text>
                   )}
                 </TouchableOpacity>
               </View>
@@ -570,10 +765,20 @@ const styles = StyleSheet.create({
     marginLeft: 8,
     marginBottom: 8,
   },
+  inputStatusIndicator: {
+    marginLeft: 8,
+    marginBottom: 8,
+  },
   validationMessage: {
     fontSize: 14,
     color: '#EF4444',
     marginBottom: 8,
+  },
+  validationNeutral: {
+    color: '#6B7280',
+  },
+  validationError: {
+    color: '#EF4444',
   },
   validationSuccess: {
     color: '#10B981',

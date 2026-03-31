@@ -313,7 +313,9 @@ export default function SendAmountScreen() {
   const recipientDisplay = recipientUsername
     ? `@${recipientUsername}`
     : recipientAddress
-      ? formatAddress(recipientAddress)
+      ? isAvalancheTransfer
+        ? formatAddress(recipientAddress)
+        : `External wallet (${formatAddress(recipientAddress)})`
       : "Not set";
 
   const canContinue =

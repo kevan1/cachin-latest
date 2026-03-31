@@ -6,6 +6,8 @@ import { useRouter } from 'expo-router';
 import { useState, useEffect } from 'react';
 import { getUsername, clearUsername, Currency, getSelectedCurrency, saveSelectedCurrency } from '@/utils/userStorage';
 import { usePrivy } from '@privy-io/expo';
+import { clearTransactions } from '@/utils/transactionStorage';
+import { clearSponsoredSolanaWallet } from '@/utils/sponsoredWalletStorage';
 import Svg, { Path } from 'react-native-svg';
 
 // Icon components
@@ -101,8 +103,30 @@ export default function ProfileScreen() {
 
   useEffect(() => {
     const loadUsername = async () => {
+      const rawUser = user as {
+        linkedAccounts?: {
+          type?: string;
+          chainType?: string;
+          chain_type?: string;
+          address?: string | null;
+        }[];
+        linked_accounts?: {
+          type?: string;
+          chainType?: string;
+          chain_type?: string;
+          address?: string | null;
+        }[];
+      } | null;
+      const linkedAccounts = rawUser?.linkedAccounts ?? rawUser?.linked_accounts ?? [];
+      const solanaAccount = linkedAccounts.find(
+        (account) =>
+          account?.type === 'wallet' &&
+          (account.chainType === 'solana' || account.chain_type === 'solana')
+      );
+      const solanaAddress = solanaAccount?.address?.trim() || undefined;
+
       console.log('[Profile] Loading username from storage...');
-      const storedUsername = await getUsername();
+      const storedUsername = await getUsername(solanaAddress);
       console.log('[Profile] Stored username:', storedUsername);
       
       if (storedUsername && !storedUsername.startsWith('user-')) {
@@ -121,7 +145,7 @@ export default function ProfileScreen() {
 
     loadUsername();
     loadCurrency();
-  }, []);
+  }, [user]);
   
   // Monitor user state and redirect if logged out
   useEffect(() => {
@@ -153,6 +177,8 @@ export default function ProfileScreen() {
               
               // Clear username from storage
               await clearUsername();
+              await clearSponsoredSolanaWallet(user?.id);
+              await clearTransactions();
               console.log('Username cleared');
               
               // Logout from Privy

@@ -76,18 +76,28 @@ export async function saveUsername(
 export async function getUsername(solanaAddress?: string): Promise<string | null> {
   try {
     // Try AsyncStorage first (fastest)
-    let username = await AsyncStorage.getItem(USERNAME_KEY);
-    
+    const username = await AsyncStorage.getItem(USERNAME_KEY);
+    const cachedSolanaAddress = await AsyncStorage.getItem(SOLANA_ADDRESS_KEY);
+
     if (username) {
-      console.log('[UserStorage] Username found in AsyncStorage:', username);
-      return username;
+      const normalizedCachedAddress = cachedSolanaAddress?.trim().toLowerCase() ?? '';
+      const normalizedRequestedAddress = solanaAddress?.trim().toLowerCase() ?? '';
+      const sameWallet =
+        !normalizedRequestedAddress ||
+        !normalizedCachedAddress ||
+        normalizedCachedAddress === normalizedRequestedAddress;
+
+      if (sameWallet) {
+        console.log('[UserStorage] Username found in AsyncStorage:', username);
+        return username;
+      }
     }
-    
-    // If not in AsyncStorage, try Firestore
+
+    // If not usable in AsyncStorage, try Firestore for the current wallet
     if (solanaAddress) {
-      console.log('[UserStorage] Username not in cache, checking Firestore...');
+      console.log('[UserStorage] Username not in matching cache, checking Firestore...');
       const userData = await getUserFromFirestore(solanaAddress);
-      
+
       if (userData && userData.username) {
         // Cache it locally for next time
         await AsyncStorage.setItem(USERNAME_KEY, userData.username);
@@ -95,8 +105,12 @@ export async function getUsername(solanaAddress?: string): Promise<string | null
         console.log('[UserStorage] Username retrieved from Firestore:', userData.username);
         return userData.username;
       }
+
+      // Wallet has no username in Firestore, avoid returning stale cache from another wallet
+      await AsyncStorage.removeItem(USERNAME_KEY);
+      await AsyncStorage.setItem(SOLANA_ADDRESS_KEY, solanaAddress);
     }
-    
+
     console.log('[UserStorage] No username found');
     return null;
   } catch (error) {

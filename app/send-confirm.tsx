@@ -241,14 +241,19 @@ export default function SendConfirmScreen() {
   );
 
   useEffect(() => {
-    getSponsoredSolanaWallet()
+    if (!user?.id) {
+      setSponsoredWalletAddress(null);
+      return;
+    }
+
+    getSponsoredSolanaWallet(user.id)
       .then(({ address }) => {
         setSponsoredWalletAddress(address);
       })
       .catch(() => {
         setSponsoredWalletAddress(null);
       });
-  }, []);
+  }, [user?.id]);
 
   useFocusEffect(
     useCallback(() => {
@@ -476,7 +481,7 @@ export default function SendConfirmScreen() {
         await setSponsoredSolanaWallet({
           id: ensuredWalletId ?? null,
           address: ensuredWalletAddress ?? null,
-        });
+        }, user.id);
       } catch (error) {
         console.error("Error ensuring sponsored wallet:", error);
         Alert.alert(
