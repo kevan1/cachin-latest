@@ -16,6 +16,7 @@ import { useEmbeddedSolanaWallet } from '@privy-io/expo';
 import { fetchAllTokenBalances } from '@/utils/balanceService';
 import { fetchTokenPrices } from '@/utils/priceService';
 import { Colors } from '@/constants/theme';
+import { GlassView } from '@/components/ui/GlassView';
 
 export default function WithdrawAmountScreen() {
   const router = useRouter();
@@ -130,17 +131,30 @@ export default function WithdrawAmountScreen() {
     <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
       <ScrollView
         contentInsetAdjustmentBehavior="automatic"
-        style={[styles.container, { backgroundColor: palette.background }]}
+        style={[styles.container, { backgroundColor: 'transparent' }]}
         contentContainerStyle={styles.containerContent}
         showsVerticalScrollIndicator={false}
       >
         {/* Header */}
         <View style={styles.header}>
-          <TouchableOpacity 
-            style={[styles.iconButton, { backgroundColor: palette.surfaceMuted, borderColor: palette.borderSubtle }]} 
+          <TouchableOpacity
+            style={styles.iconButtonPressable}
             onPress={handleBack}
+            activeOpacity={0.78}
           >
-            <MaterialIcons name="arrow-back" size={20} color={palette.primaryText} />
+            <GlassView
+              style={[
+                styles.iconButton,
+                {
+                  borderColor:
+                    colorScheme === 'dark' ? 'rgba(255,255,255,0.2)' : 'rgba(255,255,255,0.5)',
+                },
+              ]}
+              intensity={26}
+              interactive
+            >
+              <MaterialIcons name="arrow-back" size={20} color={palette.primaryText} />
+            </GlassView>
           </TouchableOpacity>
           <Text style={[styles.headerTitle, { color: palette.primaryText }]}>Withdraw Amount</Text>
           <View style={styles.headerSpacer} />
@@ -148,17 +162,35 @@ export default function WithdrawAmountScreen() {
 
         <View style={styles.content}>
           {/* Amount Input */}
-          <View style={[styles.amountCard, { backgroundColor: palette.surface, borderColor: palette.borderSubtle }]}>
+          <GlassView
+            style={[
+              styles.amountCard,
+              {
+                borderColor:
+                  colorScheme === 'dark' ? 'rgba(255,255,255,0.16)' : 'rgba(255,255,255,0.52)',
+              },
+            ]}
+            intensity={30}
+            interactive
+          >
             
             {/* Interactive Badge acting as swap button */}
-            <TouchableOpacity 
-               onPress={handleSwap}
-               style={[styles.amountBadge, { backgroundColor: palette.surfaceMuted }]}
+            <TouchableOpacity
+              onPress={handleSwap}
+              style={styles.amountBadgePressable}
+              activeOpacity={0.78}
             >
-               <MaterialIcons name="swap-vert" size={16} color={palette.secondaryText} style={{marginRight: 4}} />
-              <Text style={[styles.amountBadgeText, { color: palette.secondaryText }]}>
-                {isUsdInput ? 'USD' : 'ARS'} Amount
-              </Text>
+              <GlassView style={styles.amountBadge} intensity={24} interactive>
+                <MaterialIcons
+                  name="swap-vert"
+                  size={16}
+                  color={palette.secondaryText}
+                  style={{ marginRight: 4 }}
+                />
+                <Text style={[styles.amountBadgeText, { color: palette.secondaryText }]}>
+                  {isUsdInput ? 'USD' : 'ARS'} Amount
+                </Text>
+              </GlassView>
             </TouchableOpacity>
             
             <View style={styles.amountRow}>
@@ -185,7 +217,7 @@ export default function WithdrawAmountScreen() {
                 ? "Loading balance..." 
                 : `Available Balance: $${balance} USD`}
             </Text>
-          </View>
+          </GlassView>
         </View>
 
         <View style={styles.footer}>
@@ -230,6 +262,9 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     borderWidth: 1,
   },
+  iconButtonPressable: {
+    borderRadius: 20,
+  },
   headerTitle: {
     fontSize: 18,
     fontWeight: '600',
@@ -258,6 +293,9 @@ const styles = StyleSheet.create({
     paddingVertical: 6,
     borderRadius: 999,
     marginBottom: 16,
+  },
+  amountBadgePressable: {
+    borderRadius: 999,
   },
   amountBadgeText: {
     fontSize: 12,

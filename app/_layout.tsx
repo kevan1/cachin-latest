@@ -7,8 +7,10 @@ import { Stack, Redirect, useSegments, useRouter } from "expo-router";
 import { StatusBar } from "expo-status-bar";
 import "react-native-reanimated";
 import { Component, ReactNode, ErrorInfo, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ActivityIndicator, StyleSheet, Text, TouchableOpacity, View, useColorScheme } from "react-native";
+import { ActivityIndicator, Platform, StyleSheet, Text, TouchableOpacity, UIManager, View, useColorScheme } from "react-native";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
+import * as SplashScreen from "expo-splash-screen";
+import LottieView from "lottie-react-native";
 
 import Constants from "expo-constants";
 import { PrivyProvider, usePrivy } from "@privy-io/expo";
@@ -91,6 +93,19 @@ const expoExtra = asRecord(Constants.expoConfig?.extra);
 const manifestExtra = asRecord(constantsWithLegacyManifests.manifest?.extra);
 const manifest2Extra = asRecord(constantsWithLegacyManifests.manifest2?.extra);
 const manifest2ExpoClientExtra = asRecord(asRecord(manifest2Extra.expoClient).extra);
+
+void SplashScreen.preventAutoHideAsync().catch(() => {
+  // Avoid throwing during fast refresh if splash was already handled.
+});
+
+const POST_SPLASH_FALLBACK_MS = 1800;
+let hasConsumedPostSplashTransition = false;
+
+function consumePostSplashTransitionOnce() {
+  if (hasConsumedPostSplashTransition) return false;
+  hasConsumedPostSplashTransition = true;
+  return true;
+}
 
 const envPrivyAppId = pickFirstNonEmpty(
   process.env.EXPO_PUBLIC_PRIVY_APP_ID,
@@ -287,6 +302,49 @@ function UsernameGateCheckingScreen() {
         Hold on a second while we confirm your account setup.
       </Text>
       <ActivityIndicator size="small" color={palette.primary} style={styles.gateSpinner} />
+    </View>
+  );
+}
+
+function PostSplashTransition({ onDone }: { onDone: () => void }) {
+  const completedRef = useRef(false);
+  const canRenderNativeLottie = useMemo(() => {
+    if (Platform.OS === "web") return false;
+    try {
+      return Boolean(
+        UIManager.getViewManagerConfig?.("LottieAnimationView") ??
+        UIManager.getViewManagerConfig?.("LottieAnimationViewModule")
+      );
+    } catch {
+      return false;
+    }
+  }, []);
+
+  const finishTransition = useCallback(() => {
+    if (completedRef.current) return;
+    completedRef.current = true;
+    onDone();
+  }, [onDone]);
+
+  useEffect(() => {
+    const timeout = setTimeout(finishTransition, POST_SPLASH_FALLBACK_MS);
+    return () => clearTimeout(timeout);
+  }, [finishTransition]);
+
+  return (
+    <View style={styles.postSplashContainer}>
+      {canRenderNativeLottie ? (
+        <LottieView
+          source={require("../assets/animations/post-splash-transition.json")}
+          autoPlay
+          loop={false}
+          resizeMode="cover"
+          onAnimationFinish={finishTransition}
+          style={styles.postSplashAnimation}
+        />
+      ) : (
+        <ActivityIndicator size="large" color="#6b7280" />
+      )}
     </View>
   );
 }
@@ -530,13 +588,7 @@ function AppNavigator() {
       <Stack.Screen
         name="send-amount"
         options={{
-          headerShown: true,
-          title: "Send to username",
-          headerShadowVisible: false,
-          headerTransparent: false,
-          headerStyle: { backgroundColor: "transparent" },
-          headerBlurEffect,
-          headerRight: renderSheetCloseButton,
+          headerShown: false,
           presentation: "formSheet",
           sheetAllowedDetents: "fitToContents",
           sheetLargestUndimmedDetentIndex: "last",
@@ -554,7 +606,7 @@ function AppNavigator() {
           sheetLargestUndimmedDetentIndex: "last",
           sheetGrabberVisible: false,
           sheetCornerRadius: 28,
-          contentStyle: { backgroundColor: "#FFFFFF" },
+          contentStyle: { backgroundColor: "transparent" },
         }}
       />
       <Stack.Screen
@@ -578,13 +630,7 @@ function AppNavigator() {
       <Stack.Screen
         name="send-options"
         options={{
-          headerShown: true,
-          title: "Send",
-          headerShadowVisible: false,
-          headerTransparent: false,
-          headerStyle: { backgroundColor: "transparent" },
-          headerBlurEffect,
-          headerRight: renderSheetCloseButton,
+          headerShown: false,
           presentation: "formSheet",
           sheetAllowedDetents: "fitToContents",
           sheetLargestUndimmedDetentIndex: "last",
@@ -609,7 +655,7 @@ function AppNavigator() {
           sheetLargestUndimmedDetentIndex: "last",
           sheetGrabberVisible: false,
           sheetCornerRadius: 28,
-          contentStyle: { backgroundColor: "#FFFFFF" },
+          contentStyle: { backgroundColor: "transparent" },
         }}
       />
       <Stack.Screen
@@ -621,7 +667,7 @@ function AppNavigator() {
           sheetLargestUndimmedDetentIndex: "last",
           sheetGrabberVisible: false,
           sheetCornerRadius: 28,
-          contentStyle: { backgroundColor: "#FFFFFF" },
+          contentStyle: { backgroundColor: "transparent" },
         }}
       />
       <Stack.Screen
@@ -633,7 +679,7 @@ function AppNavigator() {
           sheetLargestUndimmedDetentIndex: "last",
           sheetGrabberVisible: false,
           sheetCornerRadius: 28,
-          contentStyle: { backgroundColor: "#FFFFFF" },
+          contentStyle: { backgroundColor: "transparent" },
         }}
       />
       <Stack.Screen
@@ -645,7 +691,7 @@ function AppNavigator() {
           sheetLargestUndimmedDetentIndex: "last",
           sheetGrabberVisible: false,
           sheetCornerRadius: 28,
-          contentStyle: { backgroundColor: "#FFFFFF" },
+          contentStyle: { backgroundColor: "transparent" },
         }}
       />
       <Stack.Screen
@@ -658,6 +704,42 @@ function AppNavigator() {
           sheetGrabberVisible: false,
           sheetCornerRadius: 28,
           contentStyle: { backgroundColor: "#FFFFFF" },
+        }}
+      />
+      <Stack.Screen
+        name="crypto-deposit"
+        options={{
+          headerShown: false,
+          presentation: "formSheet",
+          sheetAllowedDetents: "fitToContents",
+          sheetLargestUndimmedDetentIndex: "last",
+          sheetGrabberVisible: false,
+          sheetCornerRadius: 28,
+          contentStyle: { backgroundColor: "transparent" },
+        }}
+      />
+      <Stack.Screen
+        name="deposit"
+        options={{
+          headerShown: false,
+          presentation: "formSheet",
+          sheetAllowedDetents: "fitToContents",
+          sheetLargestUndimmedDetentIndex: "last",
+          sheetGrabberVisible: false,
+          sheetCornerRadius: 28,
+          contentStyle: { backgroundColor: "transparent" },
+        }}
+      />
+      <Stack.Screen
+        name="fiat-deposit"
+        options={{
+          headerShown: false,
+          presentation: "formSheet",
+          sheetAllowedDetents: "fitToContents",
+          sheetLargestUndimmedDetentIndex: "last",
+          sheetGrabberVisible: false,
+          sheetCornerRadius: 28,
+          contentStyle: { backgroundColor: "transparent" },
         }}
       />
       <Stack.Screen
@@ -686,12 +768,46 @@ function AppNavigator() {
 
 export default function RootLayout() {
   const colorScheme = useColorScheme();
-  useFonts({
+  const [fontsLoaded] = useFonts({
     Inter_400Regular,
     Inter_500Medium,
     Inter_600SemiBold,
   });
+  const [nativeSplashHidden, setNativeSplashHidden] = useState(false);
+  const [showPostSplash, setShowPostSplash] = useState(
+    consumePostSplashTransitionOnce
+  );
   const hasPrivyConfig = Boolean(privyAppId && privyClientId);
+
+  useEffect(() => {
+    if (!fontsLoaded) return;
+    let isCancelled = false;
+
+    const hideNativeSplash = async () => {
+      try {
+        await SplashScreen.hideAsync();
+      } catch {
+        // Ignore if already hidden.
+      } finally {
+        if (!isCancelled) {
+          setNativeSplashHidden(true);
+        }
+      }
+    };
+
+    void hideNativeSplash();
+    return () => {
+      isCancelled = true;
+    };
+  }, [fontsLoaded]);
+
+  if (!fontsLoaded || !nativeSplashHidden) {
+    return null;
+  }
+
+  if (showPostSplash) {
+    return <PostSplashTransition onDone={() => setShowPostSplash(false)} />;
+  }
 
   return (
     <ThemeProvider value={colorScheme === "dark" ? DarkTheme : DefaultTheme}>
@@ -806,6 +922,14 @@ const styles = StyleSheet.create({
     marginTop: 12,
     marginBottom: 8,
     alignItems: "center",
+  },
+  postSplashContainer: {
+    flex: 1,
+    backgroundColor: "#ffffff",
+    overflow: "hidden",
+  },
+  postSplashAnimation: {
+    ...StyleSheet.absoluteFillObject,
   },
   configCode: {
     fontSize: 13,

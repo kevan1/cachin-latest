@@ -18,6 +18,8 @@ import { Transaction } from '@/types/types';
 import { useToast } from 'heroui-native';
 import { BlurView } from 'expo-blur';
 import { resolveSolanaDomain } from '@/utils/sns';
+import { fetchArsPrice } from '@/utils/priceService';
+import { getSelectedCurrency, type Currency } from '@/utils/userStorage';
 import Animated, { 
   useSharedValue, 
   useAnimatedStyle, 
@@ -31,6 +33,20 @@ import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 const BUTTON_HEIGHT = 56;
 const BUTTON_PADDING = 4;
 const THUMB_SIZE = BUTTON_HEIGHT - BUTTON_PADDING * 2;
+const DEFAULT_ARS_RATE = 1500;
+
+function formatMoneyValue(value: number, currency: 'USD' | 'ARS'): string {
+  if (!Number.isFinite(value) || value <= 0) {
+    return currency === 'ARS' ? 'ARS$0.00' : '$0.00';
+  }
+
+  const formatted = value.toLocaleString('en-US', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
+
+  return currency === 'ARS' ? `ARS$${formatted}` : `$${formatted}`;
+}
 
 function SlideToProceed({
   onConfirm,
@@ -138,6 +154,7 @@ export default function WithdrawCryptoReviewScreen() {
   const currencyParam = Array.isArray(currency) ? currency[0] : currency;
   const networkParam = Array.isArray(network) ? network[0] : network;
   const addressParam = Array.isArray(address) ? address[0] : address;
+  const parsedAmount = Number.parseFloat(amountParam ?? '0');
   const inputAddress = (addressParam ?? '').trim();
   const isSolanaNetwork = networkParam === 'solana';
   const isSnsAddress = isSolanaNetwork && inputAddress.toLowerCase().endsWith('.sol');
@@ -146,6 +163,24 @@ export default function WithdrawCryptoReviewScreen() {
   const [resolvedAddress, setResolvedAddress] = useState<string | null>(null);
   const [isResolvingSns, setIsResolvingSns] = useState(false);
   const [snsError, setSnsError] = useState<string | null>(null);
+  const [preferredCurrency, setPreferredCurrency] = useState<Currency>('USD');
+  const [arsRate, setArsRate] = useState(DEFAULT_ARS_RATE);
+
+  const amountUsdValue =
+    Number.isFinite(parsedAmount) && parsedAmount > 0
+      ? currencyParam === 'ARS'
+        ? parsedAmount / Math.max(arsRate, 1)
+        : parsedAmount
+      : 0;
+  const primaryFiatCurrency: 'USD' | 'ARS' = preferredCurrency === 'ARS' ? 'ARS' : 'USD';
+  const secondaryFiatCurrency: 'USD' | 'ARS' =
+    primaryFiatCurrency === 'ARS' ? 'USD' : 'ARS';
+  const primaryFiatValue =
+    primaryFiatCurrency === 'ARS' ? amountUsdValue * arsRate : amountUsdValue;
+  const secondaryFiatValue =
+    secondaryFiatCurrency === 'ARS' ? amountUsdValue * arsRate : amountUsdValue;
+  const primaryAmountLabel = formatMoneyValue(primaryFiatValue, primaryFiatCurrency);
+  const secondaryAmountLabel = formatMoneyValue(secondaryFiatValue, secondaryFiatCurrency);
 
   const shortenAddress = (value: string) => {
     if (value.length >= 12) {
@@ -193,6 +228,32 @@ export default function WithdrawCryptoReviewScreen() {
     };
   }, [inputAddress, isSnsAddress]);
 
+  useEffect(() => {
+    let isMounted = true;
+
+    const loadMoneyPreferences = async () => {
+      try {
+        const [selectedCurrency, latestArsRate] = await Promise.all([
+          getSelectedCurrency(),
+          fetchArsPrice(),
+        ]);
+        if (!isMounted) return;
+
+        setPreferredCurrency(selectedCurrency);
+        if (latestArsRate > 0) {
+          setArsRate(latestArsRate);
+        }
+      } catch (error) {
+        console.error('[withdraw-crypto-review] Failed to load money preferences', error);
+      }
+    };
+
+    void loadMoneyPreferences();
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
   const confirmDisabled = isSnsAddress && (!resolvedAddress || isResolvingSns);
   const confirmLabel = isSnsAddress
     ? isResolvingSns
@@ -221,7 +282,7 @@ export default function WithdrawCryptoReviewScreen() {
           type: 'send', // withdrawal acts as a send
           currency: 'USDC', // Assuming USDC for now
           chain: ChainType.SOLANA,
-          amount: parseFloat(amountParam ?? '0'),
+          amount: amountUsdValue,
           recipient: 'External Wallet',
           address: recipientAddress,
           timestamp: Date.now(),
@@ -267,7 +328,13 @@ export default function WithdrawCryptoReviewScreen() {
           <View>
           <Text style={[styles.summaryLabel, { color: palette.secondaryText }]}>↑ You&apos;re withdrawing</Text>
           <Text style={[styles.summaryAmount, { color: palette.primaryText }]}>
-            {currencyParam === 'USD' ? '$' : 'ARS$'} {amountParam}
+            {primaryAmountLabel}
+          </Text>
+          <Text style={[styles.summarySecondary, { color: palette.secondaryText }]}>
+            {secondaryAmountLabel}
+          </Text>
+          <Text style={[styles.summaryAssetAmount, { color: palette.secondaryText }]}>
+            USDC {amountUsdValue.toFixed(2)}
           </Text>
         </View>
       </View>
@@ -417,6 +484,15 @@ const styles = StyleSheet.create({
   summaryAmount: {
     fontSize: 24,
     fontWeight: '700',
+  },
+  summarySecondary: {
+    fontSize: 15,
+    fontWeight: '600',
+    marginTop: 2,
+  },
+  summaryAssetAmount: {
+    fontSize: 12,
+    marginTop: 2,
   },
   detailsCard: {
     borderRadius: 16,

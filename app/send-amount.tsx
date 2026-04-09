@@ -20,6 +20,7 @@ import { getUserByUsername } from "@/services/firestoreService";
 import { useEmbeddedEthereumWallet, useEmbeddedSolanaWallet } from "@privy-io/expo";
 import { ChainType, getChainToken } from "@/constants/chains";
 import { getSolanaRpcUrl } from "@/utils/solanaRpc";
+import { fetchArsPrice } from "@/utils/priceService";
 import {
   formatTokenUnits,
   normalizeDecimalInput,
@@ -28,6 +29,7 @@ import {
 import { Colors } from "@/constants/theme";
 import { getSelectedCurrency, Currency } from "@/utils/userStorage";
 import { IconSymbol } from "@/components/ui/icon-symbol";
+import { GlassView } from "@/components/ui/GlassView";
 import { fetchErc20EvmBalance } from "@/utils/evmBalanceService";
 import {
   coerceAvalancheWalletSource,
@@ -38,6 +40,7 @@ import {
 
 const USDC_MINT_ADDRESS = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
 const USDC_DECIMALS = 6;
+const DEFAULT_ARS_RATE = 1500;
 
 type RecipientStatus = "idle" | "resolving" | "resolved" | "error";
 
@@ -62,6 +65,19 @@ function normalizeUsername(value: string): string {
 function formatAddress(address: string): string {
   if (!address) return "";
   return `${address.slice(0, 4)}...${address.slice(-4)}`;
+}
+
+function formatNumericDisplay(value: number, maxFractionDigits: number): string {
+  if (!Number.isFinite(value) || value <= 0) return "0";
+  return value.toLocaleString("en-US", {
+    minimumFractionDigits: 0,
+    maximumFractionDigits: maxFractionDigits,
+  });
+}
+
+function toInputDecimal(value: number, maxFractionDigits: number): string {
+  if (!Number.isFinite(value) || value <= 0) return "";
+  return value.toFixed(maxFractionDigits).replace(/\.?0+$/, "");
 }
 
 export default function SendAmountScreen() {
@@ -93,10 +109,13 @@ export default function SendAmountScreen() {
   const [balance, setBalance] = useState("0.00");
   const [balanceUnits, setBalanceUnits] = useState<bigint>(0n);
   const [isLoadingBalance, setIsLoadingBalance] = useState(true);
+  const [isUsdInput, setIsUsdInput] = useState(true);
+  const [arsRate, setArsRate] = useState(DEFAULT_ARS_RATE);
   const [currency, setCurrency] = useState<Currency>("USD");
   const [avalancheWalletSource, setAvalancheWalletSource] =
     useState<AvalancheWalletSource>("privy");
   const [satochipAvalancheAddress, setSatochipAvalancheAddress] = useState<string | null>(null);
+  const didInitInputModeRef = useRef(false);
 
   const { wallets: solanaWallets } = useEmbeddedSolanaWallet();
   const { wallets: ethereumWallets } = useEmbeddedEthereumWallet();
@@ -148,12 +167,38 @@ export default function SendAmountScreen() {
       const loadCurrency = async () => {
         try {
           const selected = await getSelectedCurrency();
-          if (isActive) setCurrency(selected);
+          if (!isActive) return;
+
+          setCurrency(selected);
+          if (!didInitInputModeRef.current) {
+            didInitInputModeRef.current = true;
+            setIsUsdInput(selected !== "ARS");
+          }
         } catch (error) {
           console.error("Error loading currency:", error);
         }
       };
-      loadCurrency();
+      void loadCurrency();
+      return () => {
+        isActive = false;
+      };
+    }, [])
+  );
+
+  useFocusEffect(
+    useCallback(() => {
+      let isActive = true;
+      const loadArsRate = async () => {
+        try {
+          const latestRate = await fetchArsPrice();
+          if (isActive && latestRate > 0) {
+            setArsRate(latestRate);
+          }
+        } catch (error) {
+          console.error("[SendAmount] Failed to load ARS rate", error);
+        }
+      };
+      void loadArsRate();
       return () => {
         isActive = false;
       };
@@ -298,15 +343,42 @@ export default function SendAmountScreen() {
     void fetchSelectedBalance();
   }, [assetDecimals, avalancheUsdcToken, isAvalancheTransfer, walletAddress]);
 
+  const normalizedAmount = useMemo(() => {
+    const normalizedInput = normalizeDecimalInput(amount, 2);
+    if (!normalizedInput) return "";
+    if (isUsdInput) return normalizedInput;
+
+    const parsedArs = Number.parseFloat(normalizedInput);
+    if (!Number.isFinite(parsedArs) || parsedArs <= 0 || arsRate <= 0) return "";
+    return normalizeDecimalInput(String(parsedArs / arsRate), assetDecimals);
+  }, [amount, arsRate, assetDecimals, isUsdInput]);
+
   const amountUnits = useMemo(
-    () => parseDecimalToUnits(amount, assetDecimals),
-    [amount, assetDecimals]
+    () => parseDecimalToUnits(normalizedAmount, assetDecimals),
+    [normalizedAmount, assetDecimals]
   );
   const isAmountValid = !!amountUnits && amountUnits > 0n;
   const safeAmountUnits = amountUnits ?? 0n;
   const currencyLabel = isAvalancheTransfer
-    ? "Fuji USDC transfer"
-    : `Selected currency: ${currency}`;
+    ? "Avalanche Fuji USDC transfer"
+    : `${assetSymbol} transfer on Solana`;
+  const preferredCurrencyLabel = `Preference: ${currency}`;
+  const balanceNumber = Number.parseFloat(balance);
+  const availableInputAmount = useMemo(() => {
+    if (!Number.isFinite(balanceNumber) || balanceNumber <= 0) return 0;
+    return isUsdInput ? balanceNumber : balanceNumber * arsRate;
+  }, [arsRate, balanceNumber, isUsdInput]);
+  const equivalentDisplayAmount = useMemo(() => {
+    const parsedAmount = Number.parseFloat(amount);
+    if (!Number.isFinite(parsedAmount) || parsedAmount <= 0 || arsRate <= 0) {
+      return "0";
+    }
+
+    const converted = isUsdInput ? parsedAmount * arsRate : parsedAmount / arsRate;
+    return formatNumericDisplay(converted, 2);
+  }, [amount, arsRate, isUsdInput]);
+  const canPrefillMax =
+    !isLoadingBalance && balanceUnits > 0n && Number.isFinite(balanceNumber) && balanceNumber > 0;
   const avalancheWalletSourceLabel =
     avalancheWalletSource === "satochip" ? "Satochip card" : "Privy embedded wallet";
 
@@ -324,6 +396,48 @@ export default function SendAmountScreen() {
     isAmountValid &&
     safeAmountUnits <= balanceUnits &&
     (!isAvalancheTransfer || !!walletAddress);
+  const amountInputWidth = Math.min(240, Math.max(120, Math.max(amount.length, 4) * 20));
+
+  const handleAmountChange = (text: string) => {
+    setAmount(normalizeDecimalInput(text, 2));
+  };
+
+  const handleSwapInputCurrency = () => {
+    if (isIOS) {
+      void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    }
+
+    const parsedAmount = Number.parseFloat(amount);
+    if (!Number.isFinite(parsedAmount) || parsedAmount <= 0 || arsRate <= 0) {
+      setIsUsdInput((prev) => !prev);
+      return;
+    }
+
+    const converted = isUsdInput ? parsedAmount * arsRate : parsedAmount / arsRate;
+    setAmount(toInputDecimal(converted, 2));
+    setIsUsdInput((prev) => !prev);
+  };
+
+  const handleUseMaxAmount = () => {
+    if (!canPrefillMax) return;
+    if (isIOS) {
+      void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    }
+
+    if (isUsdInput) {
+      setAmount(toInputDecimal(balanceNumber, 2));
+      return;
+    }
+
+    setAmount(toInputDecimal(availableInputAmount, 2));
+  };
+
+  const handleBack = () => {
+    if (isIOS) {
+      void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    }
+    router.back();
+  };
 
   const handleContinue = () => {
     console.log("[SendAmount] Continue pressed", {
@@ -418,6 +532,30 @@ export default function SendAmountScreen() {
       keyboardShouldPersistTaps="handled"
       keyboardDismissMode="on-drag"
     >
+      <View style={styles.header}>
+        <TouchableOpacity
+          style={styles.iconButtonPressable}
+          onPress={handleBack}
+          activeOpacity={0.78}
+        >
+          <GlassView
+            style={[
+              styles.iconButton,
+              {
+                borderColor:
+                  colorScheme === "dark" ? "rgba(255,255,255,0.2)" : "rgba(255,255,255,0.5)",
+              },
+            ]}
+            intensity={26}
+            interactive
+          >
+            <MaterialIcons name="arrow-back" size={20} color={palette.primaryText} />
+          </GlassView>
+        </TouchableOpacity>
+        <Text style={[styles.headerTitle, { color: palette.primaryText }]}>Send to username</Text>
+        <View style={styles.headerSpacer} />
+      </View>
+
       <View style={[styles.heroIcon, { backgroundColor: palette.success }]}>
         <IconSymbol name="person.crop.circle" size={24} color={palette.actionPrimaryText} />
       </View>
@@ -508,40 +646,109 @@ export default function SendAmountScreen() {
         )}
       </View>
 
-      <View
+      <GlassView
         style={[
           styles.amountCard,
-          { backgroundColor: palette.surface, borderColor: palette.borderSubtle },
+          {
+            borderColor:
+              colorScheme === "dark" ? "rgba(255,255,255,0.16)" : "rgba(255,255,255,0.52)",
+          },
         ]}
+        intensity={30}
+        interactive
       >
-        <View style={[styles.amountBadge, { backgroundColor: palette.surfaceMuted }]}>
-          <Text style={[styles.amountBadgeText, { color: palette.secondaryText }]} selectable>
-            Amount to send
-          </Text>
-        </View>
+        <TouchableOpacity
+          accessibilityRole="button"
+          onPress={handleSwapInputCurrency}
+          style={styles.amountBadgePressable}
+          activeOpacity={0.8}
+        >
+          <GlassView style={styles.amountBadge} intensity={24} interactive>
+            <MaterialIcons
+              name="swap-vert"
+              size={16}
+              color={palette.secondaryText}
+              style={styles.amountBadgeIcon}
+            />
+            <Text style={[styles.amountBadgeText, { color: palette.secondaryText }]} selectable>
+              {isUsdInput ? "USD Amount" : "ARS Amount"}
+            </Text>
+          </GlassView>
+        </TouchableOpacity>
         <View style={styles.amountRow}>
-          <Text style={[styles.currencySymbol, { color: palette.secondaryText }]}>$</Text>
-          <TextInput
-            style={[styles.amountInput, { color: palette.primaryText }]}
-            value={amount}
-            onChangeText={(text) => setAmount(normalizeDecimalInput(text, assetDecimals))}
-            keyboardType="decimal-pad"
-            placeholder="0.00"
-            placeholderTextColor={palette.secondaryText}
-            ref={amountInputRef}
-          />
+          <View style={styles.amountInline}>
+            <Text style={[styles.currencySymbol, { color: palette.secondaryText }]}>
+              {isUsdInput ? "$" : "ARS$"}
+            </Text>
+            <TextInput
+              style={[
+                styles.amountInput,
+                {
+                  color: palette.primaryText,
+                  fontSize: amount.length > 8 ? 34 : 40,
+                  width: amountInputWidth,
+                },
+              ]}
+              value={amount}
+              onChangeText={handleAmountChange}
+              keyboardType="decimal-pad"
+              placeholder="0.00"
+              placeholderTextColor={palette.secondaryText}
+              ref={amountInputRef}
+            />
+          </View>
         </View>
+        <Text style={[styles.equivalentText, { color: palette.secondaryText }]} selectable>
+          ≈ {isUsdInput ? "ARS$" : "$"} {equivalentDisplayAmount}
+        </Text>
         <Text style={[styles.equivalentText, { color: palette.secondaryText }]} selectable>
           {currencyLabel}
         </Text>
-        <Text style={[styles.balanceText, { color: palette.secondaryText }]} selectable>
-          {isLoadingBalance
-            ? "Loading balance..."
-            : isAvalancheTransfer
-              ? `Available $${balance} ${assetSymbol}`
-              : `Available $${balance} USDC`}
+        <Text style={[styles.balanceHelperText, { color: palette.secondaryText }]} selectable>
+          {preferredCurrencyLabel}
         </Text>
-      </View>
+      </GlassView>
+
+      <TouchableOpacity
+        accessibilityRole="button"
+        onPress={handleUseMaxAmount}
+        disabled={!canPrefillMax}
+        style={styles.availableCardPressable}
+        activeOpacity={0.82}
+      >
+        <GlassView
+          style={[
+            styles.availableCard,
+            {
+              borderColor:
+                colorScheme === "dark" ? "rgba(255,255,255,0.16)" : "rgba(255,255,255,0.52)",
+            },
+          ]}
+          intensity={26}
+          interactive
+        >
+          <View style={styles.availableHeader}>
+            <Text style={[styles.availableLabel, { color: palette.secondaryText }]} selectable>
+              Available balance
+            </Text>
+            <View style={[styles.availablePill, { backgroundColor: palette.surfaceMuted }]}>
+              <Text style={[styles.availablePillText, { color: palette.secondaryText }]}>
+                {canPrefillMax ? "Tap to use max" : "No funds"}
+              </Text>
+            </View>
+          </View>
+          <Text style={[styles.availableAmount, { color: palette.primaryText }]} selectable>
+              {isLoadingBalance
+                ? "Loading balance..."
+                : `${isUsdInput ? "$" : "ARS$"}${formatNumericDisplay(availableInputAmount, 2)}`}
+          </Text>
+          {!isLoadingBalance ? (
+            <Text style={[styles.availableSubtext, { color: palette.secondaryText }]} selectable>
+              {assetSymbol} {formatNumericDisplay(balanceNumber, 6)} available
+            </Text>
+          ) : null}
+        </GlassView>
+      </TouchableOpacity>
 
       <View style={styles.metaRow}>
         <Text style={[styles.metaLabel, { color: palette.secondaryText }]} selectable>
@@ -595,6 +802,31 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     paddingTop: 0,
     paddingBottom: 16,
+  },
+  header: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: 8,
+    marginTop: 12,
+  },
+  iconButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 1,
+  },
+  iconButtonPressable: {
+    borderRadius: 20,
+  },
+  headerTitle: {
+    fontSize: 18,
+    fontWeight: "600",
+  },
+  headerSpacer: {
+    width: 40,
   },
   heroIcon: {
     width: 44,
@@ -689,43 +921,93 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     padding: 20,
     marginBottom: 12,
+    alignItems: "center",
+  },
+  amountBadgePressable: {
+    borderRadius: 999,
+    marginBottom: 12,
   },
   amountBadge: {
-    alignSelf: "center",
+    flexDirection: "row",
+    alignItems: "center",
     paddingHorizontal: 10,
     paddingVertical: 4,
     borderRadius: 999,
-    marginBottom: 12,
+  },
+  amountBadgeIcon: {
+    marginRight: 4,
   },
   amountBadgeText: {
     fontSize: 12,
     fontWeight: "600",
   },
   amountRow: {
-    flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
     marginBottom: 6,
   },
+  amountInline: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+  },
   currencySymbol: {
     fontSize: 22,
     fontWeight: "600",
-    marginRight: 4,
+    marginRight: 2,
   },
   amountInput: {
-    fontSize: 40,
     fontWeight: "600",
-    minWidth: 120,
     textAlign: "center",
   },
   equivalentText: {
     textAlign: "center",
     fontSize: 13,
   },
-  balanceText: {
+  balanceHelperText: {
     textAlign: "center",
-    fontSize: 12,
+    fontSize: 11,
     marginTop: 6,
+  },
+  availableCardPressable: {
+    borderRadius: 16,
+    marginBottom: 12,
+  },
+  availableCard: {
+    borderWidth: 1,
+    borderRadius: 16,
+    padding: 14,
+  },
+  availableHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginBottom: 8,
+    gap: 10,
+  },
+  availableLabel: {
+    fontSize: 12,
+    fontWeight: "600",
+  },
+  availablePill: {
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+  },
+  availablePillText: {
+    fontSize: 11,
+    fontWeight: "600",
+  },
+  availableAmount: {
+    fontSize: 22,
+    fontWeight: "700",
+    lineHeight: 28,
+    fontVariant: ["tabular-nums"],
+  },
+  availableSubtext: {
+    marginTop: 4,
+    fontSize: 12,
+    fontVariant: ["tabular-nums"],
   },
   metaRow: {
     flexDirection: "row",

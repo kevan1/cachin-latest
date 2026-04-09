@@ -1,11 +1,14 @@
-import { StyleSheet, View, Text, TouchableOpacity, Alert, Switch, ScrollView } from 'react-native';
+import { StyleSheet, View, Text, TouchableOpacity, Alert, Switch, ScrollView, useColorScheme } from 'react-native';
 import { useRouter } from 'expo-router';
+import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 import QRCode from 'react-native-qrcode-svg';
 import * as Clipboard from 'expo-clipboard';
 import { useEmbeddedSolanaWallet } from '@privy-io/expo';
 import { useMemo, useState } from 'react';
 import Svg, { Path } from 'react-native-svg';
 import { buildSolanaPayUri, createSolanaPayReferences, SOLANA_USDC_MINT } from '@/utils/solanaPay';
+import { GlassView } from '@/components/ui/GlassView';
+import { Colors } from '@/constants/theme';
 
 function CopyIcon({ size = 18, color = '#111' }: { size?: number; color?: string }) {
   return (
@@ -17,6 +20,8 @@ function CopyIcon({ size = 18, color = '#111' }: { size?: number; color?: string
 
 export default function CryptoDepositScreen() {
   const router = useRouter();
+  const colorScheme = useColorScheme() ?? 'light';
+  const palette = Colors[colorScheme];
   const { wallets } = useEmbeddedSolanaWallet();
   const wallet = wallets?.[0];
   const [hideWallet, setHideWallet] = useState(false);
@@ -29,7 +34,7 @@ export default function CryptoDepositScreen() {
 
   const solanaPayReferences = useMemo(
     () => (solanaAddress ? createSolanaPayReferences(1) : []),
-    [solanaAddress, receiveAsset]
+    [solanaAddress]
   );
 
   const solanaPayUri = useMemo(() => {
@@ -44,19 +49,16 @@ export default function CryptoDepositScreen() {
     });
   }, [receiveAsset, solanaAddress, solanaPayReferences]);
 
-  const handleCopyPaymentLink = async () => {
-    if (solanaPayUri) {
-      await Clipboard.setStringAsync(solanaPayUri);
-      Alert.alert('Copied!', 'Payment link copied to clipboard');
-    } else if (solanaAddress) {
+  const handleCopyWallet = async () => {
+    if (solanaAddress) {
       await Clipboard.setStringAsync(solanaAddress);
-      Alert.alert('Copied!', 'Address copied to clipboard');
+      Alert.alert('Copied!', 'Wallet address copied to clipboard');
     } else {
       Alert.alert('Wallet Not Found', 'No wallet is currently available. Please connect your wallet first.');
     }
   };
 
-  const handleClose = () => {
+  const handleBack = () => {
     router.back();
   };
 
@@ -84,15 +86,29 @@ export default function CryptoDepositScreen() {
       contentContainerStyle={styles.content}
       showsVerticalScrollIndicator={false}
     >
-      <View style={styles.handle} />
-      <TouchableOpacity style={styles.closeButton} onPress={handleClose} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
-        <Text style={styles.closeIcon}>✕</Text>
-      </TouchableOpacity>
+      <View style={styles.header}>
+        <TouchableOpacity style={styles.iconButtonPressable} onPress={handleBack} activeOpacity={0.78}>
+          <GlassView
+            style={[
+              styles.iconButton,
+              {
+                borderColor:
+                  colorScheme === 'dark' ? 'rgba(255,255,255,0.2)' : 'rgba(255,255,255,0.5)',
+              },
+            ]}
+            intensity={26}
+            interactive
+          >
+            <MaterialIcons name="arrow-back" size={20} color={palette.primaryText} />
+          </GlassView>
+        </TouchableOpacity>
+        <Text style={[styles.title, { color: palette.primaryText }]}>Receive</Text>
+        <View style={styles.headerSpacer} />
+      </View>
 
-      <Text style={styles.title}>Receive</Text>
-      <Text style={styles.subtitle}>Scan with a Solana Pay wallet. USDC is preferred, SOL is supported.</Text>
+      <Text style={[styles.subtitle, { color: '#111827' }]}>Scan with a Solana Pay wallet. USDC is preferred, SOL is supported.</Text>
 
-      <View style={styles.assetToggle}>
+      <GlassView style={styles.assetToggle} intensity={24} interactive>
         <TouchableOpacity
           style={[styles.assetToggleButton, receiveAsset === 'usdc' && styles.assetToggleButtonActive]}
           onPress={() => setReceiveAsset('usdc')}
@@ -109,9 +125,9 @@ export default function CryptoDepositScreen() {
             SOL
           </Text>
         </TouchableOpacity>
-      </View>
+      </GlassView>
 
-      <View style={styles.qrCard}>
+      <GlassView style={styles.qrCard} intensity={30} interactive>
         <View style={styles.qrFrame}>
           <QRCode
             value={solanaPayUri || solanaAddress || 'No wallet'}
@@ -121,7 +137,7 @@ export default function CryptoDepositScreen() {
           />
         </View>
         <Text selectable style={styles.addressLines}>{getWrappedAddress()}</Text>
-      </View>
+      </GlassView>
 
       <View style={styles.toggleRow}>
         <View style={{ flex: 1 }}>
@@ -138,9 +154,11 @@ export default function CryptoDepositScreen() {
         />
       </View>
 
-      <TouchableOpacity style={styles.copyButton} onPress={handleCopyPaymentLink}>
-        <CopyIcon size={18} color="#111827" />
-        <Text style={styles.copyButtonText}>Copy payment link</Text>
+      <TouchableOpacity style={styles.copyButtonPressable} onPress={handleCopyWallet} activeOpacity={0.78}>
+        <GlassView style={styles.copyButton} intensity={24} interactive>
+          <CopyIcon size={18} color="#111827" />
+          <Text style={styles.copyButtonText}>Copy wallet address</Text>
+        </GlassView>
       </TouchableOpacity>
     </ScrollView>
   );
@@ -149,29 +167,10 @@ export default function CryptoDepositScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#ffffff',
+    backgroundColor: 'transparent',
     borderTopLeftRadius: 28,
     borderTopRightRadius: 28,
     borderCurve: 'continuous',
-  },
-  handle: {
-    alignSelf: 'center',
-    width: 60,
-    height: 5,
-    borderRadius: 999,
-    backgroundColor: '#E5E7EB',
-    marginTop: 12,
-    marginBottom: 12,
-  },
-  closeButton: {
-    position: 'absolute',
-    right: 16,
-    top: 12,
-    padding: 8,
-  },
-  closeIcon: {
-    fontSize: 22,
-    color: '#9CA3AF',
   },
   content: {
     paddingHorizontal: 20,
@@ -179,15 +178,34 @@ const styles = StyleSheet.create({
     paddingBottom: 32,
     alignItems: 'center',
   },
+  header: {
+    width: '100%',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 8,
+    marginTop: 8,
+  },
+  iconButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+  },
+  iconButtonPressable: {
+    borderRadius: 20,
+  },
+  headerSpacer: {
+    width: 40,
+  },
   title: {
     fontSize: 20,
     fontWeight: '700',
-    color: '#111827',
-    marginTop: 8,
   },
   subtitle: {
     fontSize: 14,
-    color: '#9CA3AF',
     marginTop: 4,
     marginBottom: 24,
     textAlign: 'center',
@@ -196,7 +214,8 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     gap: 10,
     marginBottom: 18,
-    backgroundColor: '#F3F4F6',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.45)',
     padding: 6,
     borderRadius: 999,
     width: '100%',
@@ -208,25 +227,25 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   assetToggleButtonActive: {
-    backgroundColor: '#ffffff',
+    backgroundColor: 'rgba(255,255,255,0.85)',
     boxShadow: '0 3px 6px rgba(0, 0, 0, 0.06)',
   },
   assetToggleText: {
     fontSize: 13,
     fontWeight: '600',
-    color: '#6B7280',
+    color: '#111827',
   },
   assetToggleTextActive: {
     color: '#111827',
   },
   qrCard: {
     width: '100%',
-    backgroundColor: '#ffffff',
     borderRadius: 20,
     borderCurve: 'continuous',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.48)',
     paddingVertical: 14,
     paddingHorizontal: 12,
-    boxShadow: '0 6px 10px rgba(0, 0, 0, 0.06)',
     alignItems: 'center',
     marginBottom: 28,
   },
@@ -238,7 +257,7 @@ const styles = StyleSheet.create({
   addressLines: {
     marginTop: 14,
     fontSize: 13,
-    color: '#9CA3AF',
+    color: '#111827',
     textAlign: 'center',
     lineHeight: 18,
   },
@@ -257,7 +276,7 @@ const styles = StyleSheet.create({
   toggleHelp: {
     marginTop: 4,
     fontSize: 12,
-    color: '#6B7280',
+    color: '#111827',
   },
   toggleHelpIcon: {
     fontWeight: '700',
@@ -267,10 +286,15 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     width: '100%',
-    backgroundColor: '#EFEFF4',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.45)',
     borderRadius: 16,
     paddingVertical: 14,
     gap: 8,
+  },
+  copyButtonPressable: {
+    width: '100%',
+    borderRadius: 16,
   },
   copyButtonText: {
     fontSize: 16,

@@ -14,6 +14,7 @@ import { useState } from 'react';
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 import Svg, { Path, Circle } from 'react-native-svg';
 import { Colors } from '@/constants/theme';
+import { GlassView } from '@/components/ui/GlassView';
 
 // Icon components
 function ArgentinaFlagIcon({ size = 32 }: { size?: number }) {
@@ -72,17 +73,30 @@ export default function WithdrawBankScreen() {
     <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
       <ScrollView
         contentInsetAdjustmentBehavior="automatic"
-        style={[styles.container, { backgroundColor: palette.background }]}
+        style={[styles.container, { backgroundColor: 'transparent' }]}
         contentContainerStyle={styles.containerContent}
         showsVerticalScrollIndicator={false}
       >
         {/* Header */}
         <View style={styles.header}>
-          <TouchableOpacity 
-            style={[styles.iconButton, { backgroundColor: palette.surfaceMuted, borderColor: palette.borderSubtle }]} 
+          <TouchableOpacity
+            style={styles.iconButtonPressable}
             onPress={handleBack}
+            activeOpacity={0.78}
           >
-            <MaterialIcons name="arrow-back" size={20} color={palette.primaryText} />
+            <GlassView
+              style={[
+                styles.iconButton,
+                {
+                  borderColor:
+                    colorScheme === 'dark' ? 'rgba(255,255,255,0.2)' : 'rgba(255,255,255,0.5)',
+                },
+              ]}
+              intensity={26}
+              interactive
+            >
+              <MaterialIcons name="arrow-back" size={20} color={palette.primaryText} />
+            </GlassView>
           </TouchableOpacity>
           <Text style={[styles.headerTitle, { color: palette.primaryText }]}>Withdraw</Text>
           <View style={styles.headerSpacer} />
@@ -90,14 +104,24 @@ export default function WithdrawBankScreen() {
 
         <View style={styles.content}>
           {/* Withdrawal Summary Card */}
-          <View style={[styles.summaryCard, { backgroundColor: palette.surface, borderColor: palette.borderSubtle }]}>
+          <GlassView
+            style={[
+              styles.summaryCard,
+              {
+                borderColor:
+                  colorScheme === 'dark' ? 'rgba(255,255,255,0.16)' : 'rgba(255,255,255,0.52)',
+              },
+            ]}
+            intensity={30}
+            interactive
+          >
             <View style={styles.flagContainer}>
               <View style={styles.flagCircle}>
                 <ArgentinaFlagIcon size={40} />
               </View>
-              <View style={[styles.bankIconCircle, { backgroundColor: palette.surface, borderColor: palette.borderSubtle }]}>
+              <GlassView style={styles.bankIconCircle} intensity={24} interactive>
                 <MaterialIcons name="account-balance" size={20} color={palette.primaryText} />
-              </View>
+              </GlassView>
             </View>
             
             <Text style={[styles.summaryLabel, { color: palette.secondaryText }]}>You&apos;re withdrawing</Text>
@@ -107,13 +131,23 @@ export default function WithdrawBankScreen() {
             <Text style={[styles.summaryEquivalent, { color: palette.secondaryText }]}>
               ≈ ${amounts.usd} USD
             </Text>
-          </View>
+          </GlassView>
 
           {/* Bank Details Section */}
           <Text style={[styles.sectionTitle, { color: palette.primaryText }]}>Enter Bank Transfer details</Text>
 
-          <View style={[styles.inputContainer, { backgroundColor: palette.surface, borderColor: palette.borderSubtle }]}>
-             <MaterialIcons name="account-balance-wallet" size={24} color={palette.secondaryText} style={styles.inputIcon} />
+          <GlassView
+            style={[
+              styles.inputContainer,
+              {
+                borderColor:
+                  colorScheme === 'dark' ? 'rgba(255,255,255,0.16)' : 'rgba(255,255,255,0.52)',
+              },
+            ]}
+            intensity={28}
+            interactive
+          >
+            <MaterialIcons name="account-balance-wallet" size={24} color={palette.secondaryText} style={styles.inputIcon} />
             <TextInput
               style={[styles.input, { color: palette.primaryText }]}
               value={cbu}
@@ -122,7 +156,7 @@ export default function WithdrawBankScreen() {
               placeholderTextColor={palette.secondaryText}
               keyboardType="number-pad"
             />
-          </View>
+          </GlassView>
 
           {/* Info Message */}
           <View style={styles.infoContainer}>
@@ -174,6 +208,9 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     borderWidth: 1,
   },
+  iconButtonPressable: {
+    borderRadius: 20,
+  },
   headerTitle: {
     fontSize: 18,
     fontWeight: '600',
@@ -210,7 +247,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginLeft: -10,
     zIndex: 2,
-    borderWidth: 2,
+    borderWidth: 1,
   },
   summaryLabel: {
     fontSize: 14,

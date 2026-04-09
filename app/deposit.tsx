@@ -1,10 +1,10 @@
-import { StyleSheet, View, Text, TouchableOpacity, Image, useColorScheme, ScrollView } from 'react-native';
+import { StyleSheet, View, Text, TouchableOpacity, useColorScheme, ScrollView } from 'react-native';
 import { useRouter } from 'expo-router';
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 import { Colors } from '@/constants/theme';
 import { GlassView } from '@/components/ui/GlassView';
 
-export default function WithdrawScreen() {
+export default function DepositScreen() {
   const router = useRouter();
   const colorScheme = useColorScheme() ?? 'light';
   const palette = Colors[colorScheme];
@@ -14,24 +14,11 @@ export default function WithdrawScreen() {
   };
 
   const handleCrypto = () => {
-    router.push({
-      pathname: '/withdraw-amount',
-      params: { method: 'crypto' }
-    });
-  };
-
-  const handleMercadoPago = () => {
-    router.push({
-      pathname: '/withdraw-amount',
-      params: { method: 'mercadopago' }
-    });
+    router.push('/crypto-deposit');
   };
 
   const handleBank = () => {
-    router.push({
-      pathname: '/withdraw-amount',
-      params: { method: 'bank' }
-    });
+    router.push('/fiat-deposit');
   };
 
   return (
@@ -41,13 +28,8 @@ export default function WithdrawScreen() {
       contentContainerStyle={styles.containerContent}
       showsVerticalScrollIndicator={false}
     >
-      {/* Header */}
       <View style={styles.header}>
-        <TouchableOpacity
-          style={styles.iconButtonPressable}
-          onPress={handleBack}
-          activeOpacity={0.78}
-        >
+        <TouchableOpacity style={styles.iconButtonPressable} onPress={handleBack} activeOpacity={0.78}>
           <GlassView
             style={[
               styles.iconButton,
@@ -62,20 +44,14 @@ export default function WithdrawScreen() {
             <MaterialIcons name="arrow-back" size={20} color={palette.primaryText} />
           </GlassView>
         </TouchableOpacity>
-        <Text style={[styles.headerTitle, { color: palette.primaryText }]}>Withdraw</Text>
+        <Text style={[styles.headerTitle, { color: palette.primaryText }]}>Deposit</Text>
         <View style={styles.headerSpacer} />
       </View>
 
-      <Text style={[styles.headline, { color: palette.primaryText }]}>Choose withdrawing method</Text>
+      <Text style={[styles.headline, { color: palette.primaryText }]}>Choose deposit method</Text>
 
-      {/* Options Container */}
       <View style={styles.optionsContainer}>
-        {/* Crypto Option */}
-        <TouchableOpacity
-          style={styles.optionPressable}
-          onPress={handleCrypto}
-          activeOpacity={0.78}
-        >
+        <TouchableOpacity style={styles.optionPressable} onPress={handleCrypto} activeOpacity={0.78}>
           <GlassView
             style={[
               styles.optionItem,
@@ -89,57 +65,20 @@ export default function WithdrawScreen() {
           >
             <View style={styles.optionLeft}>
               <GlassView style={styles.iconCircle} intensity={24} interactive>
-                <MaterialIcons name="credit-card" size={24} color={palette.primaryText} />
+                <MaterialIcons name="account-balance-wallet" size={24} color={palette.primaryText} />
               </GlassView>
               <View style={styles.optionInfo}>
                 <Text style={[styles.optionTitle, { color: palette.primaryText }]}>Crypto</Text>
-                <Text style={[styles.optionSubtitle, { color: palette.secondaryText }]}>Withdraw to a wallet address</Text>
+                <Text style={[styles.optionSubtitle, { color: palette.secondaryText }]}>
+                  Receive assets via wallet address
+                </Text>
               </View>
             </View>
             <MaterialIcons name="chevron-right" size={24} color={palette.secondaryText} />
           </GlassView>
         </TouchableOpacity>
 
-        {/* Mercado Pago Option */}
-        <TouchableOpacity
-          style={styles.optionPressable}
-          onPress={handleMercadoPago}
-          activeOpacity={0.78}
-        >
-          <GlassView
-            style={[
-              styles.optionItem,
-              {
-                borderColor:
-                  colorScheme === 'dark' ? 'rgba(255,255,255,0.16)' : 'rgba(255,255,255,0.52)',
-              },
-            ]}
-            intensity={30}
-            interactive
-          >
-            <View style={styles.optionLeft}>
-              <GlassView style={styles.iconCircle} intensity={24} interactive>
-                <Image
-                  source={require('../assets/images/mp.png')}
-                  style={styles.mpImage}
-                  resizeMode="contain"
-                />
-              </GlassView>
-              <View style={styles.optionInfo}>
-                <Text style={[styles.optionTitle, { color: palette.primaryText }]}>Mercado Pago</Text>
-                <Text style={[styles.optionSubtitle, { color: palette.secondaryText }]}>Instant transfers</Text>
-              </View>
-            </View>
-            <MaterialIcons name="chevron-right" size={24} color={palette.secondaryText} />
-          </GlassView>
-        </TouchableOpacity>
-
-        {/* To Bank Option */}
-        <TouchableOpacity
-          style={styles.optionPressable}
-          onPress={handleBank}
-          activeOpacity={0.78}
-        >
+        <TouchableOpacity style={styles.optionPressable} onPress={handleBank} activeOpacity={0.78}>
           <GlassView
             style={[
               styles.optionItem,
@@ -156,8 +95,10 @@ export default function WithdrawScreen() {
                 <MaterialIcons name="account-balance" size={24} color={palette.primaryText} />
               </GlassView>
               <View style={styles.optionInfo}>
-                <Text style={[styles.optionTitle, { color: palette.primaryText }]}>To Bank</Text>
-                <Text style={[styles.optionSubtitle, { color: palette.secondaryText }]}>Standard bank withdrawal</Text>
+                <Text style={[styles.optionTitle, { color: palette.primaryText }]}>Bank</Text>
+                <Text style={[styles.optionSubtitle, { color: palette.secondaryText }]}>
+                  Receive assets via virtual bank account
+                </Text>
               </View>
             </View>
             <MaterialIcons name="chevron-right" size={24} color={palette.secondaryText} />
@@ -232,10 +173,6 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     marginRight: 16,
-  },
-  mpImage: {
-    width: 28,
-    height: 28,
   },
   optionInfo: {
     flex: 1,

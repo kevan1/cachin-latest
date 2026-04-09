@@ -1,10 +1,16 @@
-import { ScrollView, Text, TouchableOpacity, View } from "react-native";
+import { ScrollView, StyleSheet, Text, TouchableOpacity, View, useColorScheme } from "react-native";
 import { useRouter } from "expo-router";
 import * as Haptics from "expo-haptics";
+import MaterialIcons from "@expo/vector-icons/MaterialIcons";
+
+import { Colors } from "@/constants/theme";
+import { GlassView } from "@/components/ui/GlassView";
 import { IconSymbol } from "@/components/ui/icon-symbol";
 
 export default function SendOptionsScreen() {
   const router = useRouter();
+  const colorScheme = useColorScheme() ?? "light";
+  const palette = Colors[colorScheme];
   const isIOS = process.env.EXPO_OS === "ios";
 
   const triggerHaptic = (style: Haptics.ImpactFeedbackStyle) => {
@@ -13,82 +19,86 @@ export default function SendOptionsScreen() {
     }
   };
 
+  const handleBack = () => {
+    triggerHaptic(Haptics.ImpactFeedbackStyle.Light);
+    router.back();
+  };
+
   return (
     <ScrollView
       contentInsetAdjustmentBehavior="automatic"
-      contentContainerStyle={{
-        paddingHorizontal: 20,
-        paddingTop: 0,
-        paddingBottom: 28,
-        gap: 16,
-      }}
+      contentContainerStyle={styles.containerContent}
+      style={styles.container}
+      showsVerticalScrollIndicator={false}
     >
-      <View style={{ alignItems: "center", justifyContent: "center" }}>
-        <View
-          style={{
-            width: 56,
-            height: 56,
-            borderRadius: 28,
-            borderCurve: "continuous",
-            backgroundColor: "#DBEAFE",
-            alignItems: "center",
-            justifyContent: "center",
-          }}
+      <View style={styles.header}>
+        <TouchableOpacity
+          style={styles.iconButtonPressable}
+          onPress={handleBack}
+          activeOpacity={0.78}
         >
-          <IconSymbol name="paperplane.fill" size={26} color="#2563EB" />
-        </View>
+          <GlassView
+            style={[
+              styles.iconButton,
+              {
+                borderColor:
+                  colorScheme === "dark" ? "rgba(255,255,255,0.2)" : "rgba(255,255,255,0.5)",
+              },
+            ]}
+            intensity={26}
+            interactive
+          >
+            <MaterialIcons name="arrow-back" size={20} color={palette.primaryText} />
+          </GlassView>
+        </TouchableOpacity>
+        <Text style={[styles.headerTitle, { color: palette.primaryText }]}>Send</Text>
+        <View style={styles.headerSpacer} />
       </View>
 
-      <View style={{ gap: 8 }}>
-        <Text style={{ fontSize: 14, color: "#6B7280", textAlign: "center" }}>
-          Choose how you want to send money
-        </Text>
+      <View style={[styles.heroIcon, { backgroundColor: palette.success }]}>
+        <IconSymbol name="paperplane.fill" size={24} color={palette.actionPrimaryText} />
       </View>
 
-      <View style={{ gap: 12 }}>
+      <Text style={[styles.subtitle, { color: palette.secondaryText }]} selectable>
+        Choose how you want to send money
+      </Text>
+
+      <View style={styles.optionsContainer}>
         <TouchableOpacity
           accessibilityRole="button"
           onPress={() => {
             triggerHaptic(Haptics.ImpactFeedbackStyle.Medium);
             router.replace("/send-amount");
           }}
-          style={{
-            flexDirection: "row",
-            alignItems: "center",
-            justifyContent: "space-between",
-            backgroundColor: "#F9FAFB",
-            borderRadius: 16,
-            borderCurve: "continuous",
-            borderWidth: 1,
-            borderColor: "#E5E7EB",
-            paddingHorizontal: 14,
-            paddingVertical: 12,
-          }}
+          activeOpacity={0.8}
+          style={styles.optionPressable}
         >
-          <View style={{ flexDirection: "row", alignItems: "center", gap: 12 }}>
-            <View
-              style={{
-                width: 44,
-                height: 44,
-                borderRadius: 22,
-                borderCurve: "continuous",
-                backgroundColor: "#E0F2FE",
-                alignItems: "center",
-                justifyContent: "center",
-              }}
-            >
-              <IconSymbol name="person.crop.circle" size={22} color="#2563EB" />
+          <GlassView
+            style={[
+              styles.optionCard,
+              {
+                borderColor:
+                  colorScheme === "dark" ? "rgba(255,255,255,0.16)" : "rgba(255,255,255,0.52)",
+              },
+            ]}
+            intensity={30}
+            interactive
+          >
+            <View style={styles.optionLeft}>
+              <GlassView style={styles.iconCircle} intensity={24} interactive>
+                <IconSymbol name="person.crop.circle" size={22} color="#2563EB" />
+              </GlassView>
+              <View style={styles.optionInfo}>
+                <Text style={[styles.optionTitle, { color: palette.primaryText }]} selectable>
+                  Send to username
+                </Text>
+                <Text style={[styles.optionSubtitle, { color: palette.secondaryText }]} selectable>
+                  Send to a Cachin username or SNS
+                </Text>
+              </View>
             </View>
-            <View>
-              <Text style={{ fontSize: 16, fontWeight: "700", color: "#111827" }}>
-                Send to username
-              </Text>
-              <Text style={{ fontSize: 12, color: "#6B7280", marginTop: 2 }}>
-                Send to a Cachin username or SNS
-              </Text>
-            </View>
-          </View>
-          <IconSymbol name="chevron.right" size={22} color="#9CA3AF" />
+            <IconSymbol name="chevron.right" size={22} color={palette.secondaryText} />
+          </GlassView>
         </TouchableOpacity>
 
         <TouchableOpacity
@@ -97,45 +107,127 @@ export default function SendOptionsScreen() {
             triggerHaptic(Haptics.ImpactFeedbackStyle.Medium);
             router.replace("/send-link");
           }}
-          style={{
-            flexDirection: "row",
-            alignItems: "center",
-            justifyContent: "space-between",
-            backgroundColor: "#F9FAFB",
-            borderRadius: 16,
-            borderCurve: "continuous",
-            borderWidth: 1,
-            borderColor: "#E5E7EB",
-            paddingHorizontal: 14,
-            paddingVertical: 12,
-          }}
+          activeOpacity={0.8}
+          style={styles.optionPressable}
         >
-          <View style={{ flexDirection: "row", alignItems: "center", gap: 12 }}>
-            <View
-              style={{
-                width: 44,
-                height: 44,
-                borderRadius: 22,
-                borderCurve: "continuous",
-                backgroundColor: "#CCFBF1",
-                alignItems: "center",
-                justifyContent: "center",
-              }}
-            >
-              <IconSymbol name="link" size={22} color="#0F766E" />
+          <GlassView
+            style={[
+              styles.optionCard,
+              {
+                borderColor:
+                  colorScheme === "dark" ? "rgba(255,255,255,0.16)" : "rgba(255,255,255,0.52)",
+              },
+            ]}
+            intensity={30}
+            interactive
+          >
+            <View style={styles.optionLeft}>
+              <GlassView style={styles.iconCircle} intensity={24} interactive>
+                <IconSymbol name="link" size={22} color="#0F766E" />
+              </GlassView>
+              <View style={styles.optionInfo}>
+                <Text style={[styles.optionTitle, { color: palette.primaryText }]} selectable>
+                  Create payment link
+                </Text>
+                <Text style={[styles.optionSubtitle, { color: palette.secondaryText }]} selectable>
+                  Share a link that anyone can claim
+                </Text>
+              </View>
             </View>
-            <View>
-              <Text style={{ fontSize: 16, fontWeight: "700", color: "#111827" }}>
-                Create payment link
-              </Text>
-              <Text style={{ fontSize: 12, color: "#6B7280", marginTop: 2 }}>
-                Share a link that anyone can claim
-              </Text>
-            </View>
-          </View>
-          <IconSymbol name="chevron.right" size={22} color="#9CA3AF" />
+            <IconSymbol name="chevron.right" size={22} color={palette.secondaryText} />
+          </GlassView>
         </TouchableOpacity>
       </View>
     </ScrollView>
   );
 }
+
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+    backgroundColor: "transparent",
+  },
+  containerContent: {
+    paddingHorizontal: 20,
+    paddingTop: 0,
+    paddingBottom: 28,
+    gap: 16,
+  },
+  header: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: 8,
+    marginTop: 12,
+  },
+  iconButtonPressable: {
+    borderRadius: 20,
+  },
+  iconButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 1,
+  },
+  headerTitle: {
+    fontSize: 18,
+    fontWeight: "600",
+  },
+  headerSpacer: {
+    width: 40,
+  },
+  heroIcon: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    borderCurve: "continuous",
+    alignItems: "center",
+    justifyContent: "center",
+    alignSelf: "center",
+  },
+  subtitle: {
+    fontSize: 14,
+    textAlign: "center",
+    marginTop: -6,
+  },
+  optionsContainer: {
+    gap: 12,
+  },
+  optionPressable: {
+    borderRadius: 16,
+  },
+  optionCard: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    borderWidth: 1,
+    borderRadius: 16,
+    padding: 14,
+  },
+  optionLeft: {
+    flexDirection: "row",
+    alignItems: "center",
+    flex: 1,
+    gap: 12,
+  },
+  iconCircle: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  optionInfo: {
+    flex: 1,
+  },
+  optionTitle: {
+    fontSize: 16,
+    fontWeight: "700",
+  },
+  optionSubtitle: {
+    fontSize: 12,
+    marginTop: 2,
+  },
+});

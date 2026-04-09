@@ -17,7 +17,7 @@ import ReAnimated, {
   useSharedValue,
   withTiming,
 } from "react-native-reanimated";
-import { useRouter, useFocusEffect } from "expo-router";
+import { useRouter, useFocusEffect, useSegments } from "expo-router";
 import * as Haptics from 'expo-haptics';
 import { useState, useEffect, useCallback, useRef, useMemo, type ReactNode } from 'react';
 import * as Clipboard from 'expo-clipboard';
@@ -85,6 +85,7 @@ import {
 const MESH_DIMENSION = 3;
 type ReceiveAsset = 'usdc' | 'sol' | 'avax';
 const PENDING_USERNAME_SAVE_KEY = 'pending_username_save';
+const PULL_REFRESH_DISTANCE = 80;
 type LinkedSolanaAccountLike = {
   type?: string;
   chain_type?: string;
@@ -172,6 +173,7 @@ function CryptoDot({ size = 32, color = '#f97316' }: { size?: number; color?: st
 
 export default function HomeScreen() {
   const router = useRouter();
+  const segments = useSegments();
   const colorScheme = useColorScheme() ?? "light";
   const [themeId, setThemeId] = useState<string>('blue');
   const [showThemeSelector, setShowThemeSelector] = useState(false);
@@ -434,12 +436,17 @@ export default function HomeScreen() {
   const receiveSheetRef = useRef<BottomSheet>(null);
   const cryptoReceiveRef = useRef<BottomSheet>(null);
   const fiatReceiveRef = useRef<BottomSheet>(null);
+  const sendRoutePushInFlightRef = useRef(false);
+  const depositRoutePushInFlightRef = useRef(false);
+  const withdrawRoutePushInFlightRef = useRef(false);
   const homeScrollRef = useRef<ScrollView>(null);
   const refreshInFlightRef = useRef(false);
   const qrScale = useRef(new Animated.Value(1)).current;
   const pullProgress = useSharedValue(0);
   const pullRefreshTriggered = useSharedValue(false);
   const homeScrollClampTriggered = useSharedValue(false);
+  const pullDragStartOffset = useSharedValue(0);
+  const pullDragActive = useSharedValue(false);
   const [fiatCurrency, setFiatCurrency] = useState<'usd' | 'eur'>('usd');
   const snapPoints = useMemo(() => ['75%'], []);
   const sendSnapPoints = useMemo(() => ['45%'], []);
@@ -888,11 +895,25 @@ export default function HomeScreen() {
   }, []);
   
   // Handle pull to refresh
+  const resetPullRefreshVisualState = useCallback(() => {
+    pullRefreshTriggered.value = false;
+    homeScrollClampTriggered.value = false;
+    pullDragActive.value = false;
+    pullDragStartOffset.value = 0;
+    pullProgress.value = withTiming(0, { duration: 160 });
+  }, [homeScrollClampTriggered, pullDragActive, pullDragStartOffset, pullProgress, pullRefreshTriggered]);
+
   const onRefresh = useCallback(async () => {
     const fullAddress = getFullSolanaAddress();
     const avalancheAddress = getFullAvalancheAddress();
-    if (!fullAddress && !avalancheAddress) return;
-    if (refreshInFlightRef.current) return;
+    if (!fullAddress && !avalancheAddress) {
+      resetPullRefreshVisualState();
+      return;
+    }
+    if (refreshInFlightRef.current) {
+      resetPullRefreshVisualState();
+      return;
+    }
 
     refreshInFlightRef.current = true;
     setIsRefreshing(true);
@@ -908,9 +929,10 @@ export default function HomeScreen() {
       setIsRefreshing(false);
       setBalanceRefreshTick((current) => current + 1);
       refreshInFlightRef.current = false;
+      resetPullRefreshVisualState();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [fetchBalance, fetchTransactions]);
+  }, [fetchBalance, fetchTransactions, resetPullRefreshVisualState]);
 
   useEffect(() => {
     if (isRefreshing) return;
@@ -1059,23 +1081,63 @@ export default function HomeScreen() {
     return fullSolanaAddress ?? (selectedChain === 'all' ? fullAvalancheAddress : null);
   };
 
+  const isDepositRouteOpen =
+    segments[0] === "deposit" ||
+    segments[0] === "crypto-deposit" ||
+    segments[0] === "fiat-deposit";
+  const isSendRouteOpen =
+    segments[0] === "send-options" ||
+    segments[0] === "send-amount" ||
+    segments[0] === "send-link" ||
+    segments[0] === "send-confirm";
+  const isWithdrawRouteOpen =
+    segments[0] === "withdraw" ||
+    segments[0] === "withdraw-amount" ||
+    segments[0] === "withdraw-bank" ||
+    segments[0] === "withdraw-crypto" ||
+    segments[0] === "withdraw-crypto-review";
+
+  useEffect(() => {
+    if (!isSendRouteOpen) {
+      sendRoutePushInFlightRef.current = false;
+    }
+  }, [isSendRouteOpen]);
+
+  useEffect(() => {
+    if (!isDepositRouteOpen) {
+      depositRoutePushInFlightRef.current = false;
+    }
+  }, [isDepositRouteOpen]);
+
+  useEffect(() => {
+    if (!isWithdrawRouteOpen) {
+      withdrawRoutePushInFlightRef.current = false;
+    }
+  }, [isWithdrawRouteOpen]);
+
   const handleAdd = () => {
+    if (depositRoutePushInFlightRef.current || isDepositRouteOpen) return;
+    depositRoutePushInFlightRef.current = true;
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-    receiveSheetRef.current?.expand();
+    router.push('/deposit');
   };
 
   const handleWithdraw = () => {
+    if (withdrawRoutePushInFlightRef.current || isWithdrawRouteOpen) return;
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     if (selectedChain === ChainType.AVALANCHE) {
       showToast('Avalanche withdraw is coming soon. Switch to Solana to continue.');
       return;
     }
+    withdrawRoutePushInFlightRef.current = true;
     router.push('/withdraw');
   };
 
   const handleSend = () => {
+    if (sendRoutePushInFlightRef.current || isSendRouteOpen) return;
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     if (selectedChain === ChainType.AVALANCHE) {
+      sendRoutePushInFlightRef.current = true;
       router.push({
         pathname: "/send-amount",
         params: {
@@ -1086,6 +1148,7 @@ export default function HomeScreen() {
       return;
     }
     if (isIOS) {
+      sendRoutePushInFlightRef.current = true;
       router.push("/send-options");
       return;
     }
@@ -1153,12 +1216,9 @@ export default function HomeScreen() {
 
   const handleCopyReceiveAddress = async () => {
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-    if (!isAvalancheSelected && solanaPayUri) {
-      await Clipboard.setStringAsync(solanaPayUri);
-      showToast('Payment link copied to clipboard');
-    } else if (activeReceiveAddress) {
+    if (activeReceiveAddress) {
       await Clipboard.setStringAsync(activeReceiveAddress);
-      showToast('Address copied to clipboard');
+      showToast('Wallet address copied to clipboard');
     } else {
       showToast('Wallet not found. Connect your wallet first.');
     }
@@ -1297,11 +1357,17 @@ export default function HomeScreen() {
 
   const handleHomeScroll = useAnimatedScrollHandler(
     {
+      onBeginDrag: (event) => {
+        if (isRefreshing) return;
+        pullDragActive.value = true;
+        pullDragStartOffset.value = event.contentOffset.y;
+      },
       onScroll: (event) => {
         const offsetY = event.contentOffset.y;
+        const dragPullDistance = Math.max(0, pullDragStartOffset.value - offsetY);
 
-        if (offsetY < 0 && !isRefreshing) {
-          const nextProgress = Math.min(Math.abs(offsetY) / 80, 1.2);
+        if (pullDragActive.value && dragPullDistance > 0 && !isRefreshing) {
+          const nextProgress = Math.min(dragPullDistance / PULL_REFRESH_DISTANCE, 1.2);
           pullProgress.value = nextProgress;
         } else if (!isRefreshing && !pullRefreshTriggered.value) {
           pullProgress.value = withTiming(0, { duration: 120 });
@@ -1318,6 +1384,7 @@ export default function HomeScreen() {
       },
       onEndDrag: () => {
         if (isRefreshing) return;
+        pullDragActive.value = false;
 
         homeScrollClampTriggered.value = false;
 
@@ -1332,6 +1399,7 @@ export default function HomeScreen() {
       },
       onMomentumBegin: () => {
         if (isRefreshing) return;
+        pullDragActive.value = false;
         if (pullRefreshTriggered.value) return;
         pullProgress.value = withTiming(0, { duration: 140 });
         pullRefreshTriggered.value = false;
@@ -1339,13 +1407,14 @@ export default function HomeScreen() {
       },
       onMomentumEnd: () => {
         if (isRefreshing) return;
+        pullDragActive.value = false;
         if (pullRefreshTriggered.value) return;
         pullProgress.value = withTiming(0, { duration: 160 });
         pullRefreshTriggered.value = false;
         homeScrollClampTriggered.value = false;
       },
     },
-    [homeScrollClampTriggered, isIOS, isRefreshing, lockHomeScrollToTop, pullProgress, pullRefreshTriggered, triggerPullRefresh]
+    [homeScrollClampTriggered, isIOS, isRefreshing, lockHomeScrollToTop, pullDragActive, pullDragStartOffset, pullProgress, pullRefreshTriggered, triggerPullRefresh]
   );
 
   const recentCardContent = (
@@ -1540,7 +1609,12 @@ export default function HomeScreen() {
                 progress={pullProgress}
                 refreshing={isRefreshing}
                 color={pullToRefreshColor}
-                style={styles.pullToRefreshLoader}
+                size={44}
+                strokeWidth={4.5}
+                style={[
+                  styles.pullToRefreshLoader,
+                  { top: isIOS ? topInset + 22 : Math.max(14, topInset + 8) },
+                ]}
               />
               <ReAnimated.ScrollView
                 ref={homeScrollRef}
@@ -1983,43 +2057,49 @@ export default function HomeScreen() {
 
           <View style={styles.receiveOptions}>
             <TouchableOpacity
-              style={styles.receiveOption}
+              style={styles.receiveOptionPressable}
               onPress={() => {
                 Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
                 receiveSheetRef.current?.close();
                 setTimeout(() => fiatReceiveRef.current?.expand(), 150);
               }}
+              activeOpacity={0.78}
             >
-              <View style={styles.receiveOptionLeft}>
-                <View style={styles.receiveIcon}>
-                  <BankIcon size={28} />
+              <GlassView style={styles.receiveOption} intensity={26} interactive>
+                <View style={styles.receiveOptionLeft}>
+                  <View style={styles.receiveIcon}>
+                    <BankIcon size={28} />
+                  </View>
+                  <View>
+                    <Text style={styles.receiveOptionTitle}>Fiat</Text>
+                    <Text style={styles.receiveOptionSubtitle}>Receive assets via US bank account</Text>
+                  </View>
                 </View>
-                <View>
-                  <Text style={styles.receiveOptionTitle}>Fiat</Text>
-                  <Text style={styles.receiveOptionSubtitle}>Receive assets via US bank account</Text>
-                </View>
-              </View>
-              <Text style={styles.receiveChevron}>›</Text>
+                <Text style={styles.receiveChevron}>›</Text>
+              </GlassView>
             </TouchableOpacity>
 
             <TouchableOpacity
-              style={styles.receiveOption}
+              style={styles.receiveOptionPressable}
               onPress={() => {
                 Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
                 receiveSheetRef.current?.close();
                 setTimeout(() => cryptoReceiveRef.current?.expand(), 150);
               }}
+              activeOpacity={0.78}
             >
-              <View style={styles.receiveOptionLeft}>
-                <View style={[styles.receiveIcon, styles.receiveIconCrypto]}>
-                  <CryptoDot size={24} />
+              <GlassView style={styles.receiveOption} intensity={26} interactive>
+                <View style={styles.receiveOptionLeft}>
+                  <View style={[styles.receiveIcon, styles.receiveIconCrypto]}>
+                    <CryptoDot size={24} />
+                  </View>
+                  <View>
+                    <Text style={styles.receiveOptionTitle}>Crypto</Text>
+                    <Text style={styles.receiveOptionSubtitle}>Receive assets via wallet address</Text>
+                  </View>
                 </View>
-                <View>
-                  <Text style={styles.receiveOptionTitle}>Crypto</Text>
-                  <Text style={styles.receiveOptionSubtitle}>Receive assets via wallet address</Text>
-                </View>
-              </View>
-              <Text style={styles.receiveChevron}>›</Text>
+                <Text style={styles.receiveChevron}>›</Text>
+              </GlassView>
             </TouchableOpacity>
           </View>
         </BottomSheetView>
@@ -2090,7 +2170,7 @@ export default function HomeScreen() {
             </TouchableOpacity>
           </View>
 
-          <View style={styles.cryptoQrCard}>
+          <GlassView style={styles.cryptoQrCard} intensity={30} interactive>
             <Animated.View
               style={[
                 styles.cryptoQrFrame,
@@ -2131,7 +2211,7 @@ export default function HomeScreen() {
               const midpoint = Math.ceil(addr.length / 2);
               return `${addr.slice(0, midpoint)}\n${addr.slice(midpoint)}`;
             })()}</Text>
-          </View>
+          </GlassView>
 
           <View style={styles.cryptoBottomSection}>
             {!isAvalancheSelected ? (
@@ -2160,11 +2240,15 @@ export default function HomeScreen() {
               </View>
             ) : null}
 
-            <TouchableOpacity style={styles.cryptoCopyButton} onPress={handleCopyReceiveAddress}>
-              <CopyIcon size={18} color="#111827" />
-              <Text style={styles.cryptoCopyButtonText}>
-                {isAvalancheSelected ? 'Copy address' : 'Copy payment link'}
-              </Text>
+            <TouchableOpacity
+              style={styles.cryptoCopyButtonPressable}
+              onPress={handleCopyReceiveAddress}
+              activeOpacity={0.78}
+            >
+              <GlassView style={styles.cryptoCopyButton} intensity={24} interactive>
+                <CopyIcon size={18} color="#111827" />
+                <Text style={styles.cryptoCopyButtonText}>Copy wallet address</Text>
+              </GlassView>
             </TouchableOpacity>
           </View>
         </BottomSheetView>
@@ -2222,7 +2306,7 @@ export default function HomeScreen() {
             </TouchableOpacity>
           </View>
 
-          <View style={styles.fiatCard}>
+          <GlassView style={styles.fiatCard} intensity={28} interactive>
             <View style={styles.fiatCardHeader}>
               <View style={styles.fiatFlagCircle}>
                 <Text style={styles.fiatFlag}>{fiatCurrency === 'usd' ? '🇺🇸' : '🇪🇺'}</Text>
@@ -2257,7 +2341,7 @@ export default function HomeScreen() {
                 Quick setup through Bridge with standard KYC verification
               </Text>
             </View>
-          </View>
+          </GlassView>
 
           <Text style={styles.fiatFootnote}>Unavailable for NY residents.</Text>
 
@@ -2306,7 +2390,6 @@ const styles = StyleSheet.create({
   },
   pullToRefreshLoader: {
     position: "absolute",
-    top: 10,
     left: 0,
     right: 0,
     zIndex: 24,
@@ -3314,12 +3397,12 @@ const styles = StyleSheet.create({
     color: '#9CA3AF',
   },
   receiveSheetBackground: {
-    backgroundColor: '#ffffff',
+    backgroundColor: 'transparent',
     borderTopLeftRadius: 28,
     borderTopRightRadius: 28,
   },
   receiveSheetIndicator: {
-    backgroundColor: '#E5E7EB',
+    backgroundColor: 'rgba(255,255,255,0.55)',
     width: 40,
     height: 5,
   },
@@ -3363,14 +3446,16 @@ const styles = StyleSheet.create({
   receiveOptions: {
     gap: 12,
   },
+  receiveOptionPressable: {
+    borderRadius: 16,
+  },
   receiveOption: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    backgroundColor: '#F9FAFB',
     borderRadius: 16,
     borderWidth: 1,
-    borderColor: '#E5E7EB',
+    borderColor: 'rgba(255,255,255,0.5)',
     paddingHorizontal: 14,
     paddingVertical: 12,
   },
@@ -3405,12 +3490,12 @@ const styles = StyleSheet.create({
     color: '#9CA3AF',
   },
   cryptoSheetBackground: {
-    backgroundColor: '#ffffff',
+    backgroundColor: 'transparent',
     borderTopLeftRadius: 28,
     borderTopRightRadius: 28,
   },
   cryptoSheetIndicator: {
-    backgroundColor: '#E5E7EB',
+    backgroundColor: 'rgba(255,255,255,0.55)',
     width: 40,
     height: 5,
   },
@@ -3475,12 +3560,12 @@ const styles = StyleSheet.create({
   },
   cryptoQrCard: {
     alignItems: 'center',
-    backgroundColor: '#ffffff',
     borderRadius: 20,
     borderCurve: 'continuous',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.5)',
     paddingVertical: 14,
     paddingHorizontal: 12,
-    boxShadow: '0 6px 10px rgba(0, 0, 0, 0.06)',
     gap: 12,
   },
   cryptoQrFrame: {
@@ -3520,10 +3605,14 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#EFEFF4',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.45)',
     borderRadius: 16,
     paddingVertical: 14,
     gap: 8,
+  },
+  cryptoCopyButtonPressable: {
+    borderRadius: 16,
   },
   cryptoCopyButtonText: {
     fontSize: 16,
@@ -3565,11 +3654,11 @@ const styles = StyleSheet.create({
   },
   fiatCard: {
     width: '100%',
-    backgroundColor: '#ffffff',
     borderRadius: 20,
     borderCurve: 'continuous',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.48)',
     padding: 16,
-    boxShadow: '0 6px 10px rgba(0, 0, 0, 0.04)',
     gap: 12,
   },
   fiatCardHeader: {

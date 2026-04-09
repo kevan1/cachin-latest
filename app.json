@@ -17,12 +17,19 @@
       "supportsTablet": true,
       "bundleIdentifier": "app.cachin",
       "associatedDomains": [
+        "applinks:cachin.app",
+        "applinks:www.cachin.app",
         "applinks:auth.kevan.ar",
         "webcredentials:auth.kevan.ar"
       ],
       "infoPlist": {
         "NSCameraUsageDescription": "Scan QR codes to send and receive payments.",
-        "ITSAppUsesNonExemptEncryption": false
+        "ITSAppUsesNonExemptEncryption": false,
+        "NSAppTransportSecurity": {
+          "NSAllowsArbitraryLoads": true,
+          "NSAllowsArbitraryLoadsInWebContent": true,
+          "NSAllowsLocalNetworking": true
+        }
       },
       "appleTeamId": "G69A563QHR"
     },
@@ -40,6 +47,14 @@
             {
               "scheme": "https",
               "host": "auth.kevan.ar"
+            },
+            {
+              "scheme": "https",
+              "host": "cachin.app"
+            },
+            {
+              "scheme": "https",
+              "host": "www.cachin.app"
             }
           ],
           "category": [
@@ -105,6 +120,31 @@
           "android": {
             "compileSdkVersion": 36
           }
+        }
+      ],
+      [
+        "expo-alternate-app-icons",
+        [
+          {
+            "name": "IconSol",
+            "ios": "./assets/images/icon_sol.png",
+            "android": {
+              "foregroundImage": "./assets/images/icon_sol.png",
+              "backgroundColor": "#ffffff"
+            }
+          }
+        ]
+      ],
+      [
+        "expo-splash-screen",
+        {
+          "backgroundColor": "#ffffff",
+          "image": "./assets/images/splash-icon.png",
+          "dark": {
+            "image": "./assets/images/splash-icon-dark.png",
+            "backgroundColor": "#ffffff"
+          },
+          "imageWidth": 280
         }
       ],
       "expo-font",

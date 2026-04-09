@@ -8,6 +8,7 @@ import { getUsername, clearUsername, Currency, getSelectedCurrency, saveSelected
 import { usePrivy } from '@privy-io/expo';
 import { clearTransactions } from '@/utils/transactionStorage';
 import { clearSponsoredSolanaWallet } from '@/utils/sponsoredWalletStorage';
+import { getAppIconName, setAlternateAppIcon, supportsAlternateIcons } from 'expo-alternate-app-icons';
 import Svg, { Path } from 'react-native-svg';
 
 // Icon components
@@ -84,6 +85,9 @@ function CheckmarkIcon({ size = 24, color = '#10b981' }: { size?: number; color?
   );
 }
 
+type AppIconOption = 'Default' | 'Sol';
+const ICON_SOL_NAME = 'IconSol';
+
 export default function ProfileScreen() {
   const router = useRouter();
   const { logout, user } = usePrivy();
@@ -94,6 +98,8 @@ export default function ProfileScreen() {
   const [updateStatus, setUpdateStatus] = useState('Not checked yet');
   const [lastCheckedAt, setLastCheckedAt] = useState<Date | null>(null);
   const [updateId, setUpdateId] = useState<string | null>(Updates.updateId ?? null);
+  const [appIcon, setAppIcon] = useState<AppIconOption>('Default');
+  const [isUpdatingAppIcon, setIsUpdatingAppIcon] = useState(false);
   const usernameInitial = (username.trim()[0] ?? 'U').toUpperCase();
   const appVersion = Application.nativeApplicationVersion ?? 'dev';
   const buildVersion = Application.nativeBuildVersion ?? 'dev';
@@ -146,6 +152,16 @@ export default function ProfileScreen() {
     loadUsername();
     loadCurrency();
   }, [user]);
+
+  useEffect(() => {
+    if (!supportsAlternateIcons) {
+      setAppIcon('Default');
+      return;
+    }
+
+    const activeIcon = getAppIconName();
+    setAppIcon(activeIcon === ICON_SOL_NAME ? 'Sol' : 'Default');
+  }, []);
   
   // Monitor user state and redirect if logged out
   useEffect(() => {
@@ -243,6 +259,79 @@ export default function ProfileScreen() {
         }))
       );
     }
+  };
+
+  const applyAppIconSelection = async (selection: AppIconOption) => {
+    if (!supportsAlternateIcons) {
+      Alert.alert(
+        'App icon unavailable',
+        'Changing app icon is not supported in this environment. Use a native build.'
+      );
+      return;
+    }
+
+    if (isUpdatingAppIcon) return;
+    if (selection === appIcon) return;
+
+    try {
+      setIsUpdatingAppIcon(true);
+      if (selection === 'Default') {
+        await setAlternateAppIcon(null);
+      } else {
+        await setAlternateAppIcon(ICON_SOL_NAME);
+      }
+      setAppIcon(selection);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to change app icon.';
+      Alert.alert('App icon error', message);
+    } finally {
+      setIsUpdatingAppIcon(false);
+    }
+  };
+
+  const handleAppIconChange = () => {
+    if (!supportsAlternateIcons) {
+      Alert.alert(
+        'App icon unavailable',
+        'Changing app icon is not supported in this environment. Use a native build.'
+      );
+      return;
+    }
+
+    const options: AppIconOption[] = ['Default', 'Sol'];
+
+    if (process.env.EXPO_OS === 'ios') {
+      ActionSheetIOS.showActionSheetWithOptions(
+        {
+          options: [...options, 'Cancel'],
+          cancelButtonIndex: options.length,
+          title: 'Select app icon',
+        },
+        (buttonIndex) => {
+          if (buttonIndex < options.length) {
+            void applyAppIconSelection(options[buttonIndex]);
+          }
+        }
+      );
+      return;
+    }
+
+    Alert.alert(
+      'Select app icon',
+      'Choose your app icon',
+      [
+        ...options.map((option) => ({
+          text: option,
+          onPress: () => {
+            void applyAppIconSelection(option);
+          },
+        })),
+        {
+          text: 'Cancel',
+          style: 'cancel',
+        },
+      ]
+    );
   };
 
   const handleCopyLink = async () => {
@@ -470,13 +559,33 @@ export default function ProfileScreen() {
         </View>
 
         <View style={styles.menuSection}>
+          <TouchableOpacity
+            style={styles.menuItem}
+            onPress={handleAppIconChange}
+            disabled={isUpdatingAppIcon}
+          >
+            <View style={styles.menuLeft}>
+              <Text style={styles.menuText}>App icon</Text>
+            </View>
+            <View style={styles.trailingValueRow}>
+              <Text style={styles.trailingValueText}>{appIcon}</Text>
+              {isUpdatingAppIcon ? (
+                <ActivityIndicator color="#000000" />
+              ) : (
+                <Text style={styles.chevron}>›</Text>
+              )}
+            </View>
+          </TouchableOpacity>
+
+          <View style={styles.divider} />
+
           <TouchableOpacity style={styles.menuItem} onPress={handleCurrencyChange}>
             <View style={styles.menuLeft}>
               <CurrencyIcon size={24} color="#000" />
               <Text style={styles.menuText}>Currency</Text>
             </View>
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-              <Text style={{ fontSize: 16, color: '#666' }}>{currency}</Text>
+            <View style={styles.trailingValueRow}>
+              <Text style={styles.trailingValueText}>{currency}</Text>
               <Text style={styles.chevron}>›</Text>
             </View>
           </TouchableOpacity>
@@ -623,6 +732,16 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     maxWidth: '48%',
     textAlign: 'right',
+  },
+  trailingValueRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  trailingValueText: {
+    fontSize: 16,
+    color: '#666666',
+    fontWeight: '600',
   },
   chevron: {
     fontSize: 28,

@@ -10,9 +10,26 @@ import {
   ScrollView,
 } from 'react-native';
 import { useRouter, useLocalSearchParams } from 'expo-router';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 import { Colors } from '@/constants/theme';
+import { GlassView } from '@/components/ui/GlassView';
+import { fetchArsPrice } from '@/utils/priceService';
+import { getSelectedCurrency, type Currency } from '@/utils/userStorage';
+
+const DEFAULT_ARS_RATE = 1500;
+
+function formatMoneyValue(value: number, currency: 'USD' | 'ARS'): string {
+  if (!Number.isFinite(value) || value <= 0) {
+    return currency === 'ARS' ? 'ARS$0.00' : '$0.00';
+  }
+
+  const formatted = value.toLocaleString('en-US', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
+  return currency === 'ARS' ? `ARS$${formatted}` : `$${formatted}`;
+}
 
 export default function WithdrawCryptoScreen() {
   const router = useRouter();
@@ -20,8 +37,55 @@ export default function WithdrawCryptoScreen() {
   const { amount, currency } = params;
   const colorScheme = useColorScheme() ?? 'light';
   const palette = Colors[colorScheme];
+  const amountParam = Array.isArray(amount) ? amount[0] : amount;
+  const currencyParam = Array.isArray(currency) ? currency[0] : currency;
+  const parsedAmount = Number.parseFloat(amountParam ?? '0');
 
   const [address, setAddress] = useState('');
+  const [preferredCurrency, setPreferredCurrency] = useState<Currency>('USD');
+  const [arsRate, setArsRate] = useState(DEFAULT_ARS_RATE);
+
+  const amountUsdValue =
+    Number.isFinite(parsedAmount) && parsedAmount > 0
+      ? currencyParam === 'ARS'
+        ? parsedAmount / Math.max(arsRate, 1)
+        : parsedAmount
+      : 0;
+  const primaryFiatCurrency: 'USD' | 'ARS' = preferredCurrency === 'ARS' ? 'ARS' : 'USD';
+  const secondaryFiatCurrency: 'USD' | 'ARS' =
+    primaryFiatCurrency === 'ARS' ? 'USD' : 'ARS';
+  const primaryFiatValue =
+    primaryFiatCurrency === 'ARS' ? amountUsdValue * arsRate : amountUsdValue;
+  const secondaryFiatValue =
+    secondaryFiatCurrency === 'ARS' ? amountUsdValue * arsRate : amountUsdValue;
+  const primaryAmountLabel = formatMoneyValue(primaryFiatValue, primaryFiatCurrency);
+  const secondaryAmountLabel = formatMoneyValue(secondaryFiatValue, secondaryFiatCurrency);
+
+  useEffect(() => {
+    let isMounted = true;
+
+    const loadMoneyPreferences = async () => {
+      try {
+        const [selectedCurrency, latestArsRate] = await Promise.all([
+          getSelectedCurrency(),
+          fetchArsPrice(),
+        ]);
+        if (!isMounted) return;
+
+        setPreferredCurrency(selectedCurrency);
+        if (latestArsRate > 0) {
+          setArsRate(latestArsRate);
+        }
+      } catch (error) {
+        console.error('[withdraw-crypto] Failed to load money preferences', error);
+      }
+    };
+
+    void loadMoneyPreferences();
+    return () => {
+      isMounted = false;
+    };
+  }, []);
 
   const handleBack = () => {
     router.back();
@@ -42,37 +106,77 @@ export default function WithdrawCryptoScreen() {
   return (
     <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
       <ScrollView
-        style={[styles.container, { backgroundColor: palette.background }]}
+        contentInsetAdjustmentBehavior="automatic"
+        style={[styles.container, { backgroundColor: 'transparent' }]}
         contentContainerStyle={styles.containerContent}
         showsVerticalScrollIndicator={false}
       >
         {/* Header */}
         <View style={styles.header}>
           <TouchableOpacity
-            style={[styles.iconButton, { backgroundColor: palette.surfaceMuted, borderColor: palette.borderSubtle }]}
+            style={styles.iconButtonPressable}
             onPress={handleBack}
+            activeOpacity={0.78}
           >
-            <MaterialIcons name="arrow-back" size={20} color={palette.primaryText} />
+            <GlassView
+              style={[
+                styles.iconButton,
+                {
+                  borderColor:
+                    colorScheme === 'dark' ? 'rgba(255,255,255,0.2)' : 'rgba(255,255,255,0.5)',
+                },
+              ]}
+              intensity={26}
+              interactive
+            >
+              <MaterialIcons name="arrow-back" size={20} color={palette.primaryText} />
+            </GlassView>
           </TouchableOpacity>
           <Text style={[styles.headerTitle, { color: palette.primaryText }]}>Withdraw</Text>
           <View style={styles.headerSpacer} />
         </View>
 
         {/* Summary Card */}
-        <View style={[styles.summaryCard, { backgroundColor: palette.surface, borderColor: palette.borderSubtle }]}>
-          <View style={[styles.iconCircle, { backgroundColor: palette.surfaceMuted }]}>
+        <GlassView
+          style={[
+            styles.summaryCard,
+            {
+              borderColor:
+                colorScheme === 'dark' ? 'rgba(255,255,255,0.16)' : 'rgba(255,255,255,0.52)',
+            },
+          ]}
+          intensity={30}
+          interactive
+        >
+          <GlassView style={styles.iconCircle} intensity={24} interactive>
             <MaterialIcons name="account-balance-wallet" size={24} color={palette.primaryText} />
-          </View>
+          </GlassView>
           <View>
             <Text style={[styles.summaryLabel, { color: palette.secondaryText }]}>↑ You&apos;re withdrawing</Text>
             <Text style={[styles.summaryAmount, { color: palette.primaryText }]}>
-              {currency === 'USD' ? '$' : 'ARS$'} {amount}
+              {primaryAmountLabel}
+            </Text>
+            <Text style={[styles.summarySecondary, { color: palette.secondaryText }]}>
+              {secondaryAmountLabel}
+            </Text>
+            <Text style={[styles.summaryAssetAmount, { color: palette.secondaryText }]}>
+              USDC {amountUsdValue.toFixed(2)}
             </Text>
           </View>
-        </View>
+        </GlassView>
 
         {/* Network Selection */}
-        <View style={[styles.inputGroup, { backgroundColor: palette.surface, borderColor: palette.borderSubtle }]}>
+        <GlassView
+          style={[
+            styles.inputGroup,
+            {
+              borderColor:
+                colorScheme === 'dark' ? 'rgba(255,255,255,0.16)' : 'rgba(255,255,255,0.52)',
+            },
+          ]}
+          intensity={30}
+          interactive
+        >
           <View style={styles.inputHeader}>
             <MaterialIcons name="public" size={20} color={palette.secondaryText} />
             <Text style={[styles.inputLabel, { color: palette.primaryText }]}>Token and network</Text>
@@ -84,12 +188,23 @@ export default function WithdrawCryptoScreen() {
              </Text>
           </View>
            <Text style={[styles.helperText, { color: palette.secondaryText }]}>No fees with this token.</Text>
-        </View>
+        </GlassView>
 
         {/* Address Input */}
-        <View style={[styles.inputGroup, { backgroundColor: palette.surface, borderColor: palette.borderSubtle, marginTop: 16 }]}>
-           <Text style={[styles.inputLabel, { color: palette.primaryText, marginBottom: 8 }]}>Wallet address</Text>
-           <TextInput
+        <GlassView
+          style={[
+            styles.inputGroup,
+            styles.addressGroup,
+            {
+              borderColor:
+                colorScheme === 'dark' ? 'rgba(255,255,255,0.16)' : 'rgba(255,255,255,0.52)',
+            },
+          ]}
+          intensity={30}
+          interactive
+        >
+          <Text style={[styles.inputLabel, { color: palette.primaryText, marginBottom: 8 }]}>Wallet address</Text>
+          <TextInput
             style={[styles.input, { color: palette.primaryText, borderColor: palette.borderSubtle }]}
             placeholder="Enter an address or SNS"
             placeholderTextColor={palette.secondaryText}
@@ -97,7 +212,7 @@ export default function WithdrawCryptoScreen() {
             onChangeText={setAddress}
             autoCapitalize="none"
           />
-        </View>
+        </GlassView>
 
         {/* Review Button */}
         <View style={styles.footer}>
@@ -140,6 +255,9 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     borderWidth: 1,
   },
+  iconButtonPressable: {
+    borderRadius: 20,
+  },
   headerTitle: {
     fontSize: 18,
     fontWeight: '600',
@@ -171,10 +289,22 @@ const styles = StyleSheet.create({
     fontSize: 24,
     fontWeight: '700',
   },
+  summarySecondary: {
+    fontSize: 15,
+    fontWeight: '600',
+    marginTop: 2,
+  },
+  summaryAssetAmount: {
+    fontSize: 12,
+    marginTop: 2,
+  },
   inputGroup: {
     borderRadius: 16,
     borderWidth: 1,
     padding: 16,
+  },
+  addressGroup: {
+    marginTop: 16,
   },
   inputHeader: {
     flexDirection: 'row',

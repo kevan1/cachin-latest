@@ -15,6 +15,8 @@ import Animated, {
   interpolate,
   useAnimatedStyle,
 } from "react-native-reanimated";
+import { Confetti } from "react-native-fast-confetti";
+import { useImage } from "@shopify/react-native-skia";
 import { useRouter, useLocalSearchParams, useFocusEffect } from "expo-router";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Connection, PublicKey, Transaction } from "@solana/web3.js";
@@ -54,7 +56,8 @@ import { getSolanaRpcUrl } from "@/utils/solanaRpc";
 import { formatTokenUnits, parseDecimalToUnits } from "@/utils/tokenAmount";
 import { Colors } from "@/constants/theme";
 import { ChinPopoutOverlay, useChinPopout } from "@/components/ChinPopout";
-import { formatAmount } from "@/utils/formatAmount";
+import { fetchArsPrice } from "@/utils/priceService";
+import { getSelectedCurrency, Currency } from "@/utils/userStorage";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import {
   getSolanaCaip2,
@@ -82,7 +85,7 @@ import {
 
 const USDC_MINT_ADDRESS = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
 const USDC_DECIMALS = 6;
-const FX_RATE = 0.86;
+const DEFAULT_ARS_RATE = 1500;
 const DUMMY_BLOCKHASH = "11111111111111111111111111111111";
 const ERC20_TRANSFER_ABI = [
   {
@@ -126,6 +129,19 @@ function getErrorMessage(error: unknown, fallback: string): string {
   return fallback;
 }
 
+function formatMoneyValue(value: number, currency: "USD" | "ARS"): string {
+  if (!Number.isFinite(value) || value <= 0) {
+    return currency === "ARS" ? "ARS$0.00" : "$0.00";
+  }
+
+  const formatted = value.toLocaleString("en-US", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
+
+  return currency === "ARS" ? `ARS$${formatted}` : `$${formatted}`;
+}
+
 export default function SendConfirmScreen() {
   const router = useRouter();
   const params = useLocalSearchParams();
@@ -155,12 +171,7 @@ export default function SendConfirmScreen() {
           trimTrailingZeros: true,
         })
       : amountString;
-
-  const amountNumber = Number(amountDisplay);
-  const equivalentValue =
-    Number.isFinite(amountNumber) && amountNumber > 0
-      ? formatAmount(amountNumber * FX_RATE, { maxFractionDigits: 2 })
-      : "0.00";
+  const amountValueUsd = Number.parseFloat(amountDisplay);
 
   const recipientDisplay = recipientName
     ? !isAvalancheTransfer && isValidSolanaAddress(recipientName)
@@ -175,6 +186,8 @@ export default function SendConfirmScreen() {
   const [isSending, setIsSending] = useState(false);
   const [transactionSent, setTransactionSent] = useState(false);
   const [lastTransactionId, setLastTransactionId] = useState<string | null>(null);
+  const [preferredCurrency, setPreferredCurrency] = useState<Currency>("USD");
+  const [arsRate, setArsRate] = useState(DEFAULT_ARS_RATE);
   const [avalancheWalletSource, setAvalancheWalletSource] =
     useState<AvalancheWalletSource>("privy");
   const [satochipAvalancheAddress, setSatochipAvalancheAddress] = useState<string | null>(null);
@@ -205,6 +218,22 @@ export default function SendConfirmScreen() {
       : avalancheWallet?.address ?? ""
     : sponsoredWalletAddress ?? wallet?.publicKey ?? "";
   const walletDisplay = walletAddress ? formatAddress(walletAddress) : "Not connected";
+  const primaryFiatCurrency = preferredCurrency === "ARS" ? "ARS" : "USD";
+  const secondaryFiatCurrency = primaryFiatCurrency === "ARS" ? "USD" : "ARS";
+  const primaryFiatValue =
+    Number.isFinite(amountValueUsd) && amountValueUsd > 0
+      ? primaryFiatCurrency === "ARS"
+        ? amountValueUsd * arsRate
+        : amountValueUsd
+      : 0;
+  const secondaryFiatValue =
+    Number.isFinite(amountValueUsd) && amountValueUsd > 0
+      ? secondaryFiatCurrency === "ARS"
+        ? amountValueUsd * arsRate
+        : amountValueUsd
+      : 0;
+  const primaryAmountLabel = formatMoneyValue(primaryFiatValue, primaryFiatCurrency);
+  const secondaryAmountLabel = formatMoneyValue(secondaryFiatValue, secondaryFiatCurrency);
   const keyQuorumId = useMemo(() => getPrivyGaslessKeyQuorumId(), []);
   const sessionSignerPolicyIds = useMemo(() => getPrivyGasSponsorPolicyIds(), []);
 
@@ -287,6 +316,34 @@ export default function SendConfirmScreen() {
         isActive = false;
       };
     }, [isAvalancheTransfer, params.walletSource])
+  );
+
+  useFocusEffect(
+    useCallback(() => {
+      let isActive = true;
+
+      const loadMoneyPreferences = async () => {
+        try {
+          const [selectedCurrency, latestArsRate] = await Promise.all([
+            getSelectedCurrency(),
+            fetchArsPrice(),
+          ]);
+
+          if (!isActive) return;
+          setPreferredCurrency(selectedCurrency);
+          if (latestArsRate > 0) {
+            setArsRate(latestArsRate);
+          }
+        } catch (error) {
+          console.error("[SendConfirm] Failed to load money preferences", error);
+        }
+      };
+
+      void loadMoneyPreferences();
+      return () => {
+        isActive = false;
+      };
+    }, [])
   );
 
   const handleClose = useCallback(() => {
@@ -686,11 +743,9 @@ export default function SendConfirmScreen() {
   const chinLabel = useMemo(() => {
     if (!amountDisplay) return "Swipe to send";
     return isSatochipTransfer
-      ? `Swipe to sign ${amountDisplay} ${assetSymbol} with Satochip`
-      : isAvalancheTransfer
-      ? `Swipe to send $${amountDisplay} ${assetSymbol}`
-      : `Swipe to send $${amountDisplay}`;
-  }, [amountDisplay, assetSymbol, isAvalancheTransfer, isSatochipTransfer]);
+      ? `Swipe to sign ${primaryAmountLabel} with Satochip`
+      : `Swipe to send ${primaryAmountLabel}`;
+  }, [amountDisplay, isSatochipTransfer, primaryAmountLabel]);
 
   const handleSendPress = useCallback(() => {
     if (isSending) return;
@@ -711,6 +766,7 @@ export default function SendConfirmScreen() {
   const chinLift = 108;
   const footerHeightClosed = 132;
   const footerHeightOpen = 72;
+  const moneyStackImage = useImage(require("../assets/images/money-stack.png"));
   const interfaceStyle = useAnimatedStyle(() => ({
     marginBottom: interpolate(progress.value, [0, 1], [0, chinLift]),
   }));
@@ -785,6 +841,19 @@ export default function SendConfirmScreen() {
           interfaceStyle,
         ]}
       >
+        {transactionSent && moneyStackImage ? (
+          <View pointerEvents="none" style={styles.confettiLayer}>
+            <Confetti
+              type="image"
+              flakeImage={moneyStackImage}
+              count={90}
+              flakeSize={{ width: 28, height: 18 }}
+              autoStartDelay={120}
+              fallDuration={6800}
+              fadeOutOnEnd
+            />
+          </View>
+        ) : null}
         <ScrollView
           contentInsetAdjustmentBehavior="automatic"
           style={styles.scrollArea}
@@ -797,9 +866,9 @@ export default function SendConfirmScreen() {
                 : (isOpen ? footerHeightOpen : footerHeightClosed) + 16,
             },
           ]}
-          scrollEnabled={!transactionSent}
-          bounces={!transactionSent}
-          alwaysBounceVertical={!transactionSent}
+          scrollEnabled={false}
+          bounces={false}
+          alwaysBounceVertical={false}
           showsVerticalScrollIndicator={false}
         >
           {transactionSent ? (
@@ -839,10 +908,11 @@ export default function SendConfirmScreen() {
                   entering={FadeIn.delay(400).duration(500)}
                   style={[styles.successAmount, { color: palette.primaryText }]}
                 >
-                  {isAvalancheTransfer
-                    ? `$${amountDisplay} ${assetSymbol}`
-                    : `$${amountDisplay} ${assetSymbol}`}
+                  {primaryAmountLabel}
                 </Animated.Text>
+                <Text style={[styles.successAmountSecondary, { color: palette.secondaryText }]}>
+                  {secondaryAmountLabel}
+                </Text>
 
                 <View
                   style={[
@@ -962,10 +1032,13 @@ export default function SendConfirmScreen() {
                   </Text>
                 </View>
                 <Text style={[styles.amountText, { color: palette.primaryText }]}>
-                  {isAvalancheTransfer ? `$${amountDisplay} ${assetSymbol}` : `$${amountDisplay}`}
+                  {primaryAmountLabel}
                 </Text>
                 <Text style={[styles.equivalentText, { color: palette.secondaryText }]}>
-                  {isAvalancheTransfer ? "Fuji USDC" : `~${equivalentValue}`}
+                  {secondaryAmountLabel}
+                </Text>
+                <Text style={[styles.assetAmountText, { color: palette.secondaryText }]}>
+                  {assetSymbol} {amountDisplay}
                 </Text>
               </View>
 
@@ -1116,6 +1189,10 @@ const styles = StyleSheet.create({
     backgroundColor: "#ffffff",
     overflow: "hidden",
   },
+  confettiLayer: {
+    ...StyleSheet.absoluteFillObject,
+    zIndex: 8,
+  },
   scrollArea: {
     flex: 1,
     backgroundColor: "transparent",
@@ -1190,9 +1267,15 @@ const styles = StyleSheet.create({
     fontSize: 36,
     fontWeight: "600",
     marginBottom: 6,
+    textAlign: "center",
   },
   equivalentText: {
     fontSize: 13,
+    marginTop: 2,
+  },
+  assetAmountText: {
+    fontSize: 12,
+    marginTop: 4,
   },
   metaRow: {
     flexDirection: "row",
@@ -1296,6 +1379,12 @@ const styles = StyleSheet.create({
     fontSize: 36,
     fontWeight: "700",
     marginBottom: 6,
+    textAlign: "center",
+  },
+  successAmountSecondary: {
+    fontSize: 16,
+    fontWeight: "600",
+    marginTop: -6,
   },
   successDetailCard: {
     marginTop: 18,
