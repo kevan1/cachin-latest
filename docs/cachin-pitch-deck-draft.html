@@ -1,0 +1,186 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Cachin — Pitch Deck V2</title>
+  <style>
+    :root { --bg:#07111f; --alt:#0e1a2d; --card:#13213a; --line:rgba(255,255,255,.13); --text:#f8fafc; --muted:rgba(248,250,252,.68); --green:#14f195; --blue:#60a5fa; --sun:#f59e0b; --font:Inter,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; }
+    * { box-sizing:border-box; }
+    body { margin:0; background:var(--bg); color:var(--text); font-family:var(--font); overflow:hidden; }
+    .deck { width:100vw; height:100vh; position:relative; }
+    .slide { position:absolute; inset:0; padding:70px 88px; display:none; flex-direction:column; justify-content:center; background:var(--bg); }
+    .slide.active { display:flex; }
+    .eyebrow { color:var(--green); text-transform:uppercase; letter-spacing:.16em; font-weight:900; font-size:16px; }
+    h1 { font-size:86px; line-height:.98; letter-spacing:-.055em; margin:16px 0 24px; max-width:1040px; }
+    h2 { font-size:54px; line-height:1.06; letter-spacing:-.04em; margin:14px 0 24px; max-width:1060px; }
+    h3 { font-size:27px; margin:0 0 8px; }
+    p, li { font-size:25px; line-height:1.42; color:var(--muted); }
+    ul { margin:0; padding-left:28px; }
+    .sub { max-width:880px; }
+    .grid3 { display:grid; grid-template-columns:repeat(3,1fr); gap:18px; margin-top:24px; }
+    .grid2 { display:grid; grid-template-columns:repeat(2,1fr); gap:22px; margin-top:24px; }
+    .card { background:var(--card); border:1px solid var(--line); border-radius:18px; padding:22px; }
+    .metric { font-size:54px; color:var(--green); font-weight:950; letter-spacing:-.05em; }
+    .pill { display:inline-block; padding:8px 14px; border-radius:999px; background:rgba(96,165,250,.16); color:#bfdbfe; font-size:16px; font-weight:900; margin-right:8px; }
+    .diagram { display:flex; gap:14px; align-items:center; margin-top:30px; }
+    .node { flex:1; text-align:center; padding:22px 12px; border-radius:16px; background:var(--card); border:1px solid var(--line); font-size:21px; font-weight:900; }
+    .arrow { color:var(--green); font-size:32px; }
+    table { width:100%; border-collapse:collapse; font-size:20px; }
+    th,td { border:1px solid var(--line); padding:12px; text-align:left; color:var(--muted); vertical-align:top; }
+    th { color:var(--text); background:rgba(255,255,255,.06); }
+    .footer { position:absolute; left:88px; right:88px; bottom:28px; display:flex; justify-content:space-between; color:rgba(248,250,252,.38); font-size:14px; }
+    .notes { display:none; position:absolute; left:88px; right:88px; bottom:64px; padding:16px; border:1px solid var(--line); border-radius:14px; background:#050b15; color:var(--muted); font-size:18px; line-height:1.5; }
+    body.show-notes .slide.active .notes { display:block; }
+    @media print { body{overflow:visible;} .deck{height:auto;} .slide{position:relative; display:flex; min-height:100vh; page-break-after:always;} .footer{display:none;} }
+  </style>
+</head>
+<body>
+<div class="deck">
+  <section class="slide active">
+    <span class="eyebrow">Cachin</span>
+    <h1>Spend more effortlessly across LATAM.</h1>
+    <p class="sub">Fund globally. Scan supported local QRs across LATAM. Pay like a local. MVP starts in Argentina. Built from LATAM for the world.</p>
+    <div><span class="pill">LATAM Payments</span><span class="pill">QR + POS</span><span class="pill">Seeker-ready</span></div>
+    <div class="notes">Opening line: "Cachin lets travelers and crypto-paid workers pay like locals across LATAM while merchants get lower fees and faster settlement."</div>
+    <div class="footer"><span>1 / 11</span><span>Press arrows. Press N for notes.</span></div>
+  </section>
+
+  <section class="slide">
+    <span class="eyebrow">Problem</span>
+    <h2>LATAM is QR-first. Foreign money is not.</h2>
+    <ul>
+      <li>Tourists and foreigners cannot easily use local QR apps.</li>
+      <li>Freelancers get paid in crypto but spend locally.</li>
+      <li>Merchants show Mercado Pago, MODO, or other local QRs. Foreigners get stuck.</li>
+    </ul>
+    <div class="notes">Make it concrete: a traveler has dollars/euros/crypto; the merchant wants QR or local settlement.</div>
+    <div class="footer"><span>2 / 11</span><span>Cachin</span></div>
+  </section>
+
+  <section class="slide">
+    <span class="eyebrow">Agitate</span>
+    <h2>Cards are expensive for merchants. Cash is painful for travelers.</h2>
+    <div class="grid3">
+      <div class="card"><div class="metric">3-7%</div><p>Founder-stated card fee range for local merchants.</p></div>
+      <div class="card"><div class="metric">15-30d</div><p>Founder-stated card settlement delay without paying more.</p></div>
+      <div class="card"><div class="metric">1470 &gt; 1365</div><p>Founder-stated Argentina example: crypto dollar vs card dollar.</p></div>
+    </div>
+    <div class="notes">These are founder-provided numbers. Before final submission, attach dated proof/screenshots and phrase as example, not universal claim.</div>
+    <div class="footer"><span>3 / 11</span><span>Cachin</span></div>
+  </section>
+
+  <section class="slide">
+    <span class="eyebrow">Solution</span>
+    <h2>Cachin turns global funding into local QR payments.</h2>
+    <div class="diagram">
+      <div class="node">Fund with crypto, card, SWIFT, or IBAN</div><div class="arrow">→</div>
+      <div class="node">Scan local LATAM QR rails; demo starts with Mercado Pago, MODO, or Cachin QR</div><div class="arrow">→</div>
+      <div class="node">Confirm FX, fees, total</div><div class="arrow">→</div>
+      <div class="node">Pay like a local</div>
+    </div>
+    <div class="notes">Keep it simple: fund globally, scan locally, done.</div>
+    <div class="footer"><span>4 / 11</span><span>Cachin</span></div>
+  </section>
+
+  <section class="slide">
+    <span class="eyebrow">Who it serves</span>
+    <h2>One network, two sides.</h2>
+    <div class="grid2">
+      <div class="card"><h3>Core users</h3><p>Tourists and foreigners first, then digital nomads, freelancers paid in crypto, Seeker users, and regular consumers who never need to see the crypto rails.</p></div>
+      <div class="card"><h3>Merchant upgrade</h3><p>Merchants do not need to onboard for basic QR payments. If they do, they unlock lower fees, instant settlement, discounts, POS tools, and direct confirmation.</p></div>
+    </div>
+    <div class="notes">This is the biggest upgrade from V1: Cachin is a two-sided payment network, not just a wallet.</div>
+    <div class="footer"><span>5 / 11</span><span>Cachin</span></div>
+  </section>
+
+  <section class="slide">
+    <span class="eyebrow">Product</span>
+    <h2>Scan, pay, done.</h2>
+    <div class="grid3">
+      <div class="card"><h3>LATAM QR app</h3><p>iOS, Android, Seeker-ready direction, Sumsub KYC, local QR scan, FX/fee confirmation, receipt.</p></div>
+      <div class="card"><h3>Trust layer</h3><p>Pre-payment confirmation, merchant/user confirmation where available, and Crisp 1:1 support.</p></div>
+      <div class="card"><h3>Merchant upgrade</h3><p>Optional Cachin POS/direct merchant flow for lower fees, instant settlement, discounts, and direct confirmation.</p></div>
+    </div>
+    <div class="notes">Replace with real screenshots/video. First proof should be the LATAM QR payment flow demonstrated in Argentina. POS/card proof is secondary; card is separate product line.</div>
+    <div class="footer"><span>6 / 11</span><span>Cachin</span></div>
+  </section>
+
+  <section class="slide">
+    <span class="eyebrow">Why crypto</span>
+    <h2>Crypto stays behind the curtain.</h2>
+    <ul>
+      <li>Users get global funding and local spending.</li>
+      <li>Freelancers spend crypto income without cash-out loops.</li>
+      <li>Tourists scan local QRs without needing a local bank account.</li>
+      <li>Onboarded merchants get better economics than card rails.</li>
+      <li>Regular consumers are onboarded into crypto without needing to understand it.</li>
+    </ul>
+    <div class="notes">Do not lead with chains. Lead with outcomes. Mention Solana/Seeker as infra and distribution.</div>
+    <div class="footer"><span>7 / 11</span><span>Cachin</span></div>
+  </section>
+
+  <section class="slide">
+    <span class="eyebrow">Distribution</span>
+    <h2>Built from LATAM for the world.</h2>
+    <div class="grid2">
+      <div class="card"><h3>Founder edge</h3><p>Solo Argentine founder, SMB holder, solxAR member, Superteam Germany member. Local market pain is lived, not abstract.</p></div>
+      <div class="card"><h3>Support edge</h3><p>Crisp 1:1 support gives tourists a human fallback when payments are pending, failed, or confusing.</p></div>
+      <div class="card"><h3>Seeker edge</h3><p>Seeker users traveling to LATAM become a natural Solana-native first audience.</p></div>
+      <div class="card"><h3>Rail edge</h3><p>Manteca is the preferred demo/provider path; P2P.me is the backup rail. Exact coverage/pricing proof pending.</p></div>
+    </div>
+    <div class="notes">Say: "Cachin is built from LATAM for the world." Attach proof to every founder-provided claim before final submission.</div>
+    <div class="footer"><span>8 / 11</span><span>Cachin</span></div>
+  </section>
+
+  <section class="slide">
+    <span class="eyebrow">Competition</span>
+    <h2>CacaoCash validates the problem. Cachin must out-demo them.</h2>
+    <table>
+      <tr><th>Player</th><th>Strength</th><th>Cachin angle</th></tr>
+      <tr><td>CacaoCash</td><td>Public LATAM QR traveler wallet narrative.</td><td>Show LATAM QR scope, Argentina MVP demo, local founder execution, Sumsub KYC path, support, and merchant upgrade layer.</td></tr>
+      <tr><td>Lemon / Belo</td><td>Crypto fintech trust and cards.</td><td>Tourist-first local QR utility and crypto abstraction.</td></tr>
+      <tr><td>Visa / cards</td><td>Global acceptance.</td><td>Better FX/local QR utility for users; merchant economics only when merchant onboards.</td></tr>
+    </table>
+    <div class="notes">Do not accuse CacaoCash of copying in public materials. Acknowledge them, then win on local authenticity and proof.</div>
+    <div class="footer"><span>9 / 11</span><span>Cachin</span></div>
+  </section>
+
+  <section class="slide">
+    <span class="eyebrow">Roadmap / Moat</span>
+    <h2>From LATAM QR payments to merchant upgrade rails.</h2>
+    <div class="grid3">
+      <div class="card"><h3>Now</h3><p>LATAM QR flow demonstrated through the Argentina MVP for tourists and foreigners.</p></div>
+      <div class="card"><h3>Next</h3><p>Merchant onboarding, instant settlement, discounts, POS, private rails, and support/refund proof.</p></div>
+      <div class="card"><h3>Separate</h3><p>Self-custodial cold-wallet/Visa card as its own white-label product line with Cachin as first wallet integration.</p></div>
+    </div>
+    <div class="notes">This is where the card/cold-wallet story belongs: a defensibility and expansion slide.</div>
+    <div class="footer"><span>10 / 11</span><span>Cachin</span></div>
+  </section>
+
+  <section class="slide">
+    <span class="eyebrow">Ask / proof</span>
+    <h2>What Cachin needs next</h2>
+    <ul>
+      <li>Finalize hackathon track: Payments / Consumer / Stablecoins / Visa side-track.</li>
+      <li>Package proof in docs/proof: supported local QR demo, Sumsub KYC, Crisp support, merchant upgrade, POS, Seeker, Manteca, P2P.me.</li>
+      <li>Keep Manteca live after the one-day trial or switch demo to P2P.me where supported.</li>
+      <li>Scale pilot merchants across LATAM corridors.</li>
+      <li>Turn Seeker users into first travel-payment community.</li>
+    </ul>
+    <div class="notes">Final ask should be concrete: prize/track, introductions, pilot merchants, provider support, or funding. Current exact ask is TBD.</div>
+    <div class="footer"><span>11 / 11</span><span>Cachin</span></div>
+  </section>
+</div>
+<script>
+  const slides = [...document.querySelectorAll('.slide')];
+  let i = 0;
+  function show(n){ slides[i].classList.remove('active'); i = Math.max(0, Math.min(slides.length - 1, n)); slides[i].classList.add('active'); }
+  addEventListener('keydown', e => {
+    if (e.key === 'ArrowRight' || e.key === ' ') show(i + 1);
+    if (e.key === 'ArrowLeft') show(i - 1);
+    if (e.key.toLowerCase() === 'n') document.body.classList.toggle('show-notes');
+  });
+</script>
+</body>
+</html>

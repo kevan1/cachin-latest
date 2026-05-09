@@ -1,4 +1,16 @@
-import { doc, getDoc, setDoc, updateDoc, serverTimestamp, collection, query, where, getDocs } from 'firebase/firestore';
+import {
+  doc,
+  getDoc,
+  setDoc,
+  updateDoc,
+  serverTimestamp,
+  collection,
+  query,
+  where,
+  getDocs,
+  orderBy,
+  limit,
+} from 'firebase/firestore';
 import { db } from '@/config/firebase';
 
 // Collection name
@@ -8,15 +20,67 @@ function normalizeUsername(username: string): string {
   return username.trim().toLowerCase();
 }
 
+function normalizeSolanaAddress(solanaAddress: string): string {
+  return solanaAddress.trim();
+}
+
 // User data interface
 export interface UserData {
   username: string;
   solanaAddress: string;
   createdAt?: any;
   updatedAt?: any;
+  identityVerification?: {
+    status?: 'verified' | 'pending' | 'unverified';
+    provider?: string;
+    verifiedAt?: number;
+    lastEventAt?: number;
+    isSandbox?: boolean;
+  };
   settings?: {
     showFullName?: boolean;
     notifications?: boolean;
+  };
+}
+
+async function findUserDocumentBySolanaAddress(solanaAddress: string): Promise<{
+  ref: ReturnType<typeof doc>;
+  data: UserData | null;
+  exists: boolean;
+}> {
+  const normalizedAddress = normalizeSolanaAddress(solanaAddress);
+  const directRef = doc(db, USERS_COLLECTION, normalizedAddress);
+  const directSnap = await getDoc(directRef);
+
+  if (directSnap.exists()) {
+    return {
+      ref: directRef,
+      data: directSnap.data() as UserData,
+      exists: true,
+    };
+  }
+
+  const usersRef = collection(db, USERS_COLLECTION);
+  const fallbackQuery = query(
+    usersRef,
+    where('solanaAddress', '==', normalizedAddress),
+    limit(1)
+  );
+  const fallbackSnapshot = await getDocs(fallbackQuery);
+
+  if (!fallbackSnapshot.empty) {
+    const legacyDoc = fallbackSnapshot.docs[0];
+    return {
+      ref: legacyDoc.ref,
+      data: legacyDoc.data() as UserData,
+      exists: true,
+    };
+  }
+
+  return {
+    ref: directRef,
+    data: null,
+    exists: false,
   };
 }
 
@@ -29,28 +93,31 @@ export async function saveUserToFirestore(
   userData: Partial<UserData>
 ): Promise<void> {
   try {
+    const normalizedAddress = normalizeSolanaAddress(solanaAddress);
     const normalizedUserData = userData.username
       ? { ...userData, username: normalizeUsername(userData.username) }
       : userData;
-    const userRef = doc(db, USERS_COLLECTION, solanaAddress);
-    const docSnap = await getDoc(userRef);
+    const { ref: userRef, exists } = await findUserDocumentBySolanaAddress(
+      normalizedAddress
+    );
 
-    if (docSnap.exists()) {
+    if (exists) {
       // Update existing user
       await updateDoc(userRef, {
         ...normalizedUserData,
+        solanaAddress: normalizedAddress,
         updatedAt: serverTimestamp(),
       });
-      console.log('[Firestore] User updated:', solanaAddress);
+      console.log('[Firestore] User updated:', normalizedAddress);
     } else {
       // Create new user
       await setDoc(userRef, {
         ...normalizedUserData,
-        solanaAddress,
+        solanaAddress: normalizedAddress,
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
       });
-      console.log('[Firestore] User created:', solanaAddress);
+      console.log('[Firestore] User created:', normalizedAddress);
     }
   } catch (error) {
     console.error('[Firestore] Error saving user:', error);
@@ -71,14 +138,14 @@ export async function getUserFromFirestore(
       return null;
     }
 
-    const userRef = doc(db, USERS_COLLECTION, solanaAddress);
-    const docSnap = await getDoc(userRef);
+    const normalizedAddress = normalizeSolanaAddress(solanaAddress);
+    const { data, exists } = await findUserDocumentBySolanaAddress(normalizedAddress);
 
-    if (docSnap.exists()) {
-      console.log('[Firestore] User found:', solanaAddress);
-      return docSnap.data() as UserData;
+    if (exists && data) {
+      console.log('[Firestore] User found:', normalizedAddress);
+      return data;
     } else {
-      console.log('[Firestore] User not found:', solanaAddress);
+      console.log('[Firestore] User not found:', normalizedAddress);
       return null;
     }
   } catch (error) {
@@ -121,6 +188,22 @@ export async function updateUserSettingsInFirestore(
 }
 
 /**
+ * Update identity verification status in Firestore.
+ */
+export async function updateIdentityVerificationInFirestore(
+  solanaAddress: string,
+  identityVerification: UserData['identityVerification']
+): Promise<void> {
+  try {
+    await saveUserToFirestore(solanaAddress, { identityVerification });
+    console.log('[Firestore] Identity verification updated for:', solanaAddress);
+  } catch (error) {
+    console.error('[Firestore] Error updating identity verification:', error);
+    throw error;
+  }
+}
+
+/**
  * Search users by username (case-insensitive partial match)
  */
 export async function searchUsersByUsername(
@@ -149,6 +232,41 @@ export async function searchUsersByUsername(
     return results;
   } catch (error) {
     console.error('[Firestore] Error searching users:', error);
+    throw error;
+  }
+}
+
+/**
+ * Get all users from Firestore for username discovery.
+ */
+export async function getAllUsersFromFirestore(): Promise<UserData[]> {
+  try {
+    const usersRef = collection(db, USERS_COLLECTION);
+    const q = query(usersRef, orderBy('username', 'asc'));
+    const querySnapshot = await getDocs(q);
+    const results: UserData[] = [];
+
+    querySnapshot.forEach((userDoc) => {
+      const data = userDoc.data() as Partial<UserData>;
+      const username = typeof data.username === 'string' ? data.username.trim() : '';
+      const solanaAddress =
+        typeof data.solanaAddress === 'string' && data.solanaAddress.trim()
+          ? data.solanaAddress
+          : userDoc.id;
+
+      if (username && solanaAddress) {
+        results.push({
+          ...(data as UserData),
+          username,
+          solanaAddress,
+        });
+      }
+    });
+
+    console.log(`[Firestore] Loaded ${results.length} users`);
+    return results;
+  } catch (error) {
+    console.error('[Firestore] Error loading all users:', error);
     throw error;
   }
 }

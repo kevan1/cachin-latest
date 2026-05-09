@@ -4,6 +4,7 @@ type SolanaWalletLike = {
 };
 
 type SolanaProviderLike = {
+  address?: unknown;
   publicKey?: unknown;
   _publicKey?: unknown;
 };
@@ -36,18 +37,18 @@ export function getEmbeddedSolanaWalletAddress(
 ): string | null {
   const wallet = wallets?.[0];
   return (
-    normalizeSolanaAddress(wallet?.publicKey) ??
-    normalizeSolanaAddress(wallet?.address)
+    normalizeSolanaAddress(wallet?.address) ??
+    normalizeSolanaAddress(wallet?.publicKey)
   );
 }
 
-export function getSolanaProviderAddress(
-  provider?: SolanaProviderLike | null
-): string | null {
-  if (!provider) return null;
+export function getSolanaProviderAddress(provider?: unknown): string | null {
+  if (!provider || typeof provider !== "object") return null;
+  const solanaProvider = provider as SolanaProviderLike;
 
   return (
-    normalizeSolanaAddress(provider.publicKey) ??
-    normalizeSolanaAddress(provider._publicKey)
+    normalizeSolanaAddress(solanaProvider.address) ??
+    normalizeSolanaAddress(solanaProvider.publicKey) ??
+    normalizeSolanaAddress(solanaProvider._publicKey)
   );
 }

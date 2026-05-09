@@ -24,6 +24,10 @@
       ],
       "infoPlist": {
         "NSCameraUsageDescription": "Scan QR codes to send and receive payments.",
+        "NSLocationWhenInUseUsageDescription": "Allow Cachin to use your location to show nearby shops on the map.",
+        "NSLocationAlwaysAndWhenInUseUsageDescription": "Allow Cachin to use your location to show nearby shops on the map.",
+        "NSLocationAlwaysUsageDescription": "Allow Cachin to use your location to show nearby shops on the map.",
+        "UIViewControllerBasedStatusBarAppearance": false,
         "ITSAppUsesNonExemptEncryption": false,
         "NSAppTransportSecurity": {
           "NSAllowsArbitraryLoads": true,
@@ -65,6 +69,8 @@
       ],
       "permissions": [
         "android.permission.CAMERA",
+        "android.permission.ACCESS_COARSE_LOCATION",
+        "android.permission.ACCESS_FINE_LOCATION",
         "android.permission.NFC",
         "android.permission.RECORD_AUDIO",
         "android.permission.MODIFY_AUDIO_SETTINGS",
@@ -78,6 +84,7 @@
     "extra": {
       "privyAppId": "",
       "privyClientId": "",
+      "crispWebsiteId": "",
       "passkeyAssociatedDomain": "",
       "router": {},
       "eas": {
@@ -90,6 +97,18 @@
         "expo-secure-store",
         {
           "faceIDPermission": "Authenticate with Face ID to sign in and access your wallet."
+        }
+      ],
+      [
+        "expo-local-authentication",
+        {
+          "faceIDPermission": "Use Face ID to unlock Cachin."
+        }
+      ],
+      [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "Allow Cachin to use your location to show nearby shops on the map."
         }
       ],
       [
@@ -149,7 +168,8 @@
       ],
       "expo-font",
       "expo-web-browser",
-      "expo-image"
+      "expo-image",
+      "expo-notifications"
     ],
     "experiments": {
       "typedRoutes": true,

@@ -23,6 +23,7 @@ import {
   type ComponentStackScreenProps,
 } from "react-native-screen-transitions/component-stack";
 import { saveCardSetupCompleted } from "@/utils/cardSetupStorage";
+import { formatStableValue } from "@/utils/numberFormat";
 
 type CardSetupStackParamList = {
   step01: undefined;
@@ -593,7 +594,7 @@ function Step08({ navigation }: StepProps<"step08">) {
               <MaterialIcons name="lock-outline" size={18} color={TEXT_SECONDARY} />
             </View>
             <View style={styles.infoBody}>
-              <Text style={styles.infoTitle}>It's only for this card</Text>
+              <Text style={styles.infoTitle}>It&apos;s only for this card</Text>
               <Text style={styles.infoText}>
                 This PIN protects your card. It differs from your app passcode.
               </Text>
@@ -605,9 +606,9 @@ function Step08({ navigation }: StepProps<"step08">) {
               <MaterialIcons name="layers" size={18} color={TEXT_SECONDARY} />
             </View>
             <View style={styles.infoBody}>
-              <Text style={styles.infoTitle}>Don't lose it</Text>
+              <Text style={styles.infoTitle}>Don&apos;t lose it</Text>
               <Text style={styles.infoText}>
-                If you forget your PIN, you'll need your recovery phrase to restore.
+                If you forget your PIN, you&apos;ll need your recovery phrase to restore.
               </Text>
             </View>
           </View>
@@ -806,7 +807,7 @@ function Step12() {
               <MaterialIcons name="lock-outline" size={18} color={TEXT_SECONDARY} />
             </View>
             <View style={styles.infoBody}>
-              <Text style={styles.infoTitle}>It's only for this card</Text>
+              <Text style={styles.infoTitle}>It&apos;s only for this card</Text>
               <Text style={styles.infoText}>
                 Biometrics unlock your card PIN, not the app passcode.
               </Text>
@@ -831,7 +832,7 @@ function Step12() {
             </View>
             <View style={styles.infoBody}>
               <Text style={styles.infoTitle}>Your data stays private</Text>
-              <Text style={styles.infoText}>Cachin can't access it.</Text>
+              <Text style={styles.infoText}>Cachin can&apos;t access it.</Text>
             </View>
           </View>
         </View>
@@ -860,10 +861,7 @@ function Step13({ navigation }: StepProps<"step13">) {
   const [isFrozen, setIsFrozen] = useState(false);
   const [balance, setBalance] = useState(2430.25);
 
-  const formattedBalance = `$${balance.toLocaleString("en-US", {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  })}`;
+  const formattedBalance = formatStableValue(balance, { context: "detailed" });
 
   const restartConfig = () => {
     createdPin = "";
@@ -1644,6 +1642,7 @@ const styles = StyleSheet.create({
     lineHeight: 38,
     fontWeight: "800",
     letterSpacing: -0.7,
+    fontVariant: ["tabular-nums"],
   },
   balanceActions: {
     flexDirection: "row",

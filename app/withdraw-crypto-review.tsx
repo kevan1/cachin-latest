@@ -15,11 +15,12 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { saveTransaction } from '@/utils/transactionStorage';
 import { ChainType } from '@/constants/chains';
 import { Transaction } from '@/types/types';
-import { useToast } from 'heroui-native';
+import { useToast } from 'react-native-pretty-toast';
 import { BlurView } from 'expo-blur';
 import { resolveSolanaDomain } from '@/utils/sns';
 import { fetchArsPrice } from '@/utils/priceService';
 import { getSelectedCurrency, type Currency } from '@/utils/userStorage';
+import { formatFiatValue, formatTokenAmountDisplay } from '@/utils/numberFormat';
 import Animated, { 
   useSharedValue, 
   useAnimatedStyle, 
@@ -34,19 +35,6 @@ const BUTTON_HEIGHT = 56;
 const BUTTON_PADDING = 4;
 const THUMB_SIZE = BUTTON_HEIGHT - BUTTON_PADDING * 2;
 const DEFAULT_ARS_RATE = 1500;
-
-function formatMoneyValue(value: number, currency: 'USD' | 'ARS'): string {
-  if (!Number.isFinite(value) || value <= 0) {
-    return currency === 'ARS' ? 'ARS$0.00' : '$0.00';
-  }
-
-  const formatted = value.toLocaleString('en-US', {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  });
-
-  return currency === 'ARS' ? `ARS$${formatted}` : `$${formatted}`;
-}
 
 function SlideToProceed({
   onConfirm,
@@ -149,7 +137,7 @@ export default function WithdrawCryptoReviewScreen() {
   const { amount, currency, network, address } = params;
   const colorScheme = useColorScheme() ?? 'light';
   const palette = Colors[colorScheme];
-  const { toast } = useToast();
+  const toast = useToast();
   const amountParam = Array.isArray(amount) ? amount[0] : amount;
   const currencyParam = Array.isArray(currency) ? currency[0] : currency;
   const networkParam = Array.isArray(network) ? network[0] : network;
@@ -179,8 +167,19 @@ export default function WithdrawCryptoReviewScreen() {
     primaryFiatCurrency === 'ARS' ? amountUsdValue * arsRate : amountUsdValue;
   const secondaryFiatValue =
     secondaryFiatCurrency === 'ARS' ? amountUsdValue * arsRate : amountUsdValue;
-  const primaryAmountLabel = formatMoneyValue(primaryFiatValue, primaryFiatCurrency);
-  const secondaryAmountLabel = formatMoneyValue(secondaryFiatValue, secondaryFiatCurrency);
+  const primaryAmountLabel = formatFiatValue(primaryFiatValue, {
+    context: 'detailed',
+    currencyPrefix: primaryFiatCurrency === 'ARS' ? 'ARS$' : '$',
+  });
+  const secondaryAmountLabel = formatFiatValue(secondaryFiatValue, {
+    context: 'detailed',
+    currencyPrefix: secondaryFiatCurrency === 'ARS' ? 'ARS$' : '$',
+  });
+  const usdcAmountLabel = formatTokenAmountDisplay(amountUsdValue, {
+    context: 'detailed',
+    tokenPriceUsd: 1,
+    tokenDecimals: 6,
+  });
 
   const shortenAddress = (value: string) => {
     if (value.length >= 12) {
@@ -293,7 +292,7 @@ export default function WithdrawCryptoReviewScreen() {
 
         // Close the modal and return home; show confirmation as a toast.
         setShowConfirmation(false);
-        toast.show('Withdrawal confirmed!');
+        toast.success('Withdrawal confirmed!');
         router.dismissTo('/(main)/home');
 
     } catch (e) {
@@ -334,7 +333,7 @@ export default function WithdrawCryptoReviewScreen() {
             {secondaryAmountLabel}
           </Text>
           <Text style={[styles.summaryAssetAmount, { color: palette.secondaryText }]}>
-            USDC {amountUsdValue.toFixed(2)}
+            USDC {usdcAmountLabel}
           </Text>
         </View>
       </View>
@@ -484,15 +483,18 @@ const styles = StyleSheet.create({
   summaryAmount: {
     fontSize: 24,
     fontWeight: '700',
+    fontVariant: ['tabular-nums'],
   },
   summarySecondary: {
     fontSize: 15,
     fontWeight: '600',
     marginTop: 2,
+    fontVariant: ['tabular-nums'],
   },
   summaryAssetAmount: {
     fontSize: 12,
     marginTop: 2,
+    fontVariant: ['tabular-nums'],
   },
   detailsCard: {
     borderRadius: 16,

@@ -16,7 +16,11 @@ import MaterialIcons from "@expo/vector-icons/MaterialIcons";
 import * as Haptics from "expo-haptics";
 import { isAddress } from "viem";
 
-import { getUserByUsername } from "@/services/firestoreService";
+import {
+  getAllUsersFromFirestore,
+  getUserByUsername,
+  type UserData,
+} from "@/services/firestoreService";
 import { useEmbeddedEthereumWallet, useEmbeddedSolanaWallet } from "@privy-io/expo";
 import { ChainType, getChainToken } from "@/constants/chains";
 import { getSolanaRpcUrl } from "@/utils/solanaRpc";
@@ -26,6 +30,11 @@ import {
   normalizeDecimalInput,
   parseDecimalToUnits,
 } from "@/utils/tokenAmount";
+import {
+  formatDecimalForInput,
+  formatFiatValue,
+  formatTokenAmountDisplay,
+} from "@/utils/numberFormat";
 import { Colors } from "@/constants/theme";
 import { getSelectedCurrency, Currency } from "@/utils/userStorage";
 import { IconSymbol } from "@/components/ui/icon-symbol";
@@ -67,19 +76,6 @@ function formatAddress(address: string): string {
   return `${address.slice(0, 4)}...${address.slice(-4)}`;
 }
 
-function formatNumericDisplay(value: number, maxFractionDigits: number): string {
-  if (!Number.isFinite(value) || value <= 0) return "0";
-  return value.toLocaleString("en-US", {
-    minimumFractionDigits: 0,
-    maximumFractionDigits: maxFractionDigits,
-  });
-}
-
-function toInputDecimal(value: number, maxFractionDigits: number): string {
-  if (!Number.isFinite(value) || value <= 0) return "";
-  return value.toFixed(maxFractionDigits).replace(/\.?0+$/, "");
-}
-
 export default function SendAmountScreen() {
   const router = useRouter();
   const params = useLocalSearchParams();
@@ -105,6 +101,9 @@ export default function SendAmountScreen() {
   const [recipientAddress, setRecipientAddress] = useState("");
   const [recipientUsername, setRecipientUsername] = useState("");
   const [recipientStatus, setRecipientStatus] = useState<RecipientStatus>("idle");
+  const [firebaseUsers, setFirebaseUsers] = useState<UserData[]>([]);
+  const [isLoadingFirebaseUsers, setIsLoadingFirebaseUsers] = useState(false);
+  const [firebaseUsersError, setFirebaseUsersError] = useState("");
   const [amount, setAmount] = useState(initialAmount);
   const [balance, setBalance] = useState("0.00");
   const [balanceUnits, setBalanceUnits] = useState<bigint>(0n);
@@ -203,6 +202,44 @@ export default function SendAmountScreen() {
         isActive = false;
       };
     }, [])
+  );
+
+  useFocusEffect(
+    useCallback(() => {
+      let isActive = true;
+
+      const loadFirebaseUsers = async () => {
+        if (isAvalancheTransfer) {
+          setFirebaseUsers([]);
+          setFirebaseUsersError("");
+          setIsLoadingFirebaseUsers(false);
+          return;
+        }
+
+        try {
+          setIsLoadingFirebaseUsers(true);
+          setFirebaseUsersError("");
+          const users = await getAllUsersFromFirestore();
+          if (!isActive) return;
+          setFirebaseUsers(users);
+        } catch (error) {
+          if (!isActive) return;
+          console.error("[SendAmount] Failed to load Firebase users", error);
+          setFirebaseUsers([]);
+          setFirebaseUsersError("Unable to load Firebase usernames.");
+        } finally {
+          if (isActive) {
+            setIsLoadingFirebaseUsers(false);
+          }
+        }
+      };
+
+      void loadFirebaseUsers();
+
+      return () => {
+        isActive = false;
+      };
+    }, [isAvalancheTransfer])
   );
 
   useEffect(() => {
@@ -344,7 +381,7 @@ export default function SendAmountScreen() {
   }, [assetDecimals, avalancheUsdcToken, isAvalancheTransfer, walletAddress]);
 
   const normalizedAmount = useMemo(() => {
-    const normalizedInput = normalizeDecimalInput(amount, 2);
+    const normalizedInput = normalizeDecimalInput(amount, isUsdInput ? assetDecimals : 2);
     if (!normalizedInput) return "";
     if (isUsdInput) return normalizedInput;
 
@@ -370,12 +407,19 @@ export default function SendAmountScreen() {
   }, [arsRate, balanceNumber, isUsdInput]);
   const equivalentDisplayAmount = useMemo(() => {
     const parsedAmount = Number.parseFloat(amount);
+    const prefix = isUsdInput ? "ARS$" : "$";
     if (!Number.isFinite(parsedAmount) || parsedAmount <= 0 || arsRate <= 0) {
-      return "0";
+      return formatFiatValue(0, {
+        context: "detailed",
+        currencyPrefix: prefix,
+      });
     }
 
     const converted = isUsdInput ? parsedAmount * arsRate : parsedAmount / arsRate;
-    return formatNumericDisplay(converted, 2);
+    return formatFiatValue(converted, {
+      context: "detailed",
+      currencyPrefix: prefix,
+    });
   }, [amount, arsRate, isUsdInput]);
   const canPrefillMax =
     !isLoadingBalance && balanceUnits > 0n && Number.isFinite(balanceNumber) && balanceNumber > 0;
@@ -390,6 +434,20 @@ export default function SendAmountScreen() {
         : `External wallet (${formatAddress(recipientAddress)})`
       : "Not set";
 
+  const visibleFirebaseUsers = useMemo(() => {
+    const normalizedInput = normalizeUsername(recipientInput);
+
+    if (!normalizedInput) {
+      return firebaseUsers;
+    }
+
+    return firebaseUsers.filter((user) => {
+      const username = user.username.toLowerCase();
+      const address = user.solanaAddress.toLowerCase();
+      return username.includes(normalizedInput) || address.includes(normalizedInput);
+    });
+  }, [firebaseUsers, recipientInput]);
+
   const canContinue =
     recipientStatus === "resolved" &&
     !!recipientAddress &&
@@ -399,7 +457,7 @@ export default function SendAmountScreen() {
   const amountInputWidth = Math.min(240, Math.max(120, Math.max(amount.length, 4) * 20));
 
   const handleAmountChange = (text: string) => {
-    setAmount(normalizeDecimalInput(text, 2));
+    setAmount(normalizeDecimalInput(text, isUsdInput ? assetDecimals : 2));
   };
 
   const handleSwapInputCurrency = () => {
@@ -414,7 +472,7 @@ export default function SendAmountScreen() {
     }
 
     const converted = isUsdInput ? parsedAmount * arsRate : parsedAmount / arsRate;
-    setAmount(toInputDecimal(converted, 2));
+    setAmount(formatDecimalForInput(converted, isUsdInput ? 2 : assetDecimals));
     setIsUsdInput((prev) => !prev);
   };
 
@@ -425,11 +483,17 @@ export default function SendAmountScreen() {
     }
 
     if (isUsdInput) {
-      setAmount(toInputDecimal(balanceNumber, 2));
+      setAmount(
+        formatTokenUnits(balanceUnits, assetDecimals, {
+          minFractionDigits: 0,
+          maxFractionDigits: assetDecimals,
+          trimTrailingZeros: true,
+        })
+      );
       return;
     }
 
-    setAmount(toInputDecimal(availableInputAmount, 2));
+    setAmount(formatDecimalForInput(availableInputAmount, 2));
   };
 
   const handleBack = () => {
@@ -438,6 +502,17 @@ export default function SendAmountScreen() {
     }
     router.back();
   };
+
+  const handleSelectFirebaseUser = useCallback((user: UserData) => {
+    if (isIOS) {
+      void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    }
+    setRecipientInput(user.username);
+    setRecipientUsername(user.username);
+    setRecipientAddress(user.solanaAddress);
+    setRecipientStatus("resolved");
+    amountInputRef.current?.focus();
+  }, [isIOS]);
 
   const handleContinue = () => {
     console.log("[SendAmount] Continue pressed", {
@@ -646,6 +721,80 @@ export default function SendAmountScreen() {
         )}
       </View>
 
+      {!isAvalancheTransfer ? (
+        <View
+          style={[
+            styles.firebaseUsersCard,
+            { backgroundColor: palette.surface, borderColor: palette.borderSubtle },
+          ]}
+        >
+          <View style={styles.firebaseUsersHeader}>
+            <Text style={[styles.firebaseUsersTitle, { color: palette.primaryText }]} selectable>
+              Firebase usernames
+            </Text>
+            <Text style={[styles.firebaseUsersCount, { color: palette.secondaryText }]} selectable>
+              {isLoadingFirebaseUsers
+                ? "Loading"
+                : `${visibleFirebaseUsers.length}/${firebaseUsers.length}`}
+            </Text>
+          </View>
+
+          {isLoadingFirebaseUsers ? (
+            <View style={styles.firebaseUsersLoadingRow}>
+              <ActivityIndicator size="small" color={palette.secondaryText} />
+              <Text style={[styles.firebaseUsersMeta, { color: palette.secondaryText }]}>
+                Loading usernames...
+              </Text>
+            </View>
+          ) : firebaseUsersError ? (
+            <Text style={[styles.firebaseUsersMeta, { color: palette.secondaryText }]} selectable>
+              {firebaseUsersError}
+            </Text>
+          ) : visibleFirebaseUsers.length === 0 ? (
+            <Text style={[styles.firebaseUsersMeta, { color: palette.secondaryText }]} selectable>
+              No Firebase usernames found.
+            </Text>
+          ) : (
+            <View style={styles.firebaseUsersList}>
+              {visibleFirebaseUsers.map((user) => (
+                <TouchableOpacity
+                  key={user.solanaAddress}
+                  accessibilityRole="button"
+                  activeOpacity={0.78}
+                  onPress={() => handleSelectFirebaseUser(user)}
+                  style={[
+                    styles.firebaseUserRow,
+                    { backgroundColor: palette.surfaceMuted },
+                  ]}
+                >
+                  <View style={styles.firebaseUserAvatar}>
+                    <Text style={styles.firebaseUserAvatarText}>
+                      {user.username[0]?.toUpperCase() ?? "U"}
+                    </Text>
+                  </View>
+                  <View style={styles.firebaseUserBody}>
+                    <Text style={[styles.firebaseUserName, { color: palette.primaryText }]}>
+                      @{user.username}
+                    </Text>
+                    <Text
+                      style={[styles.firebaseUserAddress, { color: palette.secondaryText }]}
+                      numberOfLines={1}
+                    >
+                      {formatAddress(user.solanaAddress)}
+                    </Text>
+                  </View>
+                  <MaterialIcons
+                    name="chevron-right"
+                    size={20}
+                    color={palette.secondaryText}
+                  />
+                </TouchableOpacity>
+              ))}
+            </View>
+          )}
+        </View>
+      ) : null}
+
       <GlassView
         style={[
           styles.amountCard,
@@ -699,7 +848,7 @@ export default function SendAmountScreen() {
           </View>
         </View>
         <Text style={[styles.equivalentText, { color: palette.secondaryText }]} selectable>
-          ≈ {isUsdInput ? "ARS$" : "$"} {equivalentDisplayAmount}
+          ≈ {equivalentDisplayAmount}
         </Text>
         <Text style={[styles.equivalentText, { color: palette.secondaryText }]} selectable>
           {currencyLabel}
@@ -738,13 +887,22 @@ export default function SendAmountScreen() {
             </View>
           </View>
           <Text style={[styles.availableAmount, { color: palette.primaryText }]} selectable>
-              {isLoadingBalance
-                ? "Loading balance..."
-                : `${isUsdInput ? "$" : "ARS$"}${formatNumericDisplay(availableInputAmount, 2)}`}
+            {isLoadingBalance
+              ? "Loading balance..."
+              : formatFiatValue(availableInputAmount, {
+                  context: "detailed",
+                  currencyPrefix: isUsdInput ? "$" : "ARS$",
+                })}
           </Text>
           {!isLoadingBalance ? (
             <Text style={[styles.availableSubtext, { color: palette.secondaryText }]} selectable>
-              {assetSymbol} {formatNumericDisplay(balanceNumber, 6)} available
+              {assetSymbol}{" "}
+              {formatTokenAmountDisplay(balanceNumber, {
+                context: "detailed",
+                tokenPriceUsd: 1,
+                tokenDecimals: assetDecimals,
+              })}{" "}
+              available
             </Text>
           ) : null}
         </GlassView>
@@ -916,6 +1074,73 @@ const styles = StyleSheet.create({
     marginTop: 6,
     fontSize: 12,
   },
+  firebaseUsersCard: {
+    borderWidth: 1,
+    borderRadius: 16,
+    padding: 12,
+    marginBottom: 16,
+  },
+  firebaseUsersHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 10,
+    marginBottom: 10,
+  },
+  firebaseUsersTitle: {
+    fontSize: 14,
+    fontWeight: "700",
+  },
+  firebaseUsersCount: {
+    fontSize: 12,
+    fontWeight: "600",
+    fontVariant: ["tabular-nums"],
+  },
+  firebaseUsersLoadingRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
+  firebaseUsersMeta: {
+    fontSize: 12,
+    lineHeight: 17,
+  },
+  firebaseUsersList: {
+    gap: 8,
+  },
+  firebaseUserRow: {
+    minHeight: 52,
+    borderRadius: 12,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+  },
+  firebaseUserAvatar: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#3298FF",
+  },
+  firebaseUserAvatarText: {
+    color: "#FFFFFF",
+    fontSize: 14,
+    fontWeight: "800",
+  },
+  firebaseUserBody: {
+    flex: 1,
+    gap: 2,
+  },
+  firebaseUserName: {
+    fontSize: 14,
+    fontWeight: "700",
+  },
+  firebaseUserAddress: {
+    fontSize: 12,
+  },
   amountCard: {
     borderRadius: 20,
     borderWidth: 1,
@@ -959,10 +1184,12 @@ const styles = StyleSheet.create({
   amountInput: {
     fontWeight: "600",
     textAlign: "center",
+    fontVariant: ["tabular-nums"],
   },
   equivalentText: {
     textAlign: "center",
     fontSize: 13,
+    fontVariant: ["tabular-nums"],
   },
   balanceHelperText: {
     textAlign: "center",

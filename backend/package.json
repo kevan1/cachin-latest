@@ -3,12 +3,22 @@
   "private": true,
   "version": "1.0.0",
   "dependencies": {
+    "@p2pdotme/sdk": "^1.1.0",
     "@solana/web3.js": "^1.98.4",
     "bs58": "^6.0.0",
-    "canonicalize": "^2.1.0"
+    "canonicalize": "^2.1.0",
+    "expo-server-sdk": "^3.15.0",
+    "firebase-admin": "^13.6.0",
+    "jose": "^4.15.9",
+    "viem": "2.32.0"
   },
   "devDependencies": {
     "@types/node": "^22.18.13",
     "typescript": "^5.9.3"
+  },
+  "overrides": {
+    "@p2pdotme/sdk": {
+      "viem": "2.32.0"
+    }
   }
 }

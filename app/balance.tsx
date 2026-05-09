@@ -1,54 +1,143 @@
-import { StyleSheet, View, Text, TouchableOpacity, ScrollView } from 'react-native';
-import { useLocalSearchParams, useRouter } from 'expo-router';
+import { useEmbeddedSolanaWallet, usePrivy } from '@privy-io/expo';
+import { LinearGradient } from 'expo-linear-gradient';
 import { useEffect, useMemo, useState } from 'react';
-import { useEmbeddedEthereumWallet, useEmbeddedSolanaWallet, usePrivy } from '@privy-io/expo';
+import { ScrollView, StyleSheet, Text, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { ChainType } from '@/constants/chains';
-import { type ChainFilter } from '@/utils/chainStorage';
-import {
-  fetchMultiChainBalances,
-  type MultiChainBalances,
-} from '@/utils/multiChainBalanceService';
+import { fetchSolanaUsdcBalance } from '@/utils/balanceService';
+import { formatTokenAmountDisplay } from '@/utils/numberFormat';
 import { getSponsoredSolanaWallet } from '@/utils/sponsoredWalletStorage';
-import {
-  loadAvalancheWalletSource,
-  loadSatochipAvalancheAddress,
-  type AvalancheWalletSource,
-} from "@/utils/satochipStorage";
 
-const EMPTY_BALANCES: MultiChainBalances = {
-  solana: null,
-  avalanche: null,
-  totalUsd: 0,
+type AssetLogo = 'sol' | 'usdc' | 'usdt' | 'avalanche-usdc' | 'avax' | 'arsc';
+
+type AssetBalance = {
+  key: string;
+  logo: AssetLogo;
+  name: string;
+  amount: string;
+  isActive?: boolean;
+  isSoon?: boolean;
 };
 
+function formatBalanceAmount(value: number | null | undefined, isLoading: boolean) {
+  if (isLoading) return '...';
+
+  return formatTokenAmountDisplay(value ?? 0, {
+    context: 'detailed',
+    tokenPriceUsd: 1,
+    tokenDecimals: 6,
+  });
+}
+
+function TokenIcon({ logo }: { logo: AssetLogo }) {
+  switch (logo) {
+    case 'sol':
+      return (
+        <View style={[styles.logo, styles.solanaLogo]}>
+          <LinearGradient
+            colors={['#35F0D0', '#7D5CFF']}
+            start={{ x: 0, y: 0.5 }}
+            end={{ x: 1, y: 0.5 }}
+            style={styles.solanaBar}
+          />
+          <LinearGradient
+            colors={['#7D5CFF', '#36E1C9']}
+            start={{ x: 0, y: 0.5 }}
+            end={{ x: 1, y: 0.5 }}
+            style={styles.solanaBar}
+          />
+          <LinearGradient
+            colors={['#35F0D0', '#7D5CFF']}
+            start={{ x: 0, y: 0.5 }}
+            end={{ x: 1, y: 0.5 }}
+            style={styles.solanaBar}
+          />
+        </View>
+      );
+    case 'usdc':
+      return (
+        <View style={[styles.logo, styles.usdcLogo]}>
+          <Text maxFontSizeMultiplier={1.05} style={styles.usdcGlyph}>$</Text>
+        </View>
+      );
+    case 'usdt':
+      return (
+        <View style={[styles.logo, styles.usdtLogo]}>
+          <Text maxFontSizeMultiplier={1.05} style={styles.usdtGlyph}>T</Text>
+          <View style={styles.usdtCrossbar} />
+        </View>
+      );
+    case 'avalanche-usdc':
+      return (
+        <View style={[styles.logo, styles.avalancheLogo]}>
+          <View style={styles.avalanchePeak} />
+          <View style={styles.avalancheUsdcBadge}>
+            <Text maxFontSizeMultiplier={1.05} style={styles.avalancheUsdcGlyph}>$</Text>
+          </View>
+        </View>
+      );
+    case 'avax':
+      return (
+        <View style={[styles.logo, styles.avalancheLogo]}>
+          <View style={styles.avalanchePeak} />
+          <View style={styles.avalanchePeakSmall} />
+        </View>
+      );
+    case 'arsc':
+      return (
+        <View style={[styles.logo, styles.argentinaLogo]}>
+          <View style={styles.argentinaStripeTop} />
+          <View style={styles.argentinaStripeMiddle} />
+          <View style={styles.argentinaStripeBottom} />
+          <View style={styles.argentinaSun} />
+        </View>
+      );
+  }
+}
+
+function AssetRow({ item, index }: { item: AssetBalance; index: number }) {
+  const textStyle = item.isActive ? styles.activeText : styles.inactiveText;
+
+  return (
+    <View style={[styles.assetRow, index > 0 ? styles.assetRowDivider : null]}>
+      <View style={styles.assetIdentity}>
+        <TokenIcon logo={item.logo} />
+        <Text
+          numberOfLines={1}
+          maxFontSizeMultiplier={1.05}
+          style={[styles.assetName, textStyle]}
+        >
+          {item.name}
+        </Text>
+      </View>
+      {item.isSoon ? (
+        <View style={styles.soonBadge}>
+          <Text maxFontSizeMultiplier={1.05} style={styles.soonText}>
+            Soon
+          </Text>
+        </View>
+      ) : (
+        <Text
+          numberOfLines={1}
+          maxFontSizeMultiplier={1.05}
+          style={[styles.assetAmount, textStyle]}
+        >
+          {item.amount}
+        </Text>
+      )}
+    </View>
+  );
+}
+
 export default function BalanceScreen() {
-  const router = useRouter();
-  const params = useLocalSearchParams();
+  const insets = useSafeAreaInsets();
   const { user, isReady } = usePrivy();
   const { wallets: solanaWallets } = useEmbeddedSolanaWallet();
-  const { wallets: ethereumWallets } = useEmbeddedEthereumWallet();
-
-  const chainParam = Array.isArray(params.chain) ? params.chain[0] : params.chain;
-  const selectedChain: ChainFilter =
-    chainParam === ChainType.SOLANA ||
-    chainParam === ChainType.AVALANCHE ||
-    chainParam === 'all'
-      ? chainParam
-      : 'all';
-
-  const [balances, setBalances] = useState<MultiChainBalances>(EMPTY_BALANCES);
+  const [solanaUsdcBalance, setSolanaUsdcBalance] = useState(0);
   const [isLoadingBalance, setIsLoadingBalance] = useState(true);
   const [sponsoredWalletAddress, setSponsoredWalletAddress] = useState<string | null>(null);
-  const [avalancheWalletSource, setAvalancheWalletSource] =
-    useState<AvalancheWalletSource>("privy");
-  const [satochipAvalancheAddress, setSatochipAvalancheAddress] = useState<string | null>(null);
 
   const solanaAddress = sponsoredWalletAddress ?? solanaWallets?.[0]?.publicKey ?? null;
-  const avalancheAddress =
-    avalancheWalletSource === "satochip"
-      ? satochipAvalancheAddress
-      : ethereumWallets?.[0]?.address ?? null;
 
   useEffect(() => {
     if (!isReady) return;
@@ -68,242 +157,283 @@ export default function BalanceScreen() {
   }, [isReady, user?.id]);
 
   useEffect(() => {
-    Promise.all([loadAvalancheWalletSource(), loadSatochipAvalancheAddress()])
-      .then(([source, address]) => {
-        setAvalancheWalletSource(source);
-        setSatochipAvalancheAddress(address);
-      })
-      .catch((error) => {
-        console.error("Failed to load Avalanche wallet source", error);
-      });
-  }, []);
-
-  useEffect(() => {
     const loadBalances = async () => {
-      if (!solanaAddress && !avalancheAddress) {
-        setBalances(EMPTY_BALANCES);
+      if (!isReady) return;
+
+      if (!solanaAddress) {
+        setSolanaUsdcBalance(0);
         setIsLoadingBalance(false);
         return;
       }
 
       try {
         setIsLoadingBalance(true);
-        const nextBalances = await fetchMultiChainBalances(solanaAddress, avalancheAddress);
-        setBalances(nextBalances);
+        const nextBalance = await fetchSolanaUsdcBalance(solanaAddress);
+        setSolanaUsdcBalance(nextBalance);
       } catch (error) {
         console.error('Failed to load balances', error);
-        setBalances(EMPTY_BALANCES);
+        setSolanaUsdcBalance(0);
       } finally {
         setIsLoadingBalance(false);
       }
     };
 
     void loadBalances();
-  }, [avalancheAddress, solanaAddress]);
+  }, [isReady, solanaAddress]);
 
-  const totalUsd = useMemo(() => {
-    if (selectedChain === ChainType.SOLANA) {
-      return balances.solana?.totalUsd ?? 0;
-    }
-
-    if (selectedChain === ChainType.AVALANCHE) {
-      return balances.avalanche?.totalUsd ?? 0;
-    }
-
-    return balances.totalUsd;
-  }, [balances, selectedChain]);
-
-  const rows = useMemo(() => {
-    const nextRows: { label: string; amount: string; color: string; icon: string }[] = [];
-
-    if (selectedChain !== ChainType.AVALANCHE && balances.solana) {
-      nextRows.push({
-        label: 'Solana (SOL)',
-        amount: balances.solana.nativeBalance.toFixed(4),
-        color: '#7C3AED',
-        icon: '◎',
-      });
-      nextRows.push({
-        label: 'USD Coin (USDC)',
-        amount: balances.solana.usdcBalance.toFixed(2),
-        color: '#2563EB',
-        icon: 'Ⓢ',
-      });
-      nextRows.push({
-        label: 'Tether (USDT)',
-        amount: balances.solana.usdtBalance.toFixed(2),
-        color: '#059669',
-        icon: '₮',
-      });
-    }
-
-    if (selectedChain !== ChainType.SOLANA && balances.avalanche) {
-      nextRows.push({
-        label: 'Avalanche Fuji USDC',
-        amount: balances.avalanche.usdcBalance.toFixed(2),
-        color: '#2563EB',
-        icon: 'Ⓢ',
-      });
-      nextRows.push({
-        label: 'Avalanche Fuji (AVAX)',
-        amount: balances.avalanche.nativeBalance.toFixed(4),
-        color: '#DC2626',
-        icon: 'A',
-      });
-    }
-
-    return nextRows;
-  }, [balances, selectedChain]);
-
-  const arsRate = 1500;
-  const arsValue = totalUsd * arsRate;
-  const handleBack = () => router.back();
-
-  const title =
-    selectedChain === ChainType.SOLANA
-      ? 'Solana balance'
-      : selectedChain === ChainType.AVALANCHE
-        ? 'Avalanche Fuji balance'
-        : 'Balance';
+  const assetBalances = useMemo<AssetBalance[]>(() => {
+    return [
+      {
+        key: 'solana-usdc',
+        logo: 'usdc',
+        name: 'Solana USDC',
+        amount: `${formatBalanceAmount(solanaUsdcBalance, isLoadingBalance)} USDC`,
+        isActive: solanaUsdcBalance > 0,
+      },
+    ];
+  }, [isLoadingBalance, solanaUsdcBalance]);
 
   return (
-    <View style={styles.container}>
-      <View style={styles.header}>
-        <TouchableOpacity style={styles.backButton} onPress={handleBack}>
-          <Text style={styles.backIcon}>‹</Text>
-        </TouchableOpacity>
-        <Text style={styles.title}>{title}</Text>
-        <View style={styles.placeholder} />
-      </View>
+    <ScrollView
+      bounces={false}
+      contentInsetAdjustmentBehavior="never"
+      showsVerticalScrollIndicator={false}
+      style={styles.sheet}
+      contentContainerStyle={[
+        styles.sheetContent,
+        { paddingBottom: Math.max(insets.bottom, 0) + 28 },
+      ]}
+    >
+      <Text maxFontSizeMultiplier={1.05} style={styles.title}>
+        Balance
+      </Text>
+      <Text maxFontSizeMultiplier={1.05} style={styles.subtitle}>
+        Your spendable USDC balance on Solana
+      </Text>
 
-      <ScrollView style={{ flex: 1 }}>
-        <View style={styles.list}>
-          {isLoadingBalance ? (
-            <View style={[styles.item, styles.lastItem]}>
-              <Text style={styles.emptyText}>Loading balances...</Text>
-            </View>
-          ) : rows.length === 0 ? (
-            <View style={[styles.item, styles.lastItem]}>
-              <Text style={styles.emptyText}>No wallet connected for this chain yet.</Text>
-            </View>
-          ) : (
-            <>
-              {rows.map((row) => (
-                <View
-                  key={row.label}
-                  style={styles.item}
-                >
-                  <View style={styles.left}>
-                    <View style={[styles.iconCircle, { backgroundColor: row.color }]}>
-                      <Text style={styles.iconText}>{row.icon}</Text>
-                    </View>
-                    <Text style={styles.name}>{row.label}</Text>
-                  </View>
-                  <Text style={styles.amount}>{row.amount}</Text>
-                </View>
-              ))}
-              <View style={[styles.item, styles.lastItem]}>
-                <View style={styles.left}>
-                  <View style={[styles.iconCircle, { backgroundColor: '#60A5FA' }]}>
-                    <Text style={styles.iconText}>🇦🇷</Text>
-                  </View>
-                  <Text style={styles.name}>Argentine Peso (ARS)</Text>
-                </View>
-                <Text style={styles.amount}>{arsValue.toFixed(2)}</Text>
-              </View>
-            </>
-          )}
-        </View>
-      </ScrollView>
-    </View>
+      <View style={styles.assetCard}>
+        {assetBalances.map((item, index) => (
+          <AssetRow key={item.key} item={item} index={index} />
+        ))}
+      </View>
+    </ScrollView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
+  sheet: {
     flex: 1,
-    backgroundColor: '#F5E6D3',
-    padding: 20,
+    backgroundColor: '#1F1F1F',
   },
-  header: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
+  sheetContent: {
+    paddingTop: 40,
+    paddingHorizontal: 24,
     alignItems: 'center',
-    marginTop: 50,
-    marginBottom: 30,
-  },
-  backButton: {
-    width: 50,
-    height: 50,
-    borderRadius: 10,
-    borderWidth: 3,
-    borderColor: '#000000',
-    backgroundColor: '#FFFFFF',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  backIcon: {
-    fontSize: 32,
-    fontWeight: 'bold',
-    color: '#000000',
   },
   title: {
-    fontSize: 28,
-    fontWeight: 'bold',
-    color: '#000000',
-    textTransform: 'capitalize',
+    color: '#FFFFFF',
+    fontSize: 20,
+    lineHeight: 25,
+    fontWeight: '800',
+    letterSpacing: 0,
+    textAlign: 'center',
   },
-  placeholder: {
-    width: 50,
+  subtitle: {
+    marginTop: 14,
+    color: 'rgba(255,255,255,0.58)',
+    maxWidth: 360,
+    fontSize: 16,
+    lineHeight: 24,
+    fontWeight: '500',
+    letterSpacing: 0,
+    textAlign: 'center',
   },
-  list: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 12,
-    borderWidth: 3,
-    borderColor: '#000000',
+  assetCard: {
+    width: '100%',
+    marginTop: 22,
+    overflow: 'hidden',
+    borderRadius: 30,
+    borderCurve: 'continuous',
+    backgroundColor: '#303030',
+  },
+  assetRow: {
+    minHeight: 63,
+    paddingHorizontal: 21,
+    paddingVertical: 9,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 16,
+  },
+  assetRowDivider: {
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(255,255,255,0.075)',
+  },
+  assetIdentity: {
+    minWidth: 0,
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 18,
+  },
+  assetName: {
+    flex: 1,
+    fontSize: 16,
+    lineHeight: 21,
+    fontWeight: '800',
+    letterSpacing: 0,
+  },
+  assetAmount: {
+    maxWidth: 140,
+    fontSize: 15,
+    lineHeight: 20,
+    fontWeight: '800',
+    letterSpacing: 0,
+    textAlign: 'right',
+    fontVariant: ['tabular-nums'],
+  },
+  activeText: {
+    color: '#FFFFFF',
+  },
+  inactiveText: {
+    color: 'rgba(255,255,255,0.48)',
+  },
+  soonBadge: {
+    minWidth: 58,
+    minHeight: 28,
+    borderRadius: 14,
+    paddingHorizontal: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(255,255,255,0.1)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.08)',
+  },
+  soonText: {
+    color: 'rgba(255,255,255,0.64)',
+    fontSize: 13,
+    lineHeight: 16,
+    fontWeight: '800',
+    letterSpacing: 0,
+  },
+  logo: {
+    width: 34,
+    height: 34,
+    borderRadius: 9,
+    borderCurve: 'continuous',
+    alignItems: 'center',
+    justifyContent: 'center',
     overflow: 'hidden',
   },
-  item: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    padding: 20,
-    borderBottomWidth: 2,
-    borderBottomColor: '#000000',
+  solanaLogo: {
+    gap: 3,
+    backgroundColor: '#020202',
   },
-  lastItem: {
-    borderBottomWidth: 0,
+  solanaBar: {
+    width: 22,
+    height: 5,
+    borderRadius: 2.5,
+    transform: [{ skewX: '-18deg' }],
   },
-  left: {
-    flexDirection: 'row',
-    alignItems: 'center',
+  usdcLogo: {
+    backgroundColor: '#2775CA',
   },
-  iconCircle: {
-    width: 50,
-    height: 50,
-    borderRadius: 25,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginRight: 12,
-  },
-  iconText: {
-    fontSize: 22,
+  usdcGlyph: {
     color: '#FFFFFF',
-    fontWeight: '700',
+    fontSize: 22,
+    lineHeight: 24,
+    fontWeight: '900',
   },
-  name: {
-    fontSize: 16,
-    fontWeight: 'bold',
-    color: '#000000',
+  usdtLogo: {
+    backgroundColor: '#26A17B',
   },
-  amount: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    color: '#000000',
+  usdtGlyph: {
+    color: '#FFFFFF',
+    fontSize: 21,
+    lineHeight: 24,
+    fontWeight: '900',
   },
-  emptyText: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#000000',
+  usdtCrossbar: {
+    position: 'absolute',
+    top: 11,
+    width: 21,
+    height: 3,
+    borderRadius: 2,
+    backgroundColor: '#FFFFFF',
+  },
+  avalancheLogo: {
+    backgroundColor: '#E84142',
+  },
+  avalanchePeak: {
+    width: 0,
+    height: 0,
+    borderLeftWidth: 8,
+    borderRightWidth: 8,
+    borderBottomWidth: 18,
+    borderLeftColor: 'transparent',
+    borderRightColor: 'transparent',
+    borderBottomColor: '#FFFFFF',
+  },
+  avalanchePeakSmall: {
+    position: 'absolute',
+    right: 8,
+    bottom: 8,
+    width: 0,
+    height: 0,
+    borderLeftWidth: 4,
+    borderRightWidth: 4,
+    borderBottomWidth: 9,
+    borderLeftColor: 'transparent',
+    borderRightColor: 'transparent',
+    borderBottomColor: '#FFFFFF',
+  },
+  avalancheUsdcBadge: {
+    position: 'absolute',
+    right: 3,
+    bottom: 3,
+    width: 13,
+    height: 13,
+    borderRadius: 7,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#2775CA',
+    borderWidth: 1,
+    borderColor: '#FFFFFF',
+  },
+  avalancheUsdcGlyph: {
+    color: '#FFFFFF',
+    fontSize: 9,
+    lineHeight: 10,
+    fontWeight: '900',
+  },
+  argentinaLogo: {
+    backgroundColor: '#FFFFFF',
+  },
+  argentinaStripeTop: {
+    position: 'absolute',
+    top: 0,
+    width: '100%',
+    height: 11,
+    backgroundColor: '#75AADB',
+  },
+  argentinaStripeMiddle: {
+    position: 'absolute',
+    top: 11,
+    width: '100%',
+    height: 12,
+    backgroundColor: '#FFFFFF',
+  },
+  argentinaStripeBottom: {
+    position: 'absolute',
+    bottom: 0,
+    width: '100%',
+    height: 11,
+    backgroundColor: '#75AADB',
+  },
+  argentinaSun: {
+    width: 7,
+    height: 7,
+    borderRadius: 4,
+    backgroundColor: '#F6B40E',
   },
 });

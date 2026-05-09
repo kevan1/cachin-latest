@@ -4,8 +4,6 @@ import {
   View,
   TextInputProps,
 } from "react-native";
-import { Colors } from "@/constants/theme";
-import { useColorScheme } from "@/hooks/use-color-scheme";
 
 interface EmailInputProps extends Omit<TextInputProps, "style"> {
   value: string;
@@ -19,24 +17,17 @@ export const EmailInput: React.FC<EmailInputProps> = ({
   error = false,
   ...props
 }) => {
-  const colorScheme = useColorScheme();
-  const colors = Colors[colorScheme ?? "light"];
-
   return (
     <View style={styles.container}>
       <TextInput
         style={[
           styles.input,
-          {
-            borderColor: error ? "#ef4444" : colors.inputBorder,
-            color: colors.primaryText,
-            backgroundColor: colors.background,
-          },
+          error ? styles.inputError : null,
         ]}
         value={value}
         onChangeText={onChangeText}
         placeholder="Enter your email"
-        placeholderTextColor={colors.secondaryText}
+        placeholderTextColor="rgba(0,0,0,0.30)"
         keyboardType="email-address"
         autoCapitalize="none"
         autoCorrect={false}
@@ -52,12 +43,20 @@ const styles = StyleSheet.create({
     width: "100%",
   },
   input: {
-    height: 48,
+    minHeight: 58,
     borderWidth: 1,
-    borderRadius: 8,
-    paddingHorizontal: 12,
-    fontSize: 16,
-    paddingVertical: process.env.EXPO_OS === "ios" ? 12 : 8,
+    borderColor: "rgba(255,255,255,0.44)",
+    borderRadius: 22,
+    borderCurve: "continuous",
+    paddingHorizontal: 16,
+    fontSize: 18,
+    paddingVertical: process.env.EXPO_OS === "ios" ? 14 : 10,
+    color: "rgba(0,0,0,0.72)",
+    backgroundColor: "rgba(255,255,255,0.42)",
+    fontWeight: "700",
+  },
+  inputError: {
+    borderColor: "#ef4444",
   },
 });
 

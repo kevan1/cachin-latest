@@ -10,6 +10,7 @@ import { parseQrScanData } from '@/utils/qrScan';
 import { IconSymbol } from "@/components/ui/icon-symbol";
 import { Colors } from "@/constants/theme";
 import { GlassView } from "@/components/ui/GlassView";
+import { formatDecimalForInput } from "@/utils/numberFormat";
 
 const SCAN_SIZE = 260;
 const USDC_MINT_ADDRESS = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
@@ -77,7 +78,7 @@ export default function ScannerScreen() {
       
       await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
 
-      const result = parseQrScanData(trimmed);
+      const result = await parseQrScanData(trimmed);
 
       if (result.kind === 'cachinUser') {
         try {
@@ -131,9 +132,30 @@ export default function ScannerScreen() {
         return;
       }
 
+      if (result.kind === 'arsMercadoPago') {
+        try {
+          const amountParam =
+            typeof result.amountFiat === 'number' && Number.isFinite(result.amountFiat)
+              ? formatDecimalForInput(result.amountFiat, 2)
+              : '';
+
+          router.push({
+            pathname: '/qr-rail-select',
+            params: {
+              amount: amountParam,
+              paymentAddress: result.paymentAddress,
+              rawQr: trimmed,
+            },
+          });
+        } catch {
+          resetScanner();
+        }
+        return;
+      }
+
       Alert.alert(
         'Invalid QR code',
-        'This QR code isn’t a Cachin link or a Solana address.',
+        'This QR code isn’t a Cachin link, Solana QR, or compatible ARS QR.',
         [{ text: 'OK', onPress: resetScanner }],
       );
     },

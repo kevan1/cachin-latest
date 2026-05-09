@@ -3,11 +3,28 @@ import {
   DefaultTheme,
   ThemeProvider,
 } from "@react-navigation/native";
-import { Stack, Redirect, useSegments, useRouter } from "expo-router";
+import {
+  Stack,
+  Redirect,
+  useGlobalSearchParams,
+  useSegments,
+  useRouter,
+} from "expo-router";
 import { StatusBar } from "expo-status-bar";
 import "react-native-reanimated";
 import { Component, ReactNode, ErrorInfo, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ActivityIndicator, Platform, StyleSheet, Text, TouchableOpacity, UIManager, View, useColorScheme } from "react-native";
+import {
+  ActivityIndicator,
+  AppState,
+  Platform,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  UIManager,
+  View,
+  type AppStateStatus,
+  useColorScheme,
+} from "react-native";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import * as SplashScreen from "expo-splash-screen";
 import LottieView from "lottie-react-native";
@@ -24,13 +41,28 @@ import {
 import { useFonts } from "expo-font";
 import { Colors } from "@/constants/theme";
 import { useNetworkStatus } from "@/hooks/use-network-status";
-import { HeroUINativeProvider } from "heroui-native";
+import { ToastProvider } from "react-native-pretty-toast";
 import { ChinPopoutProvider } from "@/components/ChinPopout";
 import { IconSymbol } from "@/components/ui/icon-symbol";
-import { getUserFromFirestore } from "@/services/firestoreService";
-import { clearUsername } from "@/utils/userStorage";
-import { clearSponsoredSolanaWallet } from "@/utils/sponsoredWalletStorage";
-import { clearTransactions } from "@/utils/transactionStorage";
+import { subscribeToReceivedTransactionNotificationResponses } from "@/services/pushNotifications";
+import { initializeSupportChat } from "@/services/supportChat";
+import { initializeTransactionNotifications } from "@/services/transactionNotifications";
+import { authenticateAppLock, getAppLockAvailability } from "@/services/appLock";
+import {
+  getAppLockBootDecision,
+  isAppLockPreferenceCurrent,
+  type AppLockState,
+} from "@/utils/appLockBootGate";
+import {
+  clearAppLockRecentUnlock,
+  getAppLockEnabledPreference,
+  hasRecentAppLockUnlock,
+  rememberAppLockRecentUnlock,
+  saveAppLockEnabledPreference,
+  subscribeAppLockPreference,
+} from "@/utils/appLockPreferences";
+import { logBootTrace } from "@/utils/bootTrace";
+import { saveTransaction, transactionExists } from "@/utils/transactionStorage";
 
 
 class ErrorBoundary extends Component<
@@ -94,17 +126,52 @@ const manifestExtra = asRecord(constantsWithLegacyManifests.manifest?.extra);
 const manifest2Extra = asRecord(constantsWithLegacyManifests.manifest2?.extra);
 const manifest2ExpoClientExtra = asRecord(asRecord(manifest2Extra.expoClient).extra);
 
-void SplashScreen.preventAutoHideAsync().catch(() => {
-  // Avoid throwing during fast refresh if splash was already handled.
-});
+void SplashScreen.preventAutoHideAsync()
+  .then(() => {
+    logBootTrace("native-splash:prevent-auto-hide");
+  })
+  .catch((error) => {
+    logBootTrace("native-splash:prevent-auto-hide:failed", {
+      message: error instanceof Error ? error.message : String(error),
+    });
+  });
 
 const POST_SPLASH_FALLBACK_MS = 1800;
+const APP_LOCK_AUTH_GRACE_MS = 2500;
+const APP_LOCK_NATIVE_PROMPT_SETTLE_MS = 10000;
+const APP_LOCK_SESSION_UNLOCK_MS = 60000;
+const APP_LOCK_FEATURE_ENABLED = Platform.OS !== "web";
+const APP_LOCK_AUTHENTICATED_USER_FALLBACK_ID = "__authenticated_user__";
 let hasConsumedPostSplashTransition = false;
+let appLockUnlockedSessionUserId: string | null = null;
+let appLockUnlockedSessionUntil = 0;
+
+function logAppLock(event: string, data?: Record<string, unknown>) {
+  if (!__DEV__) return;
+  console.log(`[AppLock] ${event}`, data ?? {});
+}
 
 function consumePostSplashTransitionOnce() {
   if (hasConsumedPostSplashTransition) return false;
   hasConsumedPostSplashTransition = true;
   return true;
+}
+
+function rememberAppLockSessionUnlock(userId: string) {
+  appLockUnlockedSessionUserId = userId;
+  appLockUnlockedSessionUntil = Date.now() + APP_LOCK_SESSION_UNLOCK_MS;
+}
+
+function clearAppLockSessionUnlock() {
+  appLockUnlockedSessionUserId = null;
+  appLockUnlockedSessionUntil = 0;
+}
+
+function hasRecentAppLockSessionUnlock(userId: string) {
+  return (
+    appLockUnlockedSessionUserId === userId &&
+    Date.now() < appLockUnlockedSessionUntil
+  );
 }
 
 const envPrivyAppId = pickFirstNonEmpty(
@@ -146,7 +213,7 @@ const privyConfigDiagnostics = {
 };
 
 function OfflineScreen({ onRetry }: { onRetry: () => void }) {
-  const colorScheme = useColorScheme() ?? "light";
+  const colorScheme = useColorScheme() === "dark" ? "dark" : "light";
   const palette = Colors[colorScheme];
 
   return (
@@ -182,7 +249,7 @@ function MissingPrivyConfigScreen({
   clientId: string;
   diagnostics: typeof privyConfigDiagnostics;
 }) {
-  const colorScheme = useColorScheme() ?? "light";
+  const colorScheme = useColorScheme() === "dark" ? "dark" : "light";
   const palette = Colors[colorScheme];
 
   return (
@@ -233,77 +300,84 @@ function MissingPrivyConfigScreen({
   );
 }
 
-function MissingUsernameScreen({
-  onContinue,
-  onLogout,
+function AppLockScreen({
+  isAuthenticating,
+  errorMessage,
+  onUnlock,
 }: {
-  onContinue: () => void;
-  onLogout: () => void;
+  isAuthenticating: boolean;
+  errorMessage: string | null;
+  onUnlock: () => void;
 }) {
-  const colorScheme = useColorScheme() ?? "light";
-  const palette = Colors[colorScheme];
+  const autoUnlockAttemptedRef = useRef(false);
+  const onUnlockRef = useRef(onUnlock);
+
+  useEffect(() => {
+    onUnlockRef.current = onUnlock;
+  }, [onUnlock]);
+
+  useEffect(() => {
+    logBootTrace("app-lock-screen:mounted");
+    return () => {
+      logBootTrace("app-lock-screen:unmounted");
+    };
+  }, []);
+
+  useEffect(() => {
+    logBootTrace("app-lock-screen:state", {
+      isAuthenticating,
+      hasError: Boolean(errorMessage),
+    });
+  }, [errorMessage, isAuthenticating]);
+
+  useEffect(() => {
+    if (autoUnlockAttemptedRef.current || isAuthenticating || errorMessage) {
+      return;
+    }
+
+    autoUnlockAttemptedRef.current = true;
+    const timeout = setTimeout(() => {
+      logBootTrace("app-lock-screen:auto-unlock");
+      onUnlockRef.current();
+    }, 250);
+
+    return () => clearTimeout(timeout);
+  }, [errorMessage, isAuthenticating]);
 
   return (
-    <View style={[styles.stateContainer, { backgroundColor: palette.background }]}>
-      <View style={[styles.badge, { borderColor: palette.buttonBorder }]}>
-        <View style={[styles.badgeDot, { backgroundColor: palette.primary }]} />
-        <Text style={[styles.badgeText, { color: palette.secondaryText }]}>
-          Username required
-        </Text>
+    <View style={styles.appLockContainer}>
+      <View style={styles.appLockIcon}>
+        <IconSymbol name="lock.fill" size={28} color="#111111" />
       </View>
-      <Text style={[styles.stateTitle, { color: palette.primaryText }]}>
-        Complete your username to continue
-      </Text>
-      <Text style={[styles.stateSubtitle, { color: palette.secondaryText }]}>
-        We detected this account still has a placeholder username from beta onboarding.
-      </Text>
-      <Text style={[styles.stateSubtitle, { color: palette.secondaryText }]}>
-        Choose a unique username to finish setup and unlock the app.
-      </Text>
+      <Text style={styles.appLockTitle}>Cachin is locked</Text>
+      <Text style={styles.appLockSubtitle}>Use Face ID to continue.</Text>
+      {errorMessage ? <Text style={styles.appLockError}>{errorMessage}</Text> : null}
       <TouchableOpacity
         accessibilityRole="button"
-        onPress={onContinue}
-        style={[
-          styles.retryButton,
-          { backgroundColor: palette.primary, borderColor: palette.buttonBorder },
-        ]}
+        activeOpacity={0.86}
+        disabled={isAuthenticating}
+        onPress={onUnlock}
+        style={[styles.appLockButton, isAuthenticating ? styles.appLockButtonDisabled : null]}
       >
-        <Text style={styles.retryText}>Complete Now</Text>
-      </TouchableOpacity>
-      <TouchableOpacity
-        accessibilityRole="button"
-        onPress={onLogout}
-        style={[styles.secondaryActionButton, { borderColor: palette.buttonBorder }]}
-      >
-        <Text style={[styles.secondaryActionText, { color: palette.primaryText }]}>
-          Sign Out
-        </Text>
+        {isAuthenticating ? (
+          <ActivityIndicator color="#FFFFFF" />
+        ) : (
+          <Text style={styles.appLockButtonText}>Unlock with Face ID</Text>
+        )}
       </TouchableOpacity>
     </View>
   );
 }
 
-function UsernameGateCheckingScreen() {
-  const colorScheme = useColorScheme() ?? "light";
-  const palette = Colors[colorScheme];
+function LaunchGateScreen({ reason }: { reason: string }) {
+  useEffect(() => {
+    logBootTrace("launch-gate:mounted", { reason });
+    return () => {
+      logBootTrace("launch-gate:unmounted", { reason });
+    };
+  }, [reason]);
 
-  return (
-    <View style={[styles.stateContainer, { backgroundColor: palette.background }]}>
-      <View style={[styles.badge, { borderColor: palette.buttonBorder }]}>
-        <View style={[styles.badgeDot, { backgroundColor: palette.primary }]} />
-        <Text style={[styles.badgeText, { color: palette.secondaryText }]}>
-          Verifying profile
-        </Text>
-      </View>
-      <Text style={[styles.stateTitle, { color: palette.primaryText }]}>
-        Checking your username
-      </Text>
-      <Text style={[styles.stateSubtitle, { color: palette.secondaryText }]}>
-        Hold on a second while we confirm your account setup.
-      </Text>
-      <ActivityIndicator size="small" color={palette.primary} style={styles.gateSpinner} />
-    </View>
-  );
+  return <View style={styles.launchGateContainer} />;
 }
 
 function PostSplashTransition({ onDone }: { onDone: () => void }) {
@@ -320,14 +394,25 @@ function PostSplashTransition({ onDone }: { onDone: () => void }) {
     }
   }, []);
 
-  const finishTransition = useCallback(() => {
+  useEffect(() => {
+    logBootTrace("post-splash:mounted", { canRenderNativeLottie });
+    return () => {
+      logBootTrace("post-splash:unmounted");
+    };
+  }, [canRenderNativeLottie]);
+
+  const finishTransition = useCallback((source: string) => {
     if (completedRef.current) return;
     completedRef.current = true;
+    logBootTrace("post-splash:finish", { source });
     onDone();
   }, [onDone]);
 
   useEffect(() => {
-    const timeout = setTimeout(finishTransition, POST_SPLASH_FALLBACK_MS);
+    const timeout = setTimeout(
+      () => finishTransition("fallback-timeout"),
+      POST_SPLASH_FALLBACK_MS
+    );
     return () => clearTimeout(timeout);
   }, [finishTransition]);
 
@@ -339,7 +424,7 @@ function PostSplashTransition({ onDone }: { onDone: () => void }) {
           autoPlay
           loop={false}
           resizeMode="cover"
-          onAnimationFinish={finishTransition}
+          onAnimationFinish={() => finishTransition("animation-finish")}
           style={styles.postSplashAnimation}
         />
       ) : (
@@ -350,67 +435,313 @@ function PostSplashTransition({ onDone }: { onDone: () => void }) {
 }
 
 function AppNavigator() {
-  const { user, isReady, logout } = usePrivy();
+  const { user, isReady } = usePrivy();
   const { isConnected, refresh } = useNetworkStatus();
   const segments = useSegments();
+  const { mode } = useGlobalSearchParams<{ mode?: string | string[] }>();
+  const segmentList = segments as readonly string[];
+  const firstSegment = segmentList[0];
   const router = useRouter();
-  const [usernameGateStatus, setUsernameGateStatus] = useState<
-    "checking" | "required" | "ok"
-  >("ok");
-  const lastResolvedGateKeyRef = useRef<string | null>(null);
-  const hasResolvedGateOnceRef = useRef(false);
-  const hasAuthenticatedUser = Boolean(user?.id);
-  const inAuthGroup = segments[0] === '(main)';
-  const isUsernameScreen = segments[0] === "username";
+  const inAuthGroup = firstSegment === "(main)";
+  const isUsernameScreen = firstSegment === "username";
+  const isEmailScreen = firstSegment === "email";
+  const authFlowMode = Array.isArray(mode) ? mode[0] : mode;
+  const isCompletingUsername = isUsernameScreen && authFlowMode === "complete";
+  const isSignupUsernameScreen = isUsernameScreen && authFlowMode === "signup";
+  const isSignupEmailScreen = isEmailScreen && authFlowMode === "signup";
   const isUnauthScreen =
-    segments.length === 0 ||
-    segments[0] === "index" ||
-    segments[0] === "email";
-  const isIOS = process.env.EXPO_OS === "ios";
-  const colorScheme = useColorScheme() ?? "light";
+    segmentList.length === 0 ||
+    firstSegment === "index" ||
+    (isEmailScreen && !isSignupEmailScreen);
+  const isIOS = Platform.OS === "ios";
+  const colorScheme = useColorScheme() === "dark" ? "dark" : "light";
   const headerBlurEffect =
     colorScheme === "dark" ? "systemMaterialDark" : "systemMaterialLight";
-  const solanaAddressesForGate = useMemo(() => {
-    const rawUser = user as {
-      linkedAccounts?: {
-        type?: string;
-        chainType?: string;
-        chain_type?: string;
-        address?: string | null;
-      }[];
-      linked_accounts?: {
-        type?: string;
-        chainType?: string;
-        chain_type?: string;
-        address?: string | null;
-      }[];
-    } | null;
+  const routeSegments = segmentList.join("/") || "/";
+  const appLockSubjectId =
+    user?.id ?? (user ? APP_LOCK_AUTHENTICATED_USER_FALLBACK_ID : null);
+  const [appLockPreferenceLoaded, setAppLockPreferenceLoaded] = useState(false);
+  const [appLockPreferenceUserId, setAppLockPreferenceUserId] = useState<string | null>(null);
+  const [appLockEnabled, setAppLockEnabled] = useState(false);
+  const [appLockState, setAppLockState] = useState<AppLockState>("checking");
+  const [appLockError, setAppLockError] = useState<string | null>(null);
+  const appStateRef = useRef<AppStateStatus>(AppState.currentState);
+  const appLockStateRef = useRef<AppLockState>("checking");
+  const appLockAuthInFlightRef = useRef(false);
+  const appLockGraceUntilRef = useRef(0);
+  const appLockIgnoreAppStateUntilRef = useRef(0);
+  const appLockLastSuccessfulAuthAtRef = useRef(0);
+  const appLockHasActiveForegroundRef = useRef(
+    AppState.currentState === "active"
+  );
+  const appLockPreferenceIsCurrent = isAppLockPreferenceCurrent({
+    preferenceLoaded: appLockPreferenceLoaded,
+    preferenceUserId: appLockPreferenceUserId,
+    userId: appLockSubjectId,
+  });
+  const appLockBootDecision = getAppLockBootDecision({
+    featureEnabled: APP_LOCK_FEATURE_ENABLED,
+    isPrivyReady: isReady,
+    userId: appLockSubjectId,
+    preferenceLoaded: appLockPreferenceLoaded,
+    preferenceUserId: appLockPreferenceUserId,
+    preferenceEnabled: appLockEnabled,
+    appLockState,
+  });
+  const shouldUseAppLock = Boolean(
+    APP_LOCK_FEATURE_ENABLED &&
+      isReady &&
+      appLockSubjectId &&
+      appLockPreferenceIsCurrent &&
+      appLockEnabled
+  );
 
-    const linkedAccounts = rawUser?.linkedAccounts ?? rawUser?.linked_accounts ?? [];
-    const uniqueAddresses = new Set<string>();
+  useEffect(() => {
+    logBootTrace("navigator:state", {
+      routeSegments,
+      isReady,
+      hasUser: Boolean(user?.id),
+      hasAuthUser: Boolean(user),
+      appLockSubjectId,
+      appLockPreferenceLoaded,
+      appLockPreferenceUserId,
+      appLockEnabled,
+      appLockState,
+      appLockBootDecision,
+      shouldUseAppLock,
+    });
+  }, [
+    appLockBootDecision,
+    appLockEnabled,
+    appLockPreferenceLoaded,
+    appLockPreferenceUserId,
+    appLockState,
+    appLockSubjectId,
+    isReady,
+    routeSegments,
+    shouldUseAppLock,
+    user?.id,
+  ]);
 
-    for (const account of linkedAccounts) {
-      const isSolanaWallet =
-        account?.type === "wallet" &&
-        (account.chainType === "solana" || account.chain_type === "solana");
-      const normalizedAddress = account?.address?.trim();
-      if (!isSolanaWallet || !normalizedAddress) continue;
-      uniqueAddresses.add(normalizedAddress);
+  const lockAppForAppLock = useCallback((reason = "unknown", errorMessage: string | null = null) => {
+    logAppLock("lock", {
+      reason,
+      currentState: appLockStateRef.current,
+      appState: AppState.currentState,
+      userId: user?.id,
+      subjectId: appLockSubjectId,
+    });
+    clearAppLockSessionUnlock();
+    void clearAppLockRecentUnlock(appLockSubjectId);
+    appLockStateRef.current = "locked";
+    setAppLockState("locked");
+    setAppLockError(errorMessage);
+  }, [appLockSubjectId, user?.id]);
+
+  const authenticateForAppLock = useCallback(async () => {
+    if (!appLockSubjectId || appLockAuthInFlightRef.current) return;
+
+    try {
+      logAppLock("authenticate:start", {
+        appState: AppState.currentState,
+        userId: user?.id,
+        subjectId: appLockSubjectId,
+      });
+      appLockAuthInFlightRef.current = true;
+      appLockIgnoreAppStateUntilRef.current = Date.now() + APP_LOCK_AUTH_GRACE_MS;
+      appLockStateRef.current = "authenticating";
+      setAppLockState("authenticating");
+      setAppLockError(null);
+
+      const availability = await getAppLockAvailability();
+      if (!availability.isAvailable) {
+        await saveAppLockEnabledPreference(false, user?.id);
+        setAppLockEnabled(false);
+        appLockStateRef.current = "unlocked";
+        setAppLockState("unlocked");
+        setAppLockError(null);
+        return;
+      }
+
+      const result = await authenticateAppLock("Unlock Cachin");
+      const now = Date.now();
+      appLockGraceUntilRef.current = now + APP_LOCK_AUTH_GRACE_MS;
+      appLockIgnoreAppStateUntilRef.current =
+        now + APP_LOCK_NATIVE_PROMPT_SETTLE_MS;
+
+      if (result.success) {
+        logAppLock("authenticate:success", {
+          appState: AppState.currentState,
+          userId: user?.id,
+          subjectId: appLockSubjectId,
+        });
+        appLockLastSuccessfulAuthAtRef.current = now;
+        appLockHasActiveForegroundRef.current = AppState.currentState === "active";
+        rememberAppLockSessionUnlock(appLockSubjectId);
+        await rememberAppLockRecentUnlock(appLockSubjectId, APP_LOCK_SESSION_UNLOCK_MS);
+        appLockStateRef.current = "unlocked";
+        setAppLockState("unlocked");
+        setAppLockError(null);
+        return;
+      }
+
+      logAppLock("authenticate:failed", {
+        appState: AppState.currentState,
+        error: "error" in result ? result.error : undefined,
+      });
+      appLockStateRef.current = "locked";
+      setAppLockState("locked");
+      setAppLockError(`${availability.label} is required to unlock Cachin.`);
+    } catch (error) {
+      console.error("[AppLock] Failed to authenticate app lock", error);
+      appLockStateRef.current = "locked";
+      setAppLockState("locked");
+      setAppLockError("Authentication failed. Try again.");
+    } finally {
+      appLockAuthInFlightRef.current = false;
+    }
+  }, [appLockSubjectId, user?.id]);
+
+  useEffect(() => {
+    let isCancelled = false;
+
+    if (!isReady) {
+      setAppLockPreferenceLoaded(false);
+      setAppLockPreferenceUserId(null);
+      setAppLockEnabled(false);
+      clearAppLockSessionUnlock();
+      appLockStateRef.current = "checking";
+      setAppLockState("checking");
+      setAppLockError(null);
+      return;
     }
 
-    return Array.from(uniqueAddresses).sort((a, b) => a.localeCompare(b));
-  }, [user]);
-  const addressesSignature = solanaAddressesForGate.join(",");
-  const gateContext = isUsernameScreen ? "username" : "app";
-  const gateKey = user?.id
-    ? `${user.id}:${addressesSignature || "no-solana"}:${gateContext}`
-    : "guest";
-  const resolvedUsernameGateStatus =
-    lastResolvedGateKeyRef.current === gateKey
-      ? usernameGateStatus
-      : hasResolvedGateOnceRef.current
-        ? usernameGateStatus
-        : "checking";
+    if (!user || !appLockSubjectId) {
+      setAppLockPreferenceLoaded(true);
+      setAppLockPreferenceUserId(null);
+      setAppLockEnabled(false);
+      clearAppLockSessionUnlock();
+      appLockStateRef.current = "unlocked";
+      setAppLockState("unlocked");
+      setAppLockError(null);
+      return;
+    }
+
+    logBootTrace("app-lock:preference-load:start", {
+      userId: user.id,
+      subjectId: appLockSubjectId,
+    });
+    setAppLockPreferenceLoaded(false);
+    setAppLockPreferenceUserId(null);
+    appLockStateRef.current = "checking";
+    setAppLockState("checking");
+    setAppLockError(null);
+
+    const loadPreference = async () => {
+      try {
+        const enabled = await getAppLockEnabledPreference(user.id);
+        if (isCancelled) return;
+
+        const hasRecentUnlock =
+          hasRecentAppLockSessionUnlock(appLockSubjectId) ||
+          (enabled ? await hasRecentAppLockUnlock(appLockSubjectId) : false);
+
+        if (isCancelled) return;
+        setAppLockEnabled(enabled);
+        setAppLockPreferenceUserId(appLockSubjectId);
+        logAppLock("preference:loaded", {
+          enabled,
+          hasRecentUnlock,
+          userId: user.id,
+          subjectId: appLockSubjectId,
+        });
+
+        if (enabled && !hasRecentUnlock) {
+          lockAppForAppLock("preference-load");
+        } else {
+          appLockStateRef.current = "unlocked";
+          setAppLockState("unlocked");
+          setAppLockError(null);
+        }
+      } catch (error) {
+        console.error("[AppLock] Failed to load app lock preference", error);
+        if (isCancelled) return;
+        setAppLockEnabled(false);
+        setAppLockPreferenceUserId(appLockSubjectId);
+        appLockStateRef.current = "unlocked";
+        setAppLockState("unlocked");
+        setAppLockError(null);
+      } finally {
+        if (!isCancelled) {
+          logBootTrace("app-lock:preference-load:end", {
+            userId: user.id,
+            subjectId: appLockSubjectId,
+          });
+          setAppLockPreferenceLoaded(true);
+        }
+      }
+    };
+
+    void loadPreference();
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [appLockSubjectId, isReady, lockAppForAppLock, user?.id]);
+
+  useEffect(() => {
+    return subscribeAppLockPreference((enabled, changedUserId) => {
+      if (changedUserId && changedUserId !== user?.id) return;
+      const currentUserId = appLockSubjectId ?? changedUserId ?? null;
+      setAppLockPreferenceLoaded(true);
+      setAppLockPreferenceUserId(currentUserId);
+      setAppLockEnabled(enabled);
+      appLockStateRef.current = "unlocked";
+      setAppLockState("unlocked");
+      setAppLockError(null);
+      logBootTrace("app-lock:preference-subscription", {
+        enabled,
+        userId: currentUserId,
+      });
+    });
+  }, [appLockSubjectId, user?.id]);
+
+  useEffect(() => {
+    const subscription = AppState.addEventListener("change", (nextState) => {
+      appStateRef.current = nextState;
+
+      if (nextState === "active") {
+        appLockHasActiveForegroundRef.current = true;
+        return;
+      }
+
+      if (Date.now() < appLockIgnoreAppStateUntilRef.current) return;
+      if (!shouldUseAppLock) return;
+      if (appLockAuthInFlightRef.current) return;
+      if (Date.now() < appLockGraceUntilRef.current) return;
+      if (appLockStateRef.current !== "unlocked") return;
+
+      if (nextState === "background") {
+        const now = Date.now();
+        const wasActiveForeground = appLockHasActiveForegroundRef.current;
+        appLockHasActiveForegroundRef.current = false;
+
+        if (!wasActiveForeground) return;
+        if (
+          now - appLockLastSuccessfulAuthAtRef.current <
+          APP_LOCK_NATIVE_PROMPT_SETTLE_MS
+        ) {
+          return;
+        }
+
+        lockAppForAppLock("app-background");
+      }
+    });
+
+    return () => {
+      subscription.remove();
+    };
+  }, [lockAppForAppLock, shouldUseAppLock]);
 
   const renderSheetCloseButton = () => (
     <TouchableOpacity
@@ -433,105 +764,41 @@ function AppNavigator() {
     </TouchableOpacity>
   );
 
-  const handleGateLogout = useCallback(async () => {
-    try {
-      await clearUsername();
-      await clearSponsoredSolanaWallet(user?.id);
-      await clearTransactions();
-      await logout();
-      router.replace("/");
-    } catch (error) {
-      console.error("[AppNavigator] Failed to logout from username gate", error);
-    }
-  }, [logout, router, user?.id]);
-
   useEffect(() => {
-    let isCancelled = false;
-
-    const resolveUsernameGate = async () => {
-      if (!isReady) return;
-
-      if (!hasAuthenticatedUser) {
-        lastResolvedGateKeyRef.current = gateKey;
-        hasResolvedGateOnceRef.current = true;
-        if (!isCancelled) setUsernameGateStatus("ok");
-        return;
+    return subscribeToReceivedTransactionNotificationResponses(async (transaction) => {
+      const exists = await transactionExists(transaction.signature);
+      if (!exists) {
+        await saveTransaction(transaction);
       }
 
-      if (lastResolvedGateKeyRef.current === gateKey) {
-        return;
-      }
+      router.push({
+        pathname: "/transaction-detail",
+        params: { transactionId: transaction.id },
+      });
+    });
+  }, [router]);
 
-      try {
-        if (solanaAddressesForGate.length === 0) {
-          // Do not hard-block when linked wallets are still hydrating.
-          lastResolvedGateKeyRef.current = gateKey;
-          hasResolvedGateOnceRef.current = true;
-          if (!isCancelled) setUsernameGateStatus("ok");
-          return;
-        }
+  if (
+    appLockBootDecision === "waitingForPrivy" ||
+    appLockBootDecision === "checkingPreference"
+  ) {
+    return <LaunchGateScreen reason={appLockBootDecision} />;
+  }
 
-        if (!isCancelled && !hasResolvedGateOnceRef.current) {
-          setUsernameGateStatus("checking");
-        }
-
-        if (__DEV__) {
-          console.log("[UsernameGate] Checking linked Solana addresses", {
-            userId: user?.id,
-            addresses: solanaAddressesForGate,
-          });
-        }
-
-        let hasValidUsername = false;
-        for (const address of solanaAddressesForGate) {
-          const firestoreUser = await getUserFromFirestore(address);
-          const normalizedUsername = firestoreUser?.username?.trim().toLowerCase() ?? "";
-          const isPlaceholder =
-            !normalizedUsername ||
-            normalizedUsername === "user" ||
-            normalizedUsername.startsWith("user-");
-
-          if (!isPlaceholder) {
-            if (__DEV__) {
-              console.log("[UsernameGate] Found valid username", {
-                address,
-                username: normalizedUsername,
-              });
-            }
-            hasValidUsername = true;
-            break;
-          }
-        }
-
-        if (__DEV__ && !hasValidUsername) {
-          console.log("[UsernameGate] No valid username found for linked addresses", {
-            userId: user?.id,
-            addresses: solanaAddressesForGate,
-          });
-        }
-
-        lastResolvedGateKeyRef.current = gateKey;
-        hasResolvedGateOnceRef.current = true;
-        if (!isCancelled) {
-          setUsernameGateStatus(hasValidUsername ? "ok" : "required");
-        }
-      } catch (error) {
-        console.error("[AppNavigator] Failed to resolve username gate", error);
-        lastResolvedGateKeyRef.current = gateKey;
-        hasResolvedGateOnceRef.current = true;
-        if (!isCancelled) {
-          // Avoid trapping users behind the gate on transient Firestore errors.
-          setUsernameGateStatus("ok");
-        }
-      }
-    };
-
-    void resolveUsernameGate();
-
-    return () => {
-      isCancelled = true;
-    };
-  }, [gateKey, hasAuthenticatedUser, isReady, solanaAddressesForGate, user?.id]);
+  if (
+    appLockBootDecision === "locked" ||
+    appLockBootDecision === "authenticating"
+  ) {
+    return (
+      <AppLockScreen
+        isAuthenticating={appLockBootDecision === "authenticating"}
+        errorMessage={appLockError}
+        onUnlock={() => {
+          void authenticateForAppLock();
+        }}
+      />
+    );
+  }
 
   if (isConnected === false) {
     return <OfflineScreen onRetry={refresh} />;
@@ -546,26 +813,10 @@ function AppNavigator() {
   if (
     isReady &&
     user &&
-    resolvedUsernameGateStatus === "checking" &&
-    !isUsernameScreen &&
-    !inAuthGroup
+    (isUnauthScreen ||
+      (isUsernameScreen && !isCompletingUsername && !isSignupUsernameScreen))
   ) {
-    return <UsernameGateCheckingScreen />;
-  }
-
-  if (isReady && user && resolvedUsernameGateStatus === "required" && !isUsernameScreen) {
-    return (
-      <MissingUsernameScreen
-        onContinue={() =>
-          router.replace({ pathname: "/username", params: { mode: "complete" } })
-        }
-        onLogout={handleGateLogout}
-      />
-    );
-  }
-
-  if (isReady && user && resolvedUsernameGateStatus === "ok" && (isUnauthScreen || isUsernameScreen)) {
-    // User is logged in but on unauthenticated screens (index/email/username)
+    // Authenticated users should leave auth screens, except username completion.
     return <Redirect href="/(main)/home" />;
   }
 
@@ -574,7 +825,26 @@ function AppNavigator() {
       <Stack.Screen name="index" options={{ headerShown: false }} />
       <Stack.Screen name="username" options={{ headerShown: false }} />
       <Stack.Screen name="email" options={{ headerShown: false }} />
+      <Stack.Screen
+        name="onboarding-setup"
+        options={{
+          headerShown: false,
+          gestureEnabled: false,
+          animation: "slide_from_right",
+        }}
+      />
       <Stack.Screen name="(main)" options={{ headerShown: false }} />
+      <Stack.Screen
+        name="balance"
+        options={{
+          headerShown: false,
+          presentation: "formSheet",
+          sheetAllowedDetents: [0.7],
+          sheetGrabberVisible: true,
+          sheetCornerRadius: 40,
+          contentStyle: { backgroundColor: "transparent" },
+        }}
+      />
       <Stack.Screen
         name="card-setup-onboarding"
         options={{
@@ -747,8 +1017,76 @@ function AppNavigator() {
         options={{ headerShown: false, animation: "slide_from_right" }}
       />
       <Stack.Screen
+        name="transaction-detail"
+        options={{ headerShown: false, animation: "slide_from_right" }}
+      />
+      <Stack.Screen
+        name="earn-oro"
+        options={{ headerShown: false, animation: "slide_from_right" }}
+      />
+      <Stack.Screen
         name="profile"
         options={{ headerShown: false, animation: "slide_from_left" }}
+      />
+      <Stack.Screen
+        name="export"
+        options={{ headerShown: false, animation: "slide_from_right" }}
+      />
+      <Stack.Screen
+        name="account-details"
+        options={{
+          headerShown: false,
+          presentation: "formSheet",
+          sheetAllowedDetents: [0.995],
+          sheetLargestUndimmedDetentIndex: "last",
+          sheetGrabberVisible: true,
+          sheetCornerRadius: 40,
+          contentStyle: { backgroundColor: "transparent" },
+        }}
+      />
+      <Stack.Screen
+        name="link-email"
+        options={{
+          headerShown: false,
+          presentation: "formSheet",
+          sheetAllowedDetents: [0.56],
+          sheetLargestUndimmedDetentIndex: "last",
+          sheetGrabberVisible: true,
+          sheetCornerRadius: 34,
+          contentStyle: { backgroundColor: "transparent" },
+        }}
+      />
+      <Stack.Screen
+        name="privacy-policy"
+        options={{
+          headerShown: false,
+          presentation: "formSheet",
+          sheetAllowedDetents: [0.995],
+          sheetLargestUndimmedDetentIndex: "last",
+          sheetGrabberVisible: true,
+          sheetCornerRadius: 40,
+          contentStyle: { backgroundColor: "transparent" },
+        }}
+      />
+      <Stack.Screen
+        name="terms-and-conditions"
+        options={{
+          headerShown: false,
+          presentation: "formSheet",
+          sheetAllowedDetents: [0.995],
+          sheetLargestUndimmedDetentIndex: "last",
+          sheetGrabberVisible: true,
+          sheetCornerRadius: 40,
+          contentStyle: { backgroundColor: "transparent" },
+        }}
+      />
+      <Stack.Screen
+        name="notification-settings"
+        options={{ headerShown: false, animation: "slide_from_right" }}
+      />
+      <Stack.Screen
+        name="security"
+        options={{ headerShown: false, animation: "slide_from_right" }}
       />
       <Stack.Screen
         name="my-qr"
@@ -772,6 +1110,7 @@ export default function RootLayout() {
     Inter_400Regular,
     Inter_500Medium,
     Inter_600SemiBold,
+    LexendDeca: require("../assets/fonts/LexendDeca-VariableFont_wght.ttf"),
   });
   const [nativeSplashHidden, setNativeSplashHidden] = useState(false);
   const [showPostSplash, setShowPostSplash] = useState(
@@ -780,16 +1119,34 @@ export default function RootLayout() {
   const hasPrivyConfig = Boolean(privyAppId && privyClientId);
 
   useEffect(() => {
+    logBootTrace("root:services:init");
+    initializeSupportChat();
+    initializeTransactionNotifications();
+  }, []);
+
+  useEffect(() => {
+    logBootTrace("root:fonts-state", { fontsLoaded });
+  }, [fontsLoaded]);
+
+  useEffect(() => {
+    logBootTrace("root:post-splash-state", { showPostSplash });
+  }, [showPostSplash]);
+
+  useEffect(() => {
     if (!fontsLoaded) return;
     let isCancelled = false;
 
     const hideNativeSplash = async () => {
       try {
+        logBootTrace("native-splash:hide:start");
         await SplashScreen.hideAsync();
-      } catch {
-        // Ignore if already hidden.
+      } catch (error) {
+        logBootTrace("native-splash:hide:failed", {
+          message: error instanceof Error ? error.message : String(error),
+        });
       } finally {
         if (!isCancelled) {
+          logBootTrace("native-splash:hide:end");
           setNativeSplashHidden(true);
         }
       }
@@ -805,22 +1162,10 @@ export default function RootLayout() {
     return null;
   }
 
-  if (showPostSplash) {
-    return <PostSplashTransition onDone={() => setShowPostSplash(false)} />;
-  }
-
   return (
     <ThemeProvider value={colorScheme === "dark" ? DarkTheme : DefaultTheme}>
       <GestureHandlerRootView style={{ flex: 1 }}>
-        <HeroUINativeProvider
-          config={{
-            toast: {
-              defaultProps: {
-                placement: "top",
-              },
-            },
-          }}
-        >
+        <ToastProvider>
           <ErrorBoundary>
             {!hasPrivyConfig ? (
               <MissingPrivyConfigScreen
@@ -836,7 +1181,10 @@ export default function RootLayout() {
                 config={{
                   embedded: {
                     ethereum: {
-                      createOnLogin: "users-without-wallets",
+                      createOnLogin: "off",
+                    },
+                    solana: {
+                      createOnLogin: "off",
                     },
                   },
                 }}
@@ -848,8 +1196,11 @@ export default function RootLayout() {
                 <StatusBar style="auto" />
               </PrivyProvider>
             )}
+            {showPostSplash ? (
+              <PostSplashTransition onDone={() => setShowPostSplash(false)} />
+            ) : null}
           </ErrorBoundary>
-        </HeroUINativeProvider>
+        </ToastProvider>
       </GestureHandlerRootView>
     </ThemeProvider>
   );
@@ -924,8 +1275,10 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
   postSplashContainer: {
+    ...StyleSheet.absoluteFillObject,
+    zIndex: 999,
     flex: 1,
-    backgroundColor: "#ffffff",
+    backgroundColor: "#FFFFFF",
     overflow: "hidden",
   },
   postSplashAnimation: {
@@ -936,7 +1289,65 @@ const styles = StyleSheet.create({
     fontWeight: "600",
     marginVertical: 2,
   },
-  gateSpinner: {
-    marginTop: 16,
+  launchGateContainer: {
+    flex: 1,
+    backgroundColor: "#FFFFFF",
+  },
+  appLockContainer: {
+    flex: 1,
+    paddingHorizontal: 28,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#FFFFFF",
+  },
+  appLockIcon: {
+    width: 72,
+    height: 72,
+    borderRadius: 36,
+    borderCurve: "continuous",
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(0,0,0,0.05)",
+    borderWidth: 1,
+    borderColor: "rgba(0,0,0,0.08)",
+    marginBottom: 20,
+  },
+  appLockTitle: {
+    color: "#111111",
+    fontSize: 26,
+    lineHeight: 32,
+    fontWeight: "800",
+    textAlign: "center",
+  },
+  appLockSubtitle: {
+    marginTop: 8,
+    color: "rgba(0,0,0,0.55)",
+    fontSize: 16,
+    lineHeight: 22,
+    textAlign: "center",
+  },
+  appLockError: {
+    marginTop: 12,
+    color: "#B42318",
+    fontSize: 14,
+    lineHeight: 20,
+    textAlign: "center",
+  },
+  appLockButton: {
+    marginTop: 24,
+    minHeight: 52,
+    borderRadius: 26,
+    paddingHorizontal: 24,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#111111",
+  },
+  appLockButtonDisabled: {
+    opacity: 0.72,
+  },
+  appLockButtonText: {
+    color: "#FFFFFF",
+    fontSize: 16,
+    fontWeight: "800",
   },
 });

@@ -58,7 +58,7 @@ export function ThemeSelectorSheet({
       opacity.value = withTiming(0, { duration: 200 });
       translateY.value = withTiming(100, { duration: 200 });
     }
-  }, [isVisible, currentThemeId]);
+  }, [isVisible, currentThemeId, opacity, translateY]);
 
   const animatedStyle = useAnimatedStyle(() => {
     return {

@@ -48,6 +48,7 @@ export interface TokenBalances {
 
 // Balance cache to reduce RPC calls
 let cachedBalances: { [address: string]: { balances: TokenBalances; timestamp: number } } = {};
+let cachedSolanaUsdcBalances: { [address: string]: { balance: number; timestamp: number } } = {};
 const BALANCE_CACHE_DURATION = 30 * 1000; // 30 seconds
 
 /**
@@ -163,5 +164,40 @@ export async function fetchAllTokenBalances(address: string, forceFresh: boolean
     }
     
     return { sol: 0, usdc: 0, usdt: 0 };
+  }
+}
+
+/**
+ * Fetch only Solana mainnet USDC for an address.
+ * This is the spendable wallet balance used by the app's main money surfaces.
+ */
+export async function fetchSolanaUsdcBalance(address: string, forceFresh: boolean = false): Promise<number> {
+  const now = Date.now();
+  const cached = cachedSolanaUsdcBalances[address];
+
+  if (!forceFresh && cached && (now - cached.timestamp) < BALANCE_CACHE_DURATION) {
+    console.log('Using cached Solana USDC balance for', address);
+    return cached.balance;
+  }
+
+  try {
+    const connection = new Connection(SOLANA_MAINNET_RPC, 'confirmed');
+    const balance = await fetchMultipleMintBalances(connection, address, USDC_MINTS_MAINNET);
+
+    cachedSolanaUsdcBalances[address] = {
+      balance,
+      timestamp: now,
+    };
+
+    return balance;
+  } catch (error: any) {
+    console.error('Error fetching Solana USDC balance:', error);
+
+    if (cached) {
+      console.log('Returning cached Solana USDC balance due to error');
+      return cached.balance;
+    }
+
+    return 0;
   }
 }

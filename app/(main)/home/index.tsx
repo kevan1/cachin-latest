@@ -21,17 +21,28 @@ import { useRouter, useFocusEffect, useSegments } from "expo-router";
 import * as Haptics from 'expo-haptics';
 import { useState, useEffect, useCallback, useRef, useMemo, type ReactNode } from 'react';
 import * as Clipboard from 'expo-clipboard';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Transaction } from '@/types/types';
 import { getMergedTransactions, startTransactionPolling } from '@/utils/transactionListener';
 import { clearTransactions } from '@/utils/transactionStorage';
 import { getUsernameByAddress } from '@/services/firestoreService';
 import BottomSheet, { BottomSheetView, BottomSheetBackdrop } from '@gorhom/bottom-sheet';
-import { getUsername, getSelectedCurrency, saveUsername, Currency } from '@/utils/userStorage';
-import { fetchMultiChainBalances } from '@/utils/multiChainBalanceService';
+import {
+  getPendingUsername,
+  getUsername,
+  getSelectedCurrency,
+  Currency,
+} from '@/utils/userStorage';
+import { fetchSolanaUsdcBalance } from '@/utils/balanceService';
 import { fetchArsPrice } from '@/utils/priceService';
+import { formatAmount } from "@/utils/formatAmount";
+import {
+  formatDecimalForInput,
+  formatFiatValue,
+  formatStableValue,
+  formatTokenAmountDisplay,
+} from "@/utils/numberFormat";
 import { ChainType, getExplorerUrl, getChainSymbol } from '@/constants/chains';
-import { ChainFilter, loadSelectedChain, saveSelectedChain } from '@/utils/chainStorage';
+import { ChainFilter, saveSelectedChain } from '@/utils/chainStorage';
 import {
   loadAvalancheWalletSource,
   loadSatochipAvalancheAddress,
@@ -39,7 +50,6 @@ import {
   type AvalancheWalletSource,
 } from "@/utils/satochipStorage";
 import { THEMES, MESH_POINTS, getThemeTabColors } from '@/constants/themes';
-import { ThemeSelectorSheet } from '@/components/ThemeSelectorSheet';
 import Svg, { Path } from 'react-native-svg';
 import {
   getAccessToken,
@@ -57,42 +67,57 @@ import { PullToRefreshLoader } from "@/components/ui/PullToRefreshLoader";
 import { ANDROID_GLASS_TAB_HEIGHT } from "@/components/GlassTabBar";
 import { IconSymbol } from "@/components/ui/icon-symbol";
 import { AnimatedBalanceText } from "@/components/ui/AnimatedBalanceText";
+import { GeneratedProfileAvatar } from "@/components/profile/GeneratedProfileAvatar";
 import { PlatformPressable } from "@react-navigation/elements";
-import { useToast } from "heroui-native";
+import { useToast } from "react-native-pretty-toast";
 import { MeshGradientView } from "@wilmxre/react-native-mesh-gradient/src";
+import { Colors } from "@/constants/theme";
 import { buildSolanaPayUri, createSolanaPayReferences, SOLANA_USDC_MINT } from "@/utils/solanaPay";
 import {
   isDuplicateSessionSignerError,
-  isGaslessAuthorizationRequiredError,
   isOnDeviceSessionSignerModeError,
 } from "@/utils/privyGasless";
 import {
   getPrivyGaslessKeyQuorumId,
   getPrivyGasSponsorPolicyIds,
 } from "@/utils/privyGaslessConfig";
-import { ensureSponsoredSolanaWallet } from "@/utils/privySponsorship";
 import {
   getEmbeddedSolanaWalletAddress,
-  getSolanaProviderAddress,
 } from "@/utils/privySolanaWallet";
-import { getSponsoredSolanaWallet, setSponsoredSolanaWallet } from "@/utils/sponsoredWalletStorage";
+import {
+  ensureRegistrationSolanaAddresses,
+  persistRegisteredUsername,
+} from "@/utils/usernameRegistration";
+import { getSponsoredSolanaWallet } from "@/utils/sponsoredWalletStorage";
 import {
   loadThemePreference,
-  saveThemePreference,
   subscribeThemePreference,
 } from "@/utils/themePreferences";
+import { openSupportChat } from "@/services/supportChat";
+import { registerRemoteReceiveTransactionNotifications } from "@/services/pushNotifications";
+import { notifyForReceivedTransaction } from "@/services/transactionNotifications";
+import { getReceiveTransactionNotificationsPreference } from "@/utils/notificationPreferences";
+import { logBootTrace } from "@/utils/bootTrace";
+import {
+  getHomeRecentSnapshot,
+  getHomeRecentSnapshotSync,
+  saveHomeRecentSnapshot,
+  saveProfileSnapshot,
+} from "@/utils/uiSnapshotCache";
 
 const MESH_DIMENSION = 3;
 type ReceiveAsset = 'usdc' | 'sol' | 'avax';
-const PENDING_USERNAME_SAVE_KEY = 'pending_username_save';
 const PULL_REFRESH_DISTANCE = 80;
+const SHOW_HOME_WALLET_PILLS = false;
 type LinkedSolanaAccountLike = {
   type?: string;
   chain_type?: string;
   chainType?: string;
   address?: string | null;
+  phoneNumber?: string | null;
+  number?: string | null;
+  phone_number?: string | null;
 };
-
 
 // Icon components using LineIcons style
 function SendIcon({ size = 24, color = '#000' }: { size?: number; color?: string }) {
@@ -175,9 +200,11 @@ export default function HomeScreen() {
   const router = useRouter();
   const segments = useSegments();
   const colorScheme = useColorScheme() ?? "light";
+  const sheetPalette = Colors[colorScheme];
+  const sheetCardBorder =
+    colorScheme === "dark" ? "rgba(255,255,255,0.16)" : "rgba(255,255,255,0.52)";
   const [themeId, setThemeId] = useState<string>('blue');
-  const [showThemeSelector, setShowThemeSelector] = useState(false);
-  
+
   // Load saved theme
   useEffect(() => {
     let isMounted = true;
@@ -199,11 +226,6 @@ export default function HomeScreen() {
     };
   }, []);
 
-  const handleThemeSelect = (id: string) => {
-    setThemeId(id);
-    void saveThemePreference(id);
-  };
-
   const currentTheme = THEMES.find(t => t.id === themeId) || THEMES[0];
   const meshColors = colorScheme === "dark" ? currentTheme.colors.dark : currentTheme.colors.light;
   const pullToRefreshColor = getThemeTabColors(themeId).active;
@@ -220,10 +242,7 @@ export default function HomeScreen() {
   const topInset = Math.max(insets.top, StatusBar.currentHeight ?? 0);
   const androidHeaderOffset = Math.max(6, topInset + 6) + 52;
   const { user, isReady } = usePrivy();
-  const {
-    wallets: ethereumWallets,
-    create: createEthereumWallet,
-  } = useEmbeddedEthereumWallet();
+  const { wallets: ethereumWallets } = useEmbeddedEthereumWallet();
   const {
     wallets: solanaWallets,
     create: createSolanaWallet,
@@ -231,17 +250,25 @@ export default function HomeScreen() {
   } = useEmbeddedSolanaWallet();
   const { addSessionSigners, removeSessionSigners } = useSessionSigners();
   const { getIdentityToken } = useIdentityToken();
-  const { toast } = useToast();
+  const toast = useToast();
   const didLogUserJwt = useRef(false);
-  const [selectedChain, setSelectedChain] = useState<ChainFilter>('all');
+  const initialRecentSnapshotRef = useRef(
+    getHomeRecentSnapshotSync({ userId: user?.id ?? null })
+  );
+  const previousUserIdRef = useRef<string | null>(user?.id ?? null);
+  const [selectedChain, setSelectedChain] = useState<ChainFilter>(ChainType.SOLANA);
   const [usdBalance, setUsdBalance] = useState<string>('0.00');
-  const [transactions, setTransactions] = useState<Transaction[]>([]);
+  const [transactions, setTransactions] = useState<Transaction[]>(
+    () => initialRecentSnapshotRef.current?.transactions ?? []
+  );
   const [isLoadingTransactions, setIsLoadingTransactions] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [balanceRefreshTick, setBalanceRefreshTick] = useState(0);
   const [selectedTransaction, setSelectedTransaction] = useState<Transaction | null>(null);
   const [username, setUsername] = useState<string>('User');
-  const [addressToUsername, setAddressToUsername] = useState<{ [address: string]: string }>({});
+  const [addressToUsername, setAddressToUsername] = useState<{ [address: string]: string }>(
+    () => initialRecentSnapshotRef.current?.addressToUsername ?? {}
+  );
   const [isBalanceVisible, setIsBalanceVisible] = useState<boolean>(true);
   const [hideWallet, setHideWallet] = useState(false);
   const [receiveAsset, setReceiveAsset] = useState<ReceiveAsset>('usdc');
@@ -249,7 +276,6 @@ export default function HomeScreen() {
   const [arsPrice, setArsPrice] = useState<number>(0);
   const [, setSponsoredWalletId] = useState<string | null>(null);
   const [sponsoredWalletAddress, setSponsoredWalletAddress] = useState<string | null>(null);
-  const [sponsoredWalletLoaded, setSponsoredWalletLoaded] = useState(false);
   const [avalancheWalletSource, setAvalancheWalletSource] =
     useState<AvalancheWalletSource>("privy");
   const [satochipAvalancheAddress, setSatochipAvalancheAddress] = useState<string | null>(null);
@@ -258,11 +284,61 @@ export default function HomeScreen() {
   const sessionSignerPolicyIds = useMemo(() => getPrivyGasSponsorPolicyIds(), []);
 
   useEffect(() => {
-    setUsername('User');
-    setTransactions([]);
-    setAddressToUsername({});
-    setUsdBalance('0.00');
-  }, [user?.id]);
+    logBootTrace("home:mounted");
+    return () => {
+      logBootTrace("home:unmounted");
+    };
+  }, []);
+
+  useEffect(() => {
+    logBootTrace("home:privy-state", {
+      isReady,
+      hasUser: Boolean(user?.id),
+    });
+  }, [isReady, user?.id]);
+
+  useEffect(() => {
+    if (!isReady) return;
+
+    let isCancelled = false;
+    const previousUserId = previousUserIdRef.current;
+    const nextUserId = user?.id ?? null;
+    previousUserIdRef.current = nextUserId;
+
+    if (!nextUserId) {
+      setUsername('User');
+      setTransactions([]);
+      setAddressToUsername({});
+      setUsdBalance('0.00');
+      return;
+    }
+
+    const memorySnapshot = getHomeRecentSnapshotSync({ userId: nextUserId });
+    if (memorySnapshot) {
+      setTransactions(memorySnapshot.transactions);
+      setAddressToUsername(memorySnapshot.addressToUsername);
+      return;
+    }
+
+    if (previousUserId && previousUserId !== nextUserId) {
+      setUsername('User');
+      setTransactions([]);
+      setAddressToUsername({});
+      setUsdBalance('0.00');
+    }
+
+    getHomeRecentSnapshot({ userId: nextUserId })
+      .then((snapshot) => {
+        if (isCancelled || !snapshot) return;
+        setTransactions(snapshot.transactions);
+        setAddressToUsername(snapshot.addressToUsername);
+      })
+      .catch(() => undefined);
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [isReady, user?.id]);
 
   useEffect(() => {
     console.log("[Home] EXPO_PUBLIC_PRIVY_KEY_QUORUM_ID:", keyQuorumId);
@@ -296,7 +372,7 @@ export default function HomeScreen() {
         // Copy the access token by default to avoid confusion. (ID token is still logged above when available.)
         if (accessToken) {
           await Clipboard.setStringAsync(accessToken);
-          toast.show("Copied PRIVY_ACCESS_TOKEN to clipboard.");
+          toast.show({ title: "Copied PRIVY_ACCESS_TOKEN to clipboard." });
         }
       })
       .catch((error) => {
@@ -366,7 +442,7 @@ export default function HomeScreen() {
         });
 
         if (!options?.silent) {
-          toast.show("Gasless authorization enabled for this wallet.");
+          toast.show({ title: "Gasless authorization enabled for this wallet." });
         }
       } catch (error) {
         if (isOnDeviceSessionSignerModeError(error)) {
@@ -376,14 +452,14 @@ export default function HomeScreen() {
           });
 
           if (!options?.silent) {
-            toast.show("Gasless authorization enabled for this wallet.");
+            toast.show({ title: "Gasless authorization enabled for this wallet." });
           }
           return;
         }
 
         if (isDuplicateSessionSignerError(error)) {
           if (!options?.silent) {
-            toast.show("Gasless authorization is already enabled for this wallet.");
+            toast.show({ title: "Gasless authorization is already enabled for this wallet." });
           }
           return;
         }
@@ -397,14 +473,14 @@ export default function HomeScreen() {
     try {
       const address = embeddedSolanaAddress;
       if (!address) {
-        toast.show("No embedded Solana wallet available.");
+        toast.show({ title: "No embedded Solana wallet available." });
         return;
       }
       await authorizeGaslessForAddress(address);
     } catch (error: any) {
       const message = error instanceof Error ? error.message : String(error);
       console.error("[Home] Failed to add session signer", error);
-      toast.show(message || "Failed to authorize wallet.");
+      toast.show({ title: message || "Failed to authorize wallet." });
     }
   }, [
     authorizeGaslessForAddress,
@@ -416,14 +492,14 @@ export default function HomeScreen() {
     try {
       const address = embeddedSolanaAddress;
       if (!address) {
-        toast.show("No embedded Solana wallet available.");
+        toast.show({ title: "No embedded Solana wallet available." });
         return;
       }
       await removeSessionSigners({ address });
-      toast.show("Gasless authorization revoked for this wallet.");
+      toast.show({ title: "Gasless authorization revoked for this wallet." });
     } catch (error: any) {
       console.error("[Home] Failed to revoke session signers", error);
-      toast.show(error instanceof Error ? error.message : "Failed to revoke gasless.");
+      toast.show({ title: error instanceof Error ? error.message : "Failed to revoke gasless." });
     }
   }, [
     embeddedSolanaAddress,
@@ -439,6 +515,7 @@ export default function HomeScreen() {
   const sendRoutePushInFlightRef = useRef(false);
   const depositRoutePushInFlightRef = useRef(false);
   const withdrawRoutePushInFlightRef = useRef(false);
+  const earnOroRoutePushInFlightRef = useRef(false);
   const homeScrollRef = useRef<ScrollView>(null);
   const refreshInFlightRef = useRef(false);
   const qrScale = useRef(new Animated.Value(1)).current;
@@ -456,11 +533,6 @@ export default function HomeScreen() {
   const tabBarHeight = isIOS ? 49 : ANDROID_GLASS_TAB_HEIGHT;
   const sheetBottomPadding = Math.max(24, insets.bottom + tabBarHeight + 12);
   
-  // Load selected chain preference
-  useEffect(() => {
-    loadSelectedChain().then(setSelectedChain);
-  }, []);
-
   useFocusEffect(
     useCallback(() => {
       let isActive = true;
@@ -487,12 +559,10 @@ export default function HomeScreen() {
     const hydrateSponsoredWallet = async () => {
       if (!isReady) return;
 
-      setSponsoredWalletLoaded(false);
       setSponsoredWalletId(null);
       setSponsoredWalletAddress(null);
 
       if (!user?.id) {
-        if (!isCancelled) setSponsoredWalletLoaded(true);
         return;
       }
 
@@ -506,8 +576,6 @@ export default function HomeScreen() {
         console.error("[Home] Failed to load sponsored wallet from storage", error);
         setSponsoredWalletId(null);
         setSponsoredWalletAddress(null);
-      } finally {
-        if (!isCancelled) setSponsoredWalletLoaded(true);
       }
     };
 
@@ -543,13 +611,9 @@ export default function HomeScreen() {
     return `${address.slice(0, start)}...${address.slice(-end)}`;
   };
   
-  // Get display address based on selected chain
+  // Home money surfaces intentionally use only Solana USDC.
   const getDisplayAddress = () => {
-    if (selectedChain === ChainType.AVALANCHE) {
-      return getAvalancheAddress();
-    }
-
-    return getSolanaAddress() ?? getAvalancheAddress();
+    return getSolanaAddress();
   };
   
   // Handle chain selection
@@ -564,11 +628,7 @@ export default function HomeScreen() {
     if (sponsoredWalletAddress) {
       return sponsoredWalletAddress;
     }
-    if (solanaWallets && solanaWallets.length > 0) {
-      const wallet = solanaWallets[0];
-      return wallet.publicKey || null;
-    }
-    return null;
+    return embeddedSolanaAddress;
   };
   
   // Load username on mount
@@ -578,6 +638,10 @@ export default function HomeScreen() {
       console.log('[Home] Loading username for address:', solanaAddress);
 
       if (!solanaAddress) {
+        if (!isReady || user?.id) {
+          return;
+        }
+
         setUsername('User');
         return;
       }
@@ -585,7 +649,9 @@ export default function HomeScreen() {
       // Try to get username for the active Solana address.
       const storedUsername = await getUsername(solanaAddress);
       console.log('[Home] Retrieved username:', storedUsername);
-      
+      const nextUsername =
+        storedUsername && !storedUsername.startsWith('user-') ? storedUsername : 'User';
+
       if (storedUsername && !storedUsername.startsWith('user-')) {
         setUsername(storedUsername);
         console.log('[Home] Username set to:', storedUsername);
@@ -593,165 +659,72 @@ export default function HomeScreen() {
         console.log('[Home] No username found, using default "User"');
         setUsername('User');
       }
+
+      if (nextUsername !== 'User') {
+        await saveProfileSnapshot(
+          {
+            userId: user?.id ?? null,
+            address: solanaAddress,
+          },
+          {
+            userId: user?.id ?? null,
+            username: nextUsername,
+            primarySolanaAddress: solanaAddress,
+            solanaAddresses: [solanaAddress],
+            sponsoredWalletAddress,
+            firestoreUser: null,
+            identityVerification: null,
+            updatedAt: Date.now(),
+          }
+        );
+      }
     };
     loadUsername();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [solanaWallets, sponsoredWalletAddress, user?.id]);
+  }, [embeddedSolanaAddress, isReady, sponsoredWalletAddress, user?.id]);
 
   // Complete deferred username sync when wallet hydration was unavailable at signup.
   useEffect(() => {
     const syncPendingUsername = async () => {
-      const pendingSync = await AsyncStorage.getItem(PENDING_USERNAME_SAVE_KEY);
-      if (pendingSync !== 'true') {
+      if (!isReady || !user?.id) {
         return;
       }
 
-      const solanaAddress = getFullSolanaAddressForUsername();
-      if (!solanaAddress) {
-        return;
-      }
+      const pendingUsername = await getPendingUsername();
+      if (!pendingUsername) return;
 
-      const cachedUsername = await getUsername(solanaAddress);
-      if (!cachedUsername) {
-        await AsyncStorage.removeItem(PENDING_USERNAME_SAVE_KEY);
-        return;
-      }
+      const solanaAddresses = await ensureRegistrationSolanaAddresses({
+        knownAddresses: [
+          sponsoredWalletAddress,
+          embeddedSolanaAddress,
+          ...Array.from(ownExternalSolanaAddresses),
+        ],
+        createSolanaWallet,
+        walletStatus: solanaWalletStatus,
+      });
 
-      await saveUsername(cachedUsername, solanaAddress);
-      await AsyncStorage.removeItem(PENDING_USERNAME_SAVE_KEY);
+      if (solanaAddresses.length === 0) return;
+
+      await persistRegisteredUsername({
+        username: pendingUsername,
+        solanaAddresses,
+        userId: user.id,
+        sponsoredWalletAddress,
+      });
+      setUsername(pendingUsername);
       console.log('[Home] Synced pending username to Firestore');
     };
 
     void syncPendingUsername().catch((error) => {
       console.error('[Home] Failed to sync pending username:', error);
     });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [solanaWallets, sponsoredWalletAddress, user?.id]);
-
-  const walletInitAttempted = useRef(false);
-  const walletCreationAttempted = useRef(false);
-  const avalancheWalletInitAttempted = useRef(false);
-
-  useEffect(() => {
-    walletInitAttempted.current = false;
-    walletCreationAttempted.current = false;
-    avalancheWalletInitAttempted.current = false;
-  }, [user?.id]);
-
-  useEffect(() => {
-    if (!isReady || !user?.id || avalancheWalletInitAttempted.current) return;
-
-    if (embeddedAvalancheAddress) {
-      avalancheWalletInitAttempted.current = true;
-      return;
-    }
-
-    if (typeof createEthereumWallet !== 'function') {
-      console.warn('[Home] No embedded Avalanche wallet available and create() is unavailable.');
-      return;
-    }
-
-    let isCancelled = false;
-    avalancheWalletInitAttempted.current = true;
-
-    void createEthereumWallet().catch((error) => {
-      if (isCancelled) return;
-      avalancheWalletInitAttempted.current = false;
-      console.error('[Home] Failed to prepare Avalanche wallet', error);
-    });
-
-    return () => {
-      isCancelled = true;
-    };
-  }, [createEthereumWallet, embeddedAvalancheAddress, isReady, user?.id]);
-
-  useEffect(() => {
-    if (!sponsoredWalletLoaded) return;
-    if (!isReady || !user?.id || walletInitAttempted.current) return;
-
-    const walletIsBusy =
-      solanaWalletStatus === "creating" ||
-      solanaWalletStatus === "connecting" ||
-      solanaWalletStatus === "reconnecting";
-
-    let isCancelled = false;
-
-    const prepareSponsoredWallet = async () => {
-      let walletAddress = embeddedSolanaAddress;
-
-      if (!walletAddress) {
-        if (walletIsBusy) return;
-        if (walletCreationAttempted.current) return;
-        if (typeof createSolanaWallet !== "function") {
-          console.warn("[Home] No embedded Solana wallet available and create() is unavailable.");
-          return;
-        }
-
-        walletCreationAttempted.current = true;
-        console.log("[Home] No embedded Solana wallet found. Creating one...");
-        const provider = await createSolanaWallet({ recoveryMethod: "privy" });
-        walletAddress = getSolanaProviderAddress(provider);
-
-        if (!walletAddress) {
-          console.log("[Home] Embedded Solana wallet created. Waiting for local wallet state to sync.");
-          return;
-        }
-      }
-
-      if (keyQuorumId) {
-        await authorizeGaslessForAddress(walletAddress, { silent: true });
-      }
-
-      walletInitAttempted.current = true;
-
-      let wallet;
-      try {
-        wallet = await ensureSponsoredSolanaWallet({
-          userId: user.id,
-          walletAddress,
-        });
-      } catch (error) {
-        if (keyQuorumId && isGaslessAuthorizationRequiredError(error)) {
-          await authorizeGaslessForAddress(walletAddress, { silent: true });
-          wallet = await ensureSponsoredSolanaWallet({
-            userId: user.id,
-            walletAddress,
-          });
-        } else {
-          throw error;
-        }
-      }
-
-      if (isCancelled) return;
-
-      console.log("[Home] ✅ Sponsored wallet ready", wallet?.address);
-      const nextId = wallet?.walletId ?? null;
-      const nextAddress = wallet?.publicKey ?? wallet?.address ?? null;
-      setSponsoredWalletId(nextId);
-      setSponsoredWalletAddress(nextAddress);
-      await setSponsoredSolanaWallet({ id: nextId, address: nextAddress }, user.id);
-    };
-
-    void prepareSponsoredWallet().catch((error) => {
-      if (isCancelled) return;
-      walletInitAttempted.current = false;
-      if (!embeddedSolanaAddress) {
-        walletCreationAttempted.current = false;
-      }
-      console.error("[Home] ❌ Failed to prepare sponsored wallet", error);
-    });
-
-    return () => {
-      isCancelled = true;
-    };
   }, [
     createSolanaWallet,
     embeddedSolanaAddress,
     isReady,
-    keyQuorumId,
+    ownExternalSolanaAddresses,
     solanaWalletStatus,
-    sponsoredWalletLoaded,
-    authorizeGaslessForAddress,
+    sponsoredWalletAddress,
     user?.id,
   ]);
 
@@ -759,11 +732,7 @@ export default function HomeScreen() {
     if (sponsoredWalletAddress) {
       return sponsoredWalletAddress;
     }
-    if (solanaWallets && solanaWallets.length > 0) {
-      const wallet = solanaWallets[0];
-      return wallet.publicKey || null;
-    }
-    return null;
+    return embeddedSolanaAddress;
   };
 
   const getFullAvalancheAddress = () => {
@@ -788,31 +757,41 @@ export default function HomeScreen() {
   console.log('Solana address to display:', solanaAddress);
   console.log('Avalanche address to display:', avalancheAddress);
 
-  // Fetch all token balances and calculate USD value
+  useEffect(() => {
+    if (Platform.OS !== 'ios' || !user?.id || !fullSolanaAddress) {
+      return;
+    }
+
+    let isCancelled = false;
+    getReceiveTransactionNotificationsPreference(user.id)
+      .then((enabled) => {
+        if (isCancelled || enabled !== true) return;
+        return registerRemoteReceiveTransactionNotifications({
+          userId: user.id,
+          addresses: [fullSolanaAddress],
+        });
+      })
+      .catch((error) => {
+        console.warn('[Home] Failed to refresh remote push registration', error);
+      });
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [fullSolanaAddress, user?.id]);
+
+  // Fetch only Solana USDC and display it as the app balance.
   const fetchBalance = async (forceFresh: boolean = false) => {
     try {
-      const multiBalances = await fetchMultiChainBalances(
-        fullSolanaAddress,
-        fullAvalancheAddress,
-        forceFresh
-      );
+      const solanaUsdcBalance = fullSolanaAddress
+        ? await fetchSolanaUsdcBalance(fullSolanaAddress, forceFresh)
+        : 0;
 
-      console.log('Multi-chain balances:', multiBalances);
-
-      let totalUsd = 0;
-      if (selectedChain === 'all') {
-        totalUsd = multiBalances.totalUsd;
-      } else if (selectedChain === ChainType.SOLANA && multiBalances.solana) {
-        totalUsd = multiBalances.solana.totalUsd;
-      } else if (selectedChain === ChainType.AVALANCHE && multiBalances.avalanche) {
-        totalUsd = multiBalances.avalanche.totalUsd;
-      }
-
-      setUsdBalance(totalUsd.toFixed(2));
-      console.log('Total USD balance:', totalUsd.toFixed(2));
+      setUsdBalance(formatDecimalForInput(solanaUsdcBalance, 6) || '0');
+      console.log('Solana USDC balance:', formatStableValue(solanaUsdcBalance, { context: 'detailed' }));
     } catch (error) {
       console.error('Error fetching balance:', error);
-      setUsdBalance('0.00');
+      setUsdBalance('0');
     }
   };
 
@@ -835,7 +814,7 @@ export default function HomeScreen() {
     });
   }, [fullSolanaAddress, solanaPayReferences, solanaReceiveAsset]);
 
-  const isAvalancheSelected = selectedChain === ChainType.AVALANCHE;
+  const isAvalancheSelected = false;
 
   useEffect(() => {
     if (isAvalancheSelected && receiveAsset === 'sol') {
@@ -858,12 +837,26 @@ export default function HomeScreen() {
     ? receiveAsset === 'avax'
       ? 'Scan with an Avalanche Fuji wallet. Send test AVAX to this address.'
       : 'Scan with an Avalanche Fuji wallet. Send Fuji USDC to this address.'
-    : 'Scan with a Solana Pay wallet. USDC is preferred, SOL is supported.';
+    : 'Scan with a Solana Pay wallet. Send USDC on Solana.';
   
   // Fetch transactions and resolve usernames
   const fetchTransactions = useCallback(async (address: string) => {
+    let cachedAddressToUsername: Record<string, string> = {};
+
     try {
-      setIsLoadingTransactions(true);
+      const cachedSnapshot = await getHomeRecentSnapshot({
+        userId: user?.id ?? null,
+        address,
+      });
+      const hasCachedTransactions = Boolean(cachedSnapshot?.transactions.length);
+
+      if (cachedSnapshot) {
+        cachedAddressToUsername = cachedSnapshot.addressToUsername;
+        setTransactions(cachedSnapshot.transactions);
+        setAddressToUsername(cachedSnapshot.addressToUsername);
+      }
+
+      setIsLoadingTransactions(!hasCachedTransactions);
       const txs = await getMergedTransactions(address);
       setTransactions(txs);
       console.log(`Loaded ${txs.length} transactions`);
@@ -871,7 +864,7 @@ export default function HomeScreen() {
       // Fetch usernames for all unique addresses in transactions
       const uniqueAddresses = [...new Set(txs.map(tx => tx.address))]
         .filter(addr => addr && addr.trim() !== ''); // Filter out empty/invalid addresses
-      const usernameMap: { [address: string]: string } = {};
+      const usernameMap: { [address: string]: string } = { ...cachedAddressToUsername };
       
       await Promise.all(
         uniqueAddresses.map(async (addr) => {
@@ -887,12 +880,21 @@ export default function HomeScreen() {
       );
       
       setAddressToUsername(usernameMap);
+      await saveHomeRecentSnapshot(
+        { userId: user?.id ?? null, address },
+        {
+          address,
+          transactions: txs.slice(0, 10),
+          addressToUsername: usernameMap,
+          updatedAt: Date.now(),
+        }
+      );
     } catch (error) {
       console.error('Error fetching transactions:', error);
     } finally {
       setIsLoadingTransactions(false);
     }
-  }, []);
+  }, [user?.id]);
   
   // Handle pull to refresh
   const resetPullRefreshVisualState = useCallback(() => {
@@ -944,8 +946,11 @@ export default function HomeScreen() {
   // Fetch balance and transactions when wallet address is available
   useEffect(() => {
     const fullAddress = getFullSolanaAddress();
-    const avalancheAddress = getFullAvalancheAddress();
-    if (!fullAddress && !avalancheAddress) {
+    if (!fullAddress) {
+      if (!isReady || user?.id) {
+        return;
+      }
+
       setUsdBalance('0.00');
       setTransactions([]);
       setAddressToUsername({});
@@ -964,6 +969,9 @@ export default function HomeScreen() {
           120000,
           (newTransaction) => {
             console.log('New transaction received:', newTransaction);
+            void notifyForReceivedTransaction(newTransaction, user?.id).catch((error) => {
+              console.error('Failed to schedule transaction notification', error);
+            });
             fetchTransactions(fullAddress);
           }
         )
@@ -979,8 +987,8 @@ export default function HomeScreen() {
       stopPolling();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [fullAvalancheAddress, solanaWallets, selectedChain, sponsoredWalletAddress]);
-  
+  }, [isReady, solanaWallets, sponsoredWalletAddress, user?.id]);
+
   // Format transaction for display
   const getDisplayNameForAddress = (address?: string | null) => {
     if (!address || address.trim() === '') {
@@ -1022,30 +1030,31 @@ export default function HomeScreen() {
       type: tx.type,
       title: addressDisplay,
       subtitle: tx.type === 'send' ? 'Send' : 'Receive',
-      amount: tx.type === 'send' ? `-${tx.amount.toFixed(2)}` : `+${tx.amount.toFixed(2)}`,
+      amount:
+        tx.type === 'send'
+          ? `-${formatTokenAmountDisplay(tx.amount, {
+              context: 'compact',
+              tokenPriceUsd: tx.currency === 'USDC' ? 1 : undefined,
+              tokenDecimals: tx.currency === 'USDC' ? 6 : undefined,
+            })}`
+          : `+${formatTokenAmountDisplay(tx.amount, {
+              context: 'compact',
+              tokenPriceUsd: tx.currency === 'USDC' ? 1 : undefined,
+              tokenDecimals: tx.currency === 'USDC' ? 6 : undefined,
+            })}`,
       currency: tx.currency || 'SOL',
       date: new Date(tx.timestamp).toLocaleDateString(),
     };
   };
 
-  const formatUsdParts = (value: string) => {
-    const num = Number.parseFloat(value);
-    if (!Number.isFinite(num)) return { dollars: "0", cents: "00" };
-    const fixed = num.toFixed(2);
-    const [whole, cents] = fixed.split(".");
-    const dollars = whole.replace(/\B(?=(\d{3})+(?!\d))/g, ",");
-    return { dollars, cents: cents ?? "00" };
-  };
-
-  const usdBalanceParts = useMemo(() => formatUsdParts(usdBalance), [usdBalance]);
-  const formattedUsdBalance = useMemo(
-    () => `$${usdBalanceParts.dollars}.${usdBalanceParts.cents}`,
-    [usdBalanceParts]
-  );
   const usdBalanceNumericValue = useMemo(() => {
     const parsed = Number.parseFloat(usdBalance);
     return Number.isFinite(parsed) ? parsed : 0;
   }, [usdBalance]);
+  const formattedUsdBalance = useMemo(
+    () => formatStableValue(usdBalanceNumericValue, { context: "detailed" }),
+    [usdBalanceNumericValue]
+  );
 
   const getSecondaryBalanceText = () => {
     if (!isBalanceVisible) return "Tap to view balance";
@@ -1055,30 +1064,25 @@ export default function HomeScreen() {
 
     if (currency === 'ARS' && arsPrice > 0) {
       const arsVal = usdVal * arsPrice;
-      // Format with thousands separator
-      return `≈ AR$ ${arsVal.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ",")}`;
+      return `≈ ${formatFiatValue(arsVal, {
+        context: "detailed",
+        currencyPrefix: "AR$",
+      })}`;
     } else if (currency === 'EUR') {
-      // approx rate
       const eurVal = usdVal * 0.95;
-      return `≈ €${eurVal.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ",")}`;
+      return `≈ ${formatFiatValue(eurVal, {
+        context: "detailed",
+        currencyPrefix: "€",
+      })}`;
     }
     
-    return `≈ $${usdBalance}`;
+    return `≈ ${formatStableValue(usdVal, { context: "detailed" })}`;
   };
 
-  const selectedChainLabel =
-    selectedChain === "all"
-      ? "All chains"
-      : selectedChain === ChainType.AVALANCHE
-        ? "Avalanche Fuji"
-        : "Solana";
+  const selectedChainLabel = "Solana USDC";
 
   const getSelectedWalletAddress = () => {
-    if (selectedChain === ChainType.AVALANCHE) {
-      return fullAvalancheAddress;
-    }
-
-    return fullSolanaAddress ?? (selectedChain === 'all' ? fullAvalancheAddress : null);
+    return fullSolanaAddress;
   };
 
   const isDepositRouteOpen =
@@ -1096,6 +1100,7 @@ export default function HomeScreen() {
     segments[0] === "withdraw-bank" ||
     segments[0] === "withdraw-crypto" ||
     segments[0] === "withdraw-crypto-review";
+  const isEarnOroRouteOpen = segments[0] === "earn-oro";
 
   useEffect(() => {
     if (!isSendRouteOpen) {
@@ -1115,6 +1120,12 @@ export default function HomeScreen() {
     }
   }, [isWithdrawRouteOpen]);
 
+  useEffect(() => {
+    if (!isEarnOroRouteOpen) {
+      earnOroRoutePushInFlightRef.current = false;
+    }
+  }, [isEarnOroRouteOpen]);
+
   const handleAdd = () => {
     if (depositRoutePushInFlightRef.current || isDepositRouteOpen) return;
     depositRoutePushInFlightRef.current = true;
@@ -1122,13 +1133,16 @@ export default function HomeScreen() {
     router.push('/deposit');
   };
 
+  const handleEarnOro = () => {
+    if (earnOroRoutePushInFlightRef.current || isEarnOroRouteOpen) return;
+    earnOroRoutePushInFlightRef.current = true;
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    router.push('/earn-oro');
+  };
+
   const handleWithdraw = () => {
     if (withdrawRoutePushInFlightRef.current || isWithdrawRouteOpen) return;
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-    if (selectedChain === ChainType.AVALANCHE) {
-      showToast('Avalanche withdraw is coming soon. Switch to Solana to continue.');
-      return;
-    }
     withdrawRoutePushInFlightRef.current = true;
     router.push('/withdraw');
   };
@@ -1136,17 +1150,6 @@ export default function HomeScreen() {
   const handleSend = () => {
     if (sendRoutePushInFlightRef.current || isSendRouteOpen) return;
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-    if (selectedChain === ChainType.AVALANCHE) {
-      sendRoutePushInFlightRef.current = true;
-      router.push({
-        pathname: "/send-amount",
-        params: {
-          chain: ChainType.AVALANCHE,
-          walletSource: avalancheWalletSource,
-        },
-      });
-      return;
-    }
     if (isIOS) {
       sendRoutePushInFlightRef.current = true;
       router.push("/send-options");
@@ -1160,13 +1163,13 @@ export default function HomeScreen() {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     router.push({
       pathname: '/balance',
-      params: { chain: selectedChain },
+      params: { chain: ChainType.SOLANA },
     });
   };
 
   const showToast = useCallback(
     (message: string) => {
-      toast.show(message);
+      toast.show({ title: message });
     },
     [toast]
   );
@@ -1195,6 +1198,33 @@ export default function HomeScreen() {
   const goToProfile = useCallback(() => {
     router.navigate("/profile");
   }, [router]);
+
+  const handleOpenSupportChat = useCallback(() => {
+    const rawUser = user as {
+      linked_accounts?: LinkedSolanaAccountLike[];
+      linkedAccounts?: LinkedSolanaAccountLike[];
+    } | null;
+    const linkedAccounts = rawUser?.linked_accounts ?? rawUser?.linkedAccounts ?? [];
+    const email =
+      linkedAccounts.find((account) => account?.type === "email")?.address?.trim() ?? null;
+    const phoneAccount = linkedAccounts.find((account) => account?.type === "phone");
+    const phone =
+      phoneAccount?.phoneNumber?.trim() ??
+      phoneAccount?.number?.trim() ??
+      phoneAccount?.phone_number?.trim() ??
+      null;
+
+    const didOpenChat = openSupportChat({
+      nickname: username,
+      tokenId: user?.id ?? null,
+      email,
+      phone,
+    });
+
+    if (!didOpenChat) {
+      showToast("Support chat is not configured yet.");
+    }
+  }, [showToast, user, username]);
 
   const handleCopyAddress = async () => {
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
@@ -1236,10 +1266,6 @@ export default function HomeScreen() {
   };
   
   const handleTransactionPress = (tx: Transaction) => {
-    if (selectedChain === ChainType.AVALANCHE) {
-      showToast('Avalanche activity is coming soon. Switch to Solana to view transaction history.');
-      return;
-    }
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     setSelectedTransaction(tx);
     bottomSheetRef.current?.expand();
@@ -1290,6 +1316,17 @@ export default function HomeScreen() {
   const getInitials = (address: string) => {
     return address.slice(0, 2).toUpperCase();
   };
+
+  const selectedStatusMeta = useMemo(() => {
+    if (!selectedTransaction) return null;
+    if (selectedTransaction.status === "confirmed") {
+      return { label: "Completed", color: "#22C55E" };
+    }
+    if (selectedTransaction.status === "pending") {
+      return { label: "Pending", color: "#F59E0B" };
+    }
+    return { label: "Failed", color: "#EF4444" };
+  }, [selectedTransaction]);
   
   const renderBackdrop = useCallback(
     (props: any) => (
@@ -1419,68 +1456,77 @@ export default function HomeScreen() {
 
   const recentCardContent = (
     <>
-      {selectedChain === ChainType.AVALANCHE ? (
+      {transactions.length === 0 ? (
         <View style={styles.emptyStateLiquid}>
-          <Text style={styles.emptyTitle}>Avalanche Fuji activity soon</Text>
-          <Text style={styles.emptySubtitle}>History is still available for Solana only in this version.</Text>
-        </View>
-      ) : transactions.length === 0 && !isLoadingTransactions ? (
-        <View style={styles.emptyStateLiquid}>
-          <Text style={styles.emptyTitle}>No activity yet</Text>
-          <Text style={styles.emptySubtitle}>Your recent transfers will appear here.</Text>
+          <View style={styles.emptyActivityMark}>
+            <View style={styles.emptyActivityMarkLine} />
+          </View>
+          <Text style={styles.emptyTitle}>
+            {isLoadingTransactions ? "Loading activity" : "No activity yet"}
+          </Text>
+          <Text style={styles.emptySubtitle}>
+            {isLoadingTransactions
+              ? "Checking your recent transfers."
+              : "Your recent transfers will appear here."}
+          </Text>
         </View>
       ) : (
-        transactions.slice(0, 6).map((tx) => {
-          const item = formatTransaction(tx);
-          const status =
-            tx.status === "confirmed"
-              ? { label: "Successful", dot: "#22C55E" }
-              : tx.status === "pending"
-                ? { label: "Pending", dot: "#F59E0B" }
-                : { label: "Failed", dot: "#EF4444" };
+        <>
+          {transactions.slice(0, 3).map((tx) => {
+            const item = formatTransaction(tx);
+            const status =
+              tx.status === "confirmed"
+                ? { label: "Successful", dot: "#22C55E" }
+                : tx.status === "pending"
+                  ? { label: "Pending", dot: "#F59E0B" }
+                  : { label: "Failed", dot: "#EF4444" };
 
-          const dateText = new Date(tx.timestamp).toLocaleString(undefined, {
-            month: "short",
-            day: "numeric",
-            hour: "numeric",
-            minute: "2-digit",
-          });
+            const dateText = new Date(tx.timestamp).toLocaleString(undefined, {
+              month: "short",
+              day: "numeric",
+              hour: "numeric",
+              minute: "2-digit",
+            });
 
-          return (
-            <TouchableOpacity
-              key={item.id}
-              style={styles.recentRow}
-              activeOpacity={0.85}
-              onPress={() => handleTransactionPress(tx)}
-            >
-              <View style={styles.recentLeft}>
-                <View style={styles.recentIcon}>
-                  {getActivityIcon(item.type)}
+            return (
+              <TouchableOpacity
+                key={item.id}
+                style={styles.recentRow}
+                activeOpacity={0.85}
+                onPress={() => handleTransactionPress(tx)}
+              >
+                <View style={styles.recentLeft}>
+                  <View style={styles.recentIcon}>
+                    {getActivityIcon(item.type)}
+                  </View>
+                  <View style={styles.recentText}>
+                    <Text style={styles.recentTitle} numberOfLines={1}>
+                      {item.title}
+                    </Text>
+                    <Text style={styles.recentMeta} numberOfLines={1}>
+                      {dateText}
+                    </Text>
+                  </View>
                 </View>
-                <View style={styles.recentText}>
-                  <Text style={styles.recentTitle} numberOfLines={1}>
-                    {item.title}
+                <View style={styles.recentRight}>
+                  <Text style={styles.recentAmount} numberOfLines={1}>
+                    {isBalanceVisible
+                      ? formatStableValue(tx.amount, { context: "compact" })
+                      : "$••••"}
                   </Text>
-                  <Text style={styles.recentMeta} numberOfLines={1}>
-                    {dateText}
-                  </Text>
+                  <View style={styles.statusRow}>
+                    <View style={[styles.statusDot, { backgroundColor: status.dot }]} />
+                    <Text style={styles.statusTextLiquid}>{status.label}</Text>
+                  </View>
                 </View>
-              </View>
-              <View style={styles.recentRight}>
-                <Text style={styles.recentAmount} numberOfLines={1}>
-                  {isBalanceVisible ? `$${tx.amount.toFixed(2)}` : "$••••"}
-                </Text>
-                <View style={styles.statusRow}>
-                  <View style={[styles.statusDot, { backgroundColor: status.dot }]} />
-                  <Text style={styles.statusTextLiquid}>{status.label}</Text>
-                </View>
-              </View>
-            </TouchableOpacity>
-          );
-        })
+              </TouchableOpacity>
+            );
+          })}
+        </>
       )}
     </>
   );
+  const hasMoreRecentTransactions = transactions.length > 3;
 
   const screenContent = (
     <View style={styles.container}>
@@ -1544,47 +1590,42 @@ export default function HomeScreen() {
                 }}
               >
                 <GlassView
-                  style={[styles.headerIconButton, isIOS ? styles.headerIconButtonIos : null]}
+                  style={[
+                    styles.headerIconButton,
+                    styles.headerProfileAvatarButton,
+                    isIOS ? styles.headerIconButtonIos : null,
+                  ]}
                   intensity={isIOS ? 16 : 30}
                   interactive
                 >
-                  <IconSymbol
-                    name="person.crop.circle"
-                    size={24}
-                    color="rgba(0,0,0,0.72)"
-                  />
+                  <GeneratedProfileAvatar size={38} />
                 </GlassView>
-                <Text style={[styles.headerGreetingText, isIOS ? styles.headerGreetingTextIos : null]} numberOfLines={1}>
-                  Hello, {username || "User"}
-                </Text>
               </TouchableOpacity>
 
               <View style={styles.headerRight}>
                 <PlatformPressable
                   onPress={() => {
-                    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                    handleAdd();
+                    handleEarnOro();
                   }}
                   pressOpacity={0.7}
-                  style={styles.headerIconHit}
+                  style={styles.headerEarnOroHit}
                 >
                   <GlassView
-                    style={[styles.headerIconButton, isIOS ? styles.headerIconButtonIos : null]}
+                    style={[styles.headerEarnOroPill, isIOS ? styles.headerEarnOroPillIos : null]}
                     intensity={isIOS ? 16 : 30}
                     interactive
                   >
-                    <IconSymbol
-                      name="plus"
-                      size={22}
-                      color="rgba(0,0,0,0.72)"
-                    />
+                    <View style={styles.headerEarnOroDot} />
+                    <Text style={styles.headerEarnOroText} numberOfLines={1}>
+                      Earn ORO
+                    </Text>
                   </GlassView>
                 </PlatformPressable>
 
                 <PlatformPressable
                   onPress={() => {
                     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                    setShowThemeSelector(true);
+                    handleOpenSupportChat();
                   }}
                   pressOpacity={0.7}
                   style={styles.headerIconHit}
@@ -1595,7 +1636,7 @@ export default function HomeScreen() {
                     interactive
                   >
                     <IconSymbol
-                      name="paintpalette.fill"
+                      name="bell.fill"
                       size={22}
                       color="rgba(0,0,0,0.72)"
                     />
@@ -1628,8 +1669,13 @@ export default function HomeScreen() {
                 onScroll={handleHomeScroll}
                 scrollEventThrottle={16}
                 showsVerticalScrollIndicator={false}
+                scrollEnabled
+                bounces
+                alwaysBounceVertical
                 overScrollMode="always"
               >
+                <View style={styles.homeContentFrame}>
+                  <View style={styles.homeTopCluster}>
 
           <View style={[styles.balanceBlock, isIOS ? styles.balanceBlockIos : null]}>
             <TouchableOpacity
@@ -1654,53 +1700,55 @@ export default function HomeScreen() {
               </Text>
             </TouchableOpacity>
 
-            <View style={[styles.pillsRow, isIOS ? styles.pillsRowIos : null]}>
-              <TouchableOpacity onPress={handleCopyAddress} activeOpacity={0.85}>
-                {renderGlassSurface(
-                  <>
-                    <Text style={styles.addressPillText}>{getDisplayAddress() ?? "No wallet"}</Text>
-                    <IconSymbol name="doc.on.doc" size={16} color="rgba(0,0,0,0.55)" />
-                  </>,
-                  [styles.addressPill, isIOS ? styles.addressPillIos : null],
-                  28,
-                  true
-                )}
-              </TouchableOpacity>
+            {SHOW_HOME_WALLET_PILLS ? (
+              <View style={[styles.pillsRow, isIOS ? styles.pillsRowIos : null]}>
+                <TouchableOpacity onPress={handleCopyAddress} activeOpacity={0.85}>
+                  {renderGlassSurface(
+                    <>
+                      <Text style={styles.addressPillText}>{getDisplayAddress() ?? "No wallet"}</Text>
+                      <IconSymbol name="doc.on.doc" size={16} color="rgba(0,0,0,0.55)" />
+                    </>,
+                    [styles.addressPill, isIOS ? styles.addressPillIos : null],
+                    28,
+                    true
+                  )}
+                </TouchableOpacity>
 
-              <TouchableOpacity
-                onPress={() => {
-                  const next =
-                    selectedChain === "all"
-                      ? ChainType.SOLANA
-                      : selectedChain === ChainType.SOLANA
-                        ? ChainType.AVALANCHE
-                        : "all";
-                  handleChainSelect(next as ChainFilter);
-                }}
-                onLongPress={() => {
-                  if (selectedChain === ChainType.AVALANCHE) {
-                    showToast('Gasless sponsorship is only available on Solana.');
-                    return;
-                  }
-                  if (keyQuorumId) {
-                    handleRevokeGasless();
-                    return;
-                  }
-                  handleAuthorizeGasless();
-                }}
-                activeOpacity={0.85}
-              >
-                {renderGlassSurface(
-                  <Text style={styles.chainPillText}>{selectedChainLabel}</Text>,
-                  [styles.chainPill, isIOS ? styles.chainPillIos : null],
-                  22,
-                  true
-                )}
-              </TouchableOpacity>
+                <TouchableOpacity
+                  onPress={() => {
+                    const next =
+                      selectedChain === "all"
+                        ? ChainType.SOLANA
+                        : selectedChain === ChainType.SOLANA
+                          ? ChainType.AVALANCHE
+                          : "all";
+                    handleChainSelect(next as ChainFilter);
+                  }}
+                  onLongPress={() => {
+                    if (selectedChain === ChainType.AVALANCHE) {
+                      showToast('Gasless sponsorship is only available on Solana.');
+                      return;
+                    }
+                    if (keyQuorumId) {
+                      handleRevokeGasless();
+                      return;
+                    }
+                    handleAuthorizeGasless();
+                  }}
+                  activeOpacity={0.85}
+                >
+                  {renderGlassSurface(
+                    <Text style={styles.chainPillText}>{selectedChainLabel}</Text>,
+                    [styles.chainPill, isIOS ? styles.chainPillIos : null],
+                    22,
+                    true
+                  )}
+                </TouchableOpacity>
 
-            </View>
+              </View>
+            ) : null}
 
-            {selectedChain === ChainType.AVALANCHE ? (
+            {SHOW_HOME_WALLET_PILLS && selectedChain === ChainType.AVALANCHE ? (
               <GlassView style={styles.avalancheSourceCard} intensity={18}>
                 <View style={styles.avalancheSourceHeader}>
                   <View>
@@ -1811,6 +1859,9 @@ export default function HomeScreen() {
               )}
             </TouchableOpacity>
           </View>
+                  </View>
+
+                  <View style={styles.homeRecentCluster}>
 
           <View style={styles.recentHeaderRow}>
             <Text style={styles.recentHeaderText}>Recent activity</Text>
@@ -1822,11 +1873,32 @@ export default function HomeScreen() {
             </TouchableOpacity>
           </View>
 
-          <View style={[styles.recentCardWrap, isIOS ? styles.recentCardWrapIos : null]}>
-            <GlassView style={[styles.recentCard, isIOS ? styles.recentCardIos : null]} intensity={18}>
+          <View
+            style={[
+              styles.recentCardWrap,
+              isIOS ? styles.recentCardWrapIos : null,
+              hasMoreRecentTransactions ? styles.recentCardWrapStacked : null,
+            ]}
+          >
+            {hasMoreRecentTransactions ? (
+              <>
+                <View style={[styles.recentCardMiniStack, styles.recentCardMiniStackBack]} />
+                <View style={[styles.recentCardMiniStack, styles.recentCardMiniStackFront]} />
+              </>
+            ) : null}
+            <GlassView
+              style={[
+                styles.recentCard,
+                transactions.length === 0 ? styles.recentCardEmpty : null,
+                isIOS ? styles.recentCardIos : null,
+              ]}
+              intensity={18}
+            >
               {recentCardContent}
             </GlassView>
           </View>
+                  </View>
+                </View>
               </ReAnimated.ScrollView>
             </View>
           </View>
@@ -1838,75 +1910,117 @@ export default function HomeScreen() {
         snapPoints={snapPoints}
         enablePanDownToClose
         backdropComponent={renderBackdrop}
-        backgroundStyle={styles.bottomSheetBackground}
-        handleIndicatorStyle={styles.bottomSheetIndicator}
+        backgroundStyle={[
+          styles.bottomSheetBackground,
+          { backgroundColor: sheetPalette.background },
+        ]}
+        handleIndicatorStyle={[
+          styles.bottomSheetIndicator,
+          { backgroundColor: sheetPalette.secondaryText },
+        ]}
       >
         <BottomSheetView style={styles.bottomSheetContent}>
           {selectedTransaction && (
             <ScrollView showsVerticalScrollIndicator={false}>
               {/* Transaction Summary Card */}
-              <View style={styles.summaryCard}>
+              <GlassView
+                style={[styles.summaryCard, { borderColor: sheetCardBorder }]}
+                intensity={30}
+              >
                 <View style={styles.summaryLeft}>
-                  <View style={styles.detailAvatar}>
+                  <View
+                    style={[
+                      styles.detailAvatar,
+                      {
+                        backgroundColor:
+                          selectedTransaction.type === "receive"
+                            ? "#059669"
+                            : "#2563EB",
+                      },
+                    ]}
+                  >
                     <Text style={styles.detailAvatarText}>
                       {getInitials(getCounterpartyValue(selectedTransaction))}
                     </Text>
                   </View>
                 </View>
                 <View style={styles.summaryCenter}>
-                  <Text style={styles.summaryTitle}>
-                    {selectedTransaction.type === 'send' ? '↗ Sent to ' : '↙ Received from '}
-                    <Text style={styles.summaryAddressInline}>
-                      {getDisplayNameForAddress(getCounterpartyValue(selectedTransaction))}
-                    </Text>
+                  <Text style={[styles.summaryTitle, { color: sheetPalette.secondaryText }]}>
+                    {selectedTransaction.type === 'send' ? 'Sent to' : 'Received from'}
                   </Text>
-                  <Text style={styles.detailAmount}>
-                    {isBalanceVisible ? `$${selectedTransaction.amount.toFixed(2)}` : '$••••'}
+                  <Text
+                    style={[styles.summaryAddressInline, { color: sheetPalette.primaryText }]}
+                    numberOfLines={1}
+                  >
+                    {getDisplayNameForAddress(getCounterpartyValue(selectedTransaction))}
+                  </Text>
+                  <Text style={[styles.detailAmount, { color: sheetPalette.primaryText }]}>
+                    {isBalanceVisible
+                      ? formatStableValue(selectedTransaction.amount, { context: "detailed" })
+                      : '$••••'}
                   </Text>
                 </View>
                 <View style={styles.summaryRight}>
-                  <View style={[
-                    styles.statusBadge,
-                    selectedTransaction.status === 'confirmed' && styles.statusBadgeConfirmed,
-                    selectedTransaction.status === 'pending' && styles.statusBadgePending,
-                  ]}>
+                  <View
+                    style={[
+                      styles.statusBadge,
+                      { backgroundColor: selectedStatusMeta?.color ?? "#EF4444" },
+                    ]}
+                  >
                     <Text style={styles.statusText}>
-                      {selectedTransaction.status === 'confirmed' ? 'Completed' : 
-                       selectedTransaction.status === 'pending' ? 'Pending' : 'Failed'}
+                      {selectedStatusMeta?.label ?? "Failed"}
                     </Text>
                   </View>
                 </View>
-              </View>
+              </GlassView>
 
               {/* Details Card */}
-              <View style={styles.detailsCard}>
+              <GlassView
+                style={[styles.detailsCard, { borderColor: sheetCardBorder }]}
+                intensity={28}
+              >
                 <View style={styles.detailRow}>
-                  <Text style={styles.detailLabel}>Created</Text>
-                  <Text style={styles.detailValue}>{formatDetailDate(selectedTransaction.timestamp)}</Text>
+                  <Text style={[styles.detailLabel, { color: sheetPalette.secondaryText }]}>Created</Text>
+                  <Text style={[styles.detailValue, { color: sheetPalette.primaryText }]}>
+                    {formatDetailDate(selectedTransaction.timestamp)}
+                  </Text>
                 </View>
 
-                <View style={styles.detailDivider} />
+                <View style={[styles.detailDivider, { backgroundColor: sheetPalette.borderSubtle }]} />
 
                 <View style={styles.detailRow}>
-                  <Text style={styles.detailLabel}>TX ID</Text>
-                  <TouchableOpacity 
-                    style={styles.signatureRow} 
+                  <Text style={[styles.detailLabel, { color: sheetPalette.secondaryText }]}>TX ID</Text>
+                  <TouchableOpacity
+                    style={styles.signatureRow}
                     onPress={() => copySignature(selectedTransaction.signature)}
                   >
-                    <Text style={styles.detailValue}>{shortenSignature(selectedTransaction.signature)}</Text>
-                    <CopyIcon size={18} color="#000" />
+                    <Text style={[styles.detailValue, { color: sheetPalette.primaryText }]}>
+                      {shortenSignature(selectedTransaction.signature)}
+                    </Text>
+                    <CopyIcon size={16} color={sheetPalette.secondaryText} />
                   </TouchableOpacity>
                 </View>
 
                 {selectedTransaction.fee && (
                   <>
-                    <View style={styles.detailDivider} />
+                    <View
+                      style={[
+                        styles.detailDivider,
+                        { backgroundColor: sheetPalette.borderSubtle },
+                      ]}
+                    />
                     <View style={styles.detailRow}>
-                      <Text style={styles.detailLabel}>Network fee</Text>
-                      <Text style={styles.detailValue}>
+                      <Text style={[styles.detailLabel, { color: sheetPalette.secondaryText }]}>
+                        Network fee
+                      </Text>
+                      <Text style={[styles.detailValue, { color: sheetPalette.primaryText }]}>
                         {selectedTransaction.chain === ChainType.SOLANA
-                          ? (selectedTransaction.fee / 1000000000).toFixed(6)
-                          : selectedTransaction.fee.toFixed(6)}{" "}
+                          ? formatAmount(selectedTransaction.fee / 1000000000, {
+                              maxFractionDigits: 6,
+                            })
+                          : formatAmount(selectedTransaction.fee, {
+                              maxFractionDigits: 6,
+                            })}{" "}
                         {getChainSymbol(selectedTransaction.chain)}
                       </Text>
                     </View>
@@ -1915,26 +2029,52 @@ export default function HomeScreen() {
 
                 {selectedTransaction.comment && (
                   <>
-                    <View style={styles.detailDivider} />
+                    <View
+                      style={[
+                        styles.detailDivider,
+                        { backgroundColor: sheetPalette.borderSubtle },
+                      ]}
+                    />
                     <View style={styles.detailRow}>
-                      <Text style={styles.detailLabel}>Comment</Text>
-                      <Text style={styles.detailValue}>{selectedTransaction.comment}</Text>
+                      <Text style={[styles.detailLabel, { color: sheetPalette.secondaryText }]}>
+                        Comment
+                      </Text>
+                      <Text style={[styles.detailValue, { color: sheetPalette.primaryText }]}>
+                        {selectedTransaction.comment}
+                      </Text>
                     </View>
                   </>
                 )}
-              </View>
+              </GlassView>
 
               {/* Action Buttons */}
-              <TouchableOpacity 
-                style={styles.explorerButton} 
+              <TouchableOpacity
+                style={[styles.explorerButton, { backgroundColor: sheetPalette.actionPrimary }]}
                 onPress={() => openExplorer(selectedTransaction.signature)}
               >
-                <Text style={styles.explorerIcon}>↗</Text>
-                <Text style={styles.explorerButtonText}>View on Explorer</Text>
+                <Text style={[styles.explorerIcon, { color: sheetPalette.actionPrimaryText }]}>↗</Text>
+                <Text
+                  style={[
+                    styles.explorerButtonText,
+                    { color: sheetPalette.actionPrimaryText },
+                  ]}
+                >
+                  View on Explorer
+                </Text>
               </TouchableOpacity>
 
-              <TouchableOpacity style={styles.closeSheetButton} onPress={handleCloseBottomSheet}>
-                <Text style={styles.closeSheetButtonText}>Close</Text>
+              <TouchableOpacity
+                style={[styles.closeSheetButton, { backgroundColor: sheetPalette.actionSecondary }]}
+                onPress={handleCloseBottomSheet}
+              >
+                <Text
+                  style={[
+                    styles.closeSheetButtonText,
+                    { color: sheetPalette.actionSecondaryText },
+                  ]}
+                >
+                  Close
+                </Text>
               </TouchableOpacity>
             </ScrollView>
           )}
@@ -2357,14 +2497,6 @@ export default function HomeScreen() {
           </TouchableOpacity>
         </BottomSheetView>
       </BottomSheet>
-
-      <ThemeSelectorSheet 
-        isVisible={showThemeSelector}
-        onClose={() => setShowThemeSelector(false)}
-        currentThemeId={themeId}
-        onSelectTheme={handleThemeSelect}
-        toggleThemeMode={() => {}} 
-      />
     </View>
   );
 
@@ -2397,12 +2529,24 @@ const styles = StyleSheet.create({
   safeAreaContent: {
     flexGrow: 1,
   },
+  homeContentFrame: {
+    flexGrow: 1,
+    justifyContent: "space-between",
+    gap: 20,
+  },
+  homeTopCluster: {
+    flexShrink: 0,
+  },
+  homeRecentCluster: {
+    flexShrink: 0,
+  },
   scrollContent: {
     paddingHorizontal: 18,
     paddingBottom: 110,
   },
   scrollContentIos: {
     paddingTop: 102,
+    paddingBottom: 166,
   },
   topHeader: {
     position: "absolute",
@@ -2441,26 +2585,49 @@ const styles = StyleSheet.create({
   },
   headerProfileRowIos: {
     gap: 10,
-    maxWidth: "64%",
-  },
-  headerGreetingText: {
-    fontSize: 19,
-    fontWeight: "700",
-    color: "rgba(2,44,68,0.92)",
-    maxWidth: 180,
-  },
-  headerGreetingTextIos: {
-    fontSize: 18,
-    fontWeight: "700",
-    maxWidth: 190,
+    maxWidth: "52%",
   },
   headerRight: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 12,
+    gap: 8,
   },
   headerIconHit: {
     borderRadius: 999,
+  },
+  headerEarnOroHit: {
+    borderRadius: 999,
+  },
+  headerEarnOroPill: {
+    height: 46,
+    minWidth: 104,
+    borderRadius: 23,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.36)",
+    alignItems: "center",
+    justifyContent: "center",
+    flexDirection: "row",
+    gap: 7,
+    paddingHorizontal: 14,
+  },
+  headerEarnOroPillIos: {
+    height: 50,
+    minWidth: 112,
+    borderRadius: 25,
+    backgroundColor: "rgba(255,255,255,0.03)",
+    borderColor: "rgba(255,255,255,0.24)",
+  },
+  headerEarnOroDot: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    backgroundColor: "#F8C846",
+  },
+  headerEarnOroText: {
+    color: "rgba(0,0,0,0.72)",
+    fontSize: 14,
+    fontWeight: "800",
+    letterSpacing: 0,
   },
   headerRightRow: {
     flexDirection: "row",
@@ -2487,6 +2654,9 @@ const styles = StyleSheet.create({
     borderRadius: 25,
     backgroundColor: "rgba(255,255,255,0.03)",
     borderColor: "rgba(255,255,255,0.24)",
+  },
+  headerProfileAvatarButton: {
+    overflow: "hidden",
   },
   headerProfileInitialText: {
     fontSize: 26,
@@ -2540,11 +2710,11 @@ const styles = StyleSheet.create({
   },
   balanceBlock: {
     alignItems: "center",
-    paddingTop: 50,
+    paddingTop: 68,
     paddingBottom: 22,
   },
   balanceBlockIos: {
-    paddingTop: 40,
+    paddingTop: 62,
     paddingBottom: 20,
   },
   balanceTap: {
@@ -2825,19 +2995,52 @@ const styles = StyleSheet.create({
   },
   recentCardWrap: {
     marginBottom: 8,
+    position: "relative",
   },
   recentCardWrapIos: {
     marginBottom: 16,
   },
+  recentCardWrapStacked: {
+    paddingBottom: 22,
+  },
+  recentCardMiniStack: {
+    position: "absolute",
+    height: 30,
+    borderRadius: 24,
+    borderCurve: "continuous",
+    backgroundColor: "rgba(255,255,255,0.42)",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.46)",
+    boxShadow: "0 14px 30px rgba(13, 28, 54, 0.16)",
+    zIndex: 0,
+  },
+  recentCardMiniStackBack: {
+    left: 38,
+    right: 38,
+    bottom: 0,
+    opacity: 0.52,
+  },
+  recentCardMiniStackFront: {
+    left: 20,
+    right: 20,
+    bottom: 10,
+    opacity: 0.78,
+  },
   recentCard: {
     borderRadius: 26,
-    paddingVertical: 8,
+    paddingVertical: 9,
     paddingHorizontal: 8,
     borderCurve: "continuous",
+    zIndex: 2,
+    boxShadow: "0 18px 38px rgba(13, 28, 54, 0.18)",
+  },
+  recentCardEmpty: {
+    minHeight: 214,
+    justifyContent: "center",
   },
   recentCardIos: {
     borderRadius: 24,
-    paddingVertical: 7,
+    paddingVertical: 8,
     paddingHorizontal: 7,
   },
   recentCardGlass: {
@@ -2848,27 +3051,54 @@ const styles = StyleSheet.create({
     boxShadow: "0 16px 32px rgba(13, 28, 54, 0.2)",
   },
   emptyStateLiquid: {
-    paddingVertical: 18,
-    paddingHorizontal: 10,
+    flex: 1,
+    minHeight: 196,
+    paddingVertical: 22,
+    paddingHorizontal: 18,
     alignItems: "center",
+    justifyContent: "center",
+  },
+  emptyActivityMark: {
+    width: 46,
+    height: 46,
+    borderRadius: 23,
+    borderCurve: "continuous",
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(255,255,255,0.38)",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.56)",
+    marginBottom: 12,
+  },
+  emptyActivityMarkLine: {
+    width: 18,
+    height: 3,
+    borderRadius: 999,
+    backgroundColor: "rgba(0,0,0,0.22)",
   },
   emptyTitle: {
-    fontSize: 14,
+    fontSize: 15,
+    lineHeight: 20,
     fontWeight: "800",
     color: "rgba(0,0,0,0.60)",
+    textAlign: "center",
   },
   emptySubtitle: {
-    marginTop: 4,
+    marginTop: 5,
     fontSize: 12,
+    lineHeight: 16,
     fontWeight: "600",
     color: "rgba(0,0,0,0.40)",
+    textAlign: "center",
+    maxWidth: 220,
   },
   recentRow: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    paddingVertical: 10,
-    paddingHorizontal: 9,
+    minHeight: 66,
+    paddingVertical: 9,
+    paddingHorizontal: 10,
     borderRadius: 18,
   },
   recentLeft: {
@@ -2879,14 +3109,14 @@ const styles = StyleSheet.create({
     paddingRight: 12,
   },
   recentIcon: {
-    width: 46,
-    height: 46,
-    borderRadius: 23,
-    backgroundColor: "rgba(255,255,255,0.35)",
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: "rgba(255,255,255,0.42)",
     alignItems: "center",
     justifyContent: "center",
     borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.45)",
+    borderColor: "rgba(255,255,255,0.54)",
   },
   recentText: {
     flex: 1,
@@ -2909,6 +3139,7 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: "800",
     color: "rgba(0,0,0,0.68)",
+    fontVariant: ["tabular-nums"],
   },
   statusRow: {
     marginTop: 4,
@@ -2933,193 +3164,11 @@ const styles = StyleSheet.create({
     marginTop: 50,
     marginBottom: 20,
   },
-  userProfile: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-  },
-  avatar: {
-    width: 50,
-    height: 50,
-    borderRadius: 25,
-    backgroundColor: '#B8A5E8',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  avatarText: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    color: '#FFFFFF',
-  },
-  username: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    color: '#000000',
-  },
-  verifiedBadge: {
-    fontSize: 18,
-    color: '#10b981',
-  },
-  addressBadge: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 20,
-    borderWidth: 2,
-    borderColor: '#000000',
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-  },
-  addressText: {
-    fontSize: 12,
-    fontWeight: 'bold',
-    color: '#000000',
-    fontFamily: 'monospace',
-  },
-  actionRow: {
-    flexDirection: 'row',
-    gap: 15,
-    marginBottom: 15,
-  },
-  actionButton: {
-    flex: 1,
-    backgroundColor: '#FFFFFF',
-    borderRadius: 50,
-    borderWidth: 3,
-    borderColor: '#000000',
-    paddingVertical: 15,
-    flexDirection: 'row',
-    justifyContent: 'center',
-    alignItems: 'center',
-    gap: 8,
-  },
-  actionIcon: {
-    fontSize: 20,
-    fontWeight: 'bold',
-  },
-  actionText: {
-    fontSize: 16,
-    fontWeight: 'bold',
-    color: '#000000',
-  },
-  balanceContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 15,
-    marginVertical: 15,
-  },
-  balanceRow: {
-    flexDirection: 'row',
-    alignItems: 'baseline',
-    gap: 4,
-  },
-  balanceAmount: {
-    fontSize: 64,
-    fontWeight: 'bold',
-    color: '#000000',
-  },
-  balanceCurrency: {
-    fontSize: 48,
-    fontWeight: 'bold',
-    color: '#666666',
-  },
-  primaryActionButton: {
-    flex: 1,
-    backgroundColor: '#60A5FA',
-    borderRadius: 50,
-    borderWidth: 3,
-    borderColor: '#000000',
-    paddingVertical: 15,
-    flexDirection: 'row',
-    justifyContent: 'center',
-    alignItems: 'center',
-    gap: 8,
-  },
-  primaryActionIcon: {
-    fontSize: 20,
-    fontWeight: 'bold',
-  },
-  primaryActionText: {
-    fontSize: 16,
-    fontWeight: 'bold',
-    color: '#000000',
-  },
-  activityHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginTop: 10,
-    marginBottom: 12,
-  },
-  activityTitle: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    color: '#000000',
-  },
-  activityArrow: {
-    fontSize: 32,
-    color: '#000000',
-  },
-  activityList: {
-    flex: 1,
-  },
-  activityItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#FFFFFF',
-    borderRadius: 12,
-    borderWidth: 2,
-    borderColor: '#000000',
-    padding: 15,
-    marginBottom: 10,
-  },
-  activityIcon: {
-    width: 50,
-    height: 50,
-    borderRadius: 25,
-    backgroundColor: '#FFD580',
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginRight: 12,
-  },
-  activityInfo: {
-    flex: 1,
-  },
-  activityItemTitle: {
-    fontSize: 16,
-    fontWeight: 'bold',
-    color: '#000000',
-    marginBottom: 2,
-  },
-  activitySubtitle: {
-    fontSize: 14,
-    color: '#666666',
-  },
-  activityDate: {
-    fontSize: 12,
-    color: '#999999',
-    marginTop: 2,
-  },
-  emptyState: {
-    padding: 40,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  emptyStateText: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    color: '#000000',
-    marginBottom: 8,
-  },
-  emptyStateSubtext: {
-    fontSize: 14,
-    color: '#666666',
-  },
   bottomSheetBackground: {
-    backgroundColor: '#F5E6D3',
     borderTopLeftRadius: 24,
     borderTopRightRadius: 24,
   },
   bottomSheetIndicator: {
-    backgroundColor: '#000000',
     width: 40,
     height: 5,
   },
@@ -3128,18 +3177,16 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
   },
   summaryCard: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 12,
-    borderWidth: 2,
-    borderColor: '#000000',
-    padding: 16,
+    borderRadius: 16,
+    borderWidth: 1,
+    padding: 14,
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 15,
+    marginBottom: 10,
     marginTop: 10,
   },
   summaryLeft: {
-    marginRight: 16,
+    marginRight: 12,
   },
   summaryCenter: {
     flex: 1,
@@ -3148,43 +3195,35 @@ const styles = StyleSheet.create({
     marginLeft: 8,
   },
   detailAvatar: {
-    width: 60,
-    height: 60,
-    borderRadius: 30,
-    backgroundColor: '#FFB380',
+    width: 50,
+    height: 50,
+    borderRadius: 25,
     justifyContent: 'center',
     alignItems: 'center',
   },
   detailAvatarText: {
-    fontSize: 22,
+    fontSize: 18,
     fontWeight: 'bold',
     color: '#FFFFFF',
   },
   summaryTitle: {
-    fontSize: 13,
-    color: '#666666',
-    marginBottom: 4,
+    fontSize: 12,
+    marginBottom: 2,
   },
   summaryAddressInline: {
-    color: '#000000',
+    fontSize: 15,
     fontWeight: '600',
   },
   detailAmount: {
-    fontSize: 28,
+    fontSize: 22,
     fontWeight: 'bold',
-    color: '#000000',
+    marginTop: 3,
+    fontVariant: ['tabular-nums'],
   },
   statusBadge: {
-    backgroundColor: '#999999',
-    borderRadius: 16,
-    paddingHorizontal: 16,
-    paddingVertical: 6,
-  },
-  statusBadgeConfirmed: {
-    backgroundColor: '#10b981',
-  },
-  statusBadgePending: {
-    backgroundColor: '#f59e0b',
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
   },
   statusText: {
     color: '#FFFFFF',
@@ -3192,117 +3231,58 @@ const styles = StyleSheet.create({
     fontSize: 12,
   },
   detailsCard: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 12,
-    borderWidth: 2,
-    borderColor: '#000000',
-    padding: 16,
-    marginBottom: 15,
+    borderRadius: 16,
+    borderWidth: 1,
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+    marginBottom: 12,
   },
   detailRow: {
-    paddingVertical: 10,
+    paddingVertical: 8,
   },
   detailLabel: {
-    fontSize: 13,
-    color: '#666666',
-    marginBottom: 4,
+    fontSize: 12,
+    marginBottom: 3,
   },
   detailValue: {
-    fontSize: 15,
-    color: '#000000',
+    fontSize: 14,
     fontWeight: '600',
+    fontVariant: ['tabular-nums'],
   },
   signatureRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
+    gap: 8,
   },
   detailDivider: {
     height: 1,
-    backgroundColor: '#E5E5E5',
-    marginVertical: 8,
   },
   explorerButton: {
     flexDirection: 'row',
-    backgroundColor: '#E8B5E8',
-    borderRadius: 10,
-    borderCurve: 'continuous',
-    borderWidth: 2,
-    borderColor: '#000000',
-    paddingVertical: 14,
+    borderRadius: 14,
+    height: 48,
     justifyContent: 'center',
     alignItems: 'center',
     gap: 8,
-    marginBottom: 12,
-    boxShadow: '3px 3px 0px rgba(0, 0, 0, 1)',
+    marginBottom: 10,
   },
   explorerIcon: {
     fontSize: 18,
   },
   explorerButtonText: {
-    fontSize: 16,
+    fontSize: 15,
     fontWeight: 'bold',
-    color: '#000000',
   },
   closeSheetButton: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 10,
-    borderCurve: 'continuous',
-    borderWidth: 2,
-    borderColor: '#000000',
-    paddingVertical: 14,
+    borderRadius: 14,
+    height: 46,
     justifyContent: 'center',
     alignItems: 'center',
     marginBottom: 20,
-    boxShadow: '3px 3px 0px rgba(0, 0, 0, 1)',
   },
   closeSheetButtonText: {
-    fontSize: 16,
-    fontWeight: 'bold',
-    color: '#000000',
-  },
-  activityRight: {
-    alignItems: 'flex-end',
-  },
-  activityAmount: {
-    fontSize: 16,
-    fontWeight: 'bold',
-    color: '#000000',
-  },
-  activityAmountPositive: {
-    color: '#10b981',
-  },
-  activityCurrency: {
-    fontSize: 12,
-    color: '#666666',
-    marginTop: 2,
-  },
-  chainSelector: {
-    flexDirection: 'row',
-    backgroundColor: '#FFFFFF',
-    borderRadius: 25,
-    borderWidth: 2,
-    borderColor: '#000000',
-    padding: 4,
-    marginBottom: 15,
-  },
-  chainTab: {
-    flex: 1,
-    paddingVertical: 10,
-    paddingHorizontal: 16,
-    borderRadius: 20,
-    alignItems: 'center',
-  },
-  chainTabActive: {
-    backgroundColor: '#60A5FA',
-  },
-  chainTabText: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#666666',
-  },
-  chainTabTextActive: {
-    color: '#000000',
+    fontSize: 15,
     fontWeight: 'bold',
   },
   sendSheetBackground: {

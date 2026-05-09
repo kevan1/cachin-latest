@@ -7,6 +7,7 @@ import {
 const USERNAME_KEY = 'user_username';
 const SOLANA_ADDRESS_KEY = 'user_solana_address';
 const CURRENCY_KEY = 'user_currency';
+export const PENDING_USERNAME_SAVE_KEY = 'pending_username_save';
 
 export type Currency = 'USD' | 'ARS' | 'EUR';
 
@@ -60,6 +61,7 @@ export async function saveUsername(
     if (solanaAddress) {
       await AsyncStorage.setItem(SOLANA_ADDRESS_KEY, solanaAddress);
       await updateUsernameInFirestore(solanaAddress, normalizedUsername);
+      await AsyncStorage.removeItem(PENDING_USERNAME_SAVE_KEY);
       console.log('[UserStorage] Username saved to Firestore for address:', solanaAddress);
     } else {
       console.log('[UserStorage] No Solana address provided, skipping Firestore sync');
@@ -68,6 +70,27 @@ export async function saveUsername(
     console.error('[UserStorage] Error saving username:', error);
     // Don't throw - we still want to continue even if Firestore fails
   }
+}
+
+export async function savePendingUsername(username: string): Promise<void> {
+  const normalizedUsername = username.trim().toLowerCase();
+  if (!normalizedUsername) return;
+
+  await AsyncStorage.setItem(USERNAME_KEY, normalizedUsername);
+  await AsyncStorage.setItem(PENDING_USERNAME_SAVE_KEY, 'true');
+}
+
+export async function getPendingUsername(): Promise<string | null> {
+  const pendingSync = await AsyncStorage.getItem(PENDING_USERNAME_SAVE_KEY);
+  if (pendingSync !== 'true') return null;
+
+  const username = await AsyncStorage.getItem(USERNAME_KEY);
+  const normalizedUsername = username?.trim().toLowerCase();
+  return normalizedUsername || null;
+}
+
+export async function clearPendingUsernameSave(): Promise<void> {
+  await AsyncStorage.removeItem(PENDING_USERNAME_SAVE_KEY);
 }
 
 /**

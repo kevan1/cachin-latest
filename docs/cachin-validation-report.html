@@ -1,0 +1,159 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Cachin Validation Report V3</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #07111f;
+      --card: #101b2f;
+      --card2: #13223a;
+      --text: #f8fafc;
+      --muted: #a9b7cc;
+      --line: #25364f;
+      --green: #14f195;
+      --blue: #60a5fa;
+      --amber: #f59e0b;
+      --red: #ef4444;
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; background: var(--bg); color: var(--text); font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+    main { max-width: 1160px; margin: auto; padding: 48px 24px 80px; }
+    h1 { font-size: 48px; letter-spacing: -0.03em; margin: 8px 0 14px; }
+    h2 { margin-top: 42px; font-size: 30px; letter-spacing: -0.02em; }
+    h3 { margin: 0 0 8px; }
+    p, li { color: var(--muted); line-height: 1.65; }
+    a { color: #93c5fd; }
+    code { color: #dbeafe; }
+    .hero, .card { border: 1px solid var(--line); background: var(--card); border-radius: 14px; padding: 26px; }
+    .hero { background: linear-gradient(180deg, rgba(20, 241, 149, 0.12), rgba(37, 99, 235, 0.06)); }
+    .badge { display: inline-block; padding: 7px 12px; border-radius: 999px; background: rgba(20, 241, 149, 0.14); color: var(--green); font-weight: 900; font-size: 13px; }
+    .warning { display: inline-block; padding: 7px 12px; border-radius: 999px; background: rgba(245, 158, 11, 0.14); color: var(--amber); font-weight: 900; font-size: 13px; margin-left: 8px; }
+    .grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
+    .grid2 { display: grid; grid-template-columns: repeat(2, 1fr); gap: 16px; }
+    .score { font-size: 52px; font-weight: 950; color: var(--green); letter-spacing: -0.05em; }
+    table { width: 100%; border-collapse: collapse; margin-top: 16px; }
+    th, td { border: 1px solid var(--line); padding: 12px; text-align: left; vertical-align: top; }
+    th { background: var(--card2); color: #e8f1ff; }
+    td { color: var(--muted); }
+    .high { color: var(--red); font-weight: 800; }
+    .med { color: var(--amber); font-weight: 800; }
+    .good { color: var(--green); font-weight: 800; }
+    @media (max-width: 820px) {
+      .grid, .grid2 { grid-template-columns: 1fr; }
+      h1 { font-size: 36px; }
+    }
+  </style>
+</head>
+<body>
+<main>
+  <section class="hero">
+    <span class="badge">V3 verdict: GO, but only with a narrow wedge</span>
+    <span class="warning">Generic LATAM QR wallet is already crowded</span>
+    <h1>Cachin Validation Report</h1>
+    <p><strong>Validated idea:</strong> Cachin lets tourists and foreigners fund globally, scan supported local QRs across LATAM, confirm FX/fees, and pay like locals. The MVP starts in Argentina with Mercado Pago/MODO-style flows.</p>
+    <p><strong>Hard correction:</strong> the idea is valid, but the broad narrative is no longer enough. Multiple products already target foreign users, stablecoins, and local QR payments. Cachin must win on proof, Argentina MVP execution, merchant/POS upgrade rails, Solana/Seeker distribution, and local-founder authenticity.</p>
+  </section>
+
+  <h2>Decision</h2>
+  <div class="grid">
+    <div class="card"><div class="score">12/15</div><p>Go score. Strong founder fit, fast MVP, and visible market pull. Distribution and revenue are weaker until real artifacts exist.</p></div>
+    <div class="card"><div class="score">0.72</div><p>Confidence. Higher than an idea, lower than a validated startup because the proof pack still has too many TBD rows.</p></div>
+    <div class="card"><div class="score">GO</div><p>Proceed, but validate through a narrow Argentina MVP and stop pitching as if LATAM reach is already proven.</p></div>
+  </div>
+
+  <h2>Validation Scorecard</h2>
+  <table>
+    <tr><th>Dimension</th><th>Score</th><th>Read</th></tr>
+    <tr><td>Founder fit</td><td class="good">3/3</td><td>Solo Argentine founder with lived local payment friction, SMB / solxAR / Superteam context, and direct merchant/POS work.</td></tr>
+    <tr><td>MVP speed</td><td class="good">3/3</td><td>Mobile app is functioning, QR flow exists, and POS repo exists. The missing piece is public proof, not a blank build.</td></tr>
+    <tr><td>Distribution clarity</td><td class="med">2/3</td><td>Tourists, Seeker users, freelancers, merchants, and regular consumers are too many audiences. First distribution must be Argentina tourist/foreigner corridors plus Solana/Seeker users.</td></tr>
+    <tr><td>Market pull</td><td class="good">3/3</td><td>Competitors and substitutes prove the problem is real: CacaoCash, SurfCash, SQRIL, Wander Wallet, Peanut, Offramp, Opera MiniPay, cards, cash, and local wallets.</td></tr>
+    <tr><td>Revenue path</td><td class="med">1/3</td><td>Merchant fee spread, FX spread, discounts, POS, and card/white-label ideas exist, but no proven unit economics, fee schedule, or settlement proof is attached yet.</td></tr>
+  </table>
+
+  <h2>Demand Evidence</h2>
+  <table>
+    <tr><th>Signal</th><th>Strength</th><th>Why it matters</th></tr>
+    <tr><td>Founder has a working app and local merchant context</td><td class="good">Strong</td><td>This is beyond a deck. The product can be demonstrated if proof artifacts are recorded.</td></tr>
+    <tr><td>Live/near-live competitors target the same pain</td><td class="good">Strong</td><td>CacaoCash, SurfCash, SQRIL, Wander Wallet, Peanut, Offramp, and Opera MiniPay all validate that foreign money into local payments is an active category.</td></tr>
+    <tr><td>Local QR is a behavioral default across LATAM</td><td class="good">Strong</td><td>The product rides existing payment behavior instead of trying to teach merchants a new one.</td></tr>
+    <tr><td>Merchant economics are painful</td><td class="med">Moderate</td><td>The 3-7% fee and 15-30 day settlement claim is believable but still founder-provided. It needs merchant statements or processor quotes.</td></tr>
+    <tr><td>Argentina FX spread can be user-visible</td><td class="med">Moderate</td><td>The 1365 vs 1470 example is a strong demo hook, but it is time-sensitive and must be refreshed before submission.</td></tr>
+    <tr><td>Seeker/Solana distribution</td><td class="med">Moderate</td><td>Strategically useful, but it is not demand by itself. It becomes strong only if Seeker users actually test it while traveling.</td></tr>
+  </table>
+
+  <h2>Competitor Scan</h2>
+  <table>
+    <tr><th>Product</th><th>Status / positioning</th><th>Impact on Cachin</th></tr>
+    <tr><td><a href="https://cacaocash.com/">CacaoCash</a></td><td>Direct public narrative: pay local QR in Latin America like a local, loaded from abroad.</td><td>Confirms the category but weakens generic positioning. Cachin must out-demo them and avoid copying-accusation messaging.</td></tr>
+    <tr><td><a href="https://www.getsurf.cash/">SurfCash</a></td><td>Solana-native stablecoin payments for travelers and crypto nomads, positioned around local payment networks and QR codes.</td><td>This is the most dangerous Solana-adjacent proof that Cachin is not alone on-chain.</td></tr>
+    <tr><td><a href="https://sqril.io/">SQRIL</a></td><td>Stablecoin-to-local-payment network, with LATAM QR and bank-transfer framing.</td><td>Shows better-funded infrastructure-level teams are attacking similar rails.</td></tr>
+    <tr><td><a href="https://www.peanut.to/">Peanut</a></td><td>Crypto payments via links, cards, and bank account off-ramp flows.</td><td>Not a pure LATAM QR app, but competes for easy crypto spending and global off-ramping.</td></tr>
+    <tr><td><a href="https://www.offramp.xyz/">Offramp</a></td><td>Stablecoin account, virtual cards, PIX/Boleto, and local payment rails in supported markets.</td><td>Validates stablecoin-to-local-payment demand and shows mature substitutes exist.</td></tr>
+    <tr><td><a href="https://www.prnewswire.com/news-releases/minipay-connects-stablecoins-to-real-time-payment-in-latin-america-rolls-out-pix-mercado-pago-support-at-devconnect-302620567.html">Opera MiniPay</a></td><td>Stablecoin wallet connecting balances to Mercado Pago and PIX through local rails.</td><td>A mainstream distribution threat: browser-scale products can copy the core utility faster than a small wallet can build trust.</td></tr>
+    <tr><td>Mercado Pago / MODO / Pix / Yape / local wallets</td><td>Incumbent local payment rails.</td><td>They own behavior. Cachin should route into them, not fight them.</td></tr>
+  </table>
+
+  <h2>Crypto Necessity Gut Check</h2>
+  <p><strong>What breaks if blockchain is removed?</strong> The product becomes a harder-to-scale Wise/Revolut/local-wallet bridge. It could still exist as fintech middleware, but it loses the strongest reason for users to start with Cachin: global stablecoin funding, crypto income spending, Solana/Seeker distribution, and faster merchant settlement paths.</p>
+  <p><strong>Conclusion:</strong> crypto is necessary, but it must stay invisible. Users should not buy the product because it is crypto. They should buy it because it lets them pay locally when cards, cash, and local accounts fail.</p>
+
+  <h2>Integration vs Build</h2>
+  <p>Cachin should stay integration-first. A custom Solana program is not required for the MVP. The fastest path is existing stablecoin/token infrastructure, wallet abstraction, provider rails like Manteca or P2P.me, and optional Solana payment primitives for Cachin-owned QR/POS flows. Custom on-chain logic only becomes justified later for privacy rails, fee capture, compliance hooks, or card/cold-wallet product mechanics.</p>
+  <table>
+    <tr><th>Layer</th><th>Recommendation</th></tr>
+    <tr><td>User wallet and gas abstraction</td><td>Integrate existing wallet/passkey and fee-abstraction tooling; do not make users manage SOL.</td></tr>
+    <tr><td>Stablecoin payment / POS QR</td><td>Use existing SPL token, Solana Pay-style, or Commerce Kit-style primitives for Cachin-owned merchant flows.</td></tr>
+    <tr><td>FX / local QR routing</td><td>Use provider integrations first. Manteca/P2P.me-style rails are the product bottleneck, not a new smart contract.</td></tr>
+    <tr><td>Privacy rails</td><td>Roadmap only. Do not pitch as live until there is a compliant design and demo.</td></tr>
+  </table>
+
+  <h2>Risk Map</h2>
+  <table>
+    <tr><th>Risk</th><th>Severity</th><th>Mitigation</th></tr>
+    <tr><td>Category is crowded and accelerating.</td><td class="high">High</td><td>Position around Argentina MVP proof, merchant/POS upgrade, and Solana/Seeker execution, not generic LATAM QR.</td></tr>
+    <tr><td>Proof is still weaker than the claims.</td><td class="high">High</td><td>Record the supported local QR payment demo first; then add KYC, support, merchant, POS, and provider proof.</td></tr>
+    <tr><td>Provider dependency can kill demos.</td><td class="high">High</td><td>Keep Manteca trial proof, define P2P.me fallback, and prepare a recorded fallback demo.</td></tr>
+    <tr><td>Regulatory and KYC wording can backfire.</td><td class="high">High</td><td>Say Sumsub KYC for supported local QR payments; describe onboarded direct transfers as subject to limits and provider/legal review.</td></tr>
+    <tr><td>Unit economics are unproven.</td><td class="high">High</td><td>Attach merchant fee/settlement proof and a simple per-transaction model before pitching revenue.</td></tr>
+    <tr><td>Scope creep dilutes the story.</td><td class="med">Medium</td><td>Keep card/cold-wallet and Visa BIN as a separate product line. Mention only as expansion if asked.</td></tr>
+  </table>
+
+  <h2>Pivot or Persist</h2>
+  <p><strong>Persist, but narrow.</strong> Do not pivot away from Cachin. Pivot away from broad "we are the LATAM QR wallet" messaging. The validated wedge is:</p>
+  <p><strong>Cachin lets tourists and foreigners pay supported local QRs across LATAM, proven first in Argentina, with merchant/POS upgrade rails and Solana/Seeker-native distribution.</strong></p>
+  <p>If the Argentina QR demo cannot be recorded within the next proof sprint, downgrade the pitch to a narrower onboarded-merchant/POS demo and stop claiming broad QR utility until the provider route is proven.</p>
+
+  <h2>7-Day Validation Sprint</h2>
+  <ol>
+    <li><strong>Day 1:</strong> Record one end-to-end Argentina MVP QR payment: fund balance, scan supported local QR, show FX/fees/final total, pay, receipt, support CTA.</li>
+    <li><strong>Day 2:</strong> Fill <code>docs/proof/providers/rails-proof.md</code> with Manteca trial screenshots, pricing/coverage proof, and P2P.me fallback evidence.</li>
+    <li><strong>Day 3:</strong> Fill <code>docs/proof/support/support-and-refunds.md</code> with Sumsub and Crisp screenshots plus refund/pending/failure copy.</li>
+    <li><strong>Day 4:</strong> Add at least three merchants to <code>docs/proof/merchants/merchant-list.md</code>; get one public/anonymized proof artifact.</li>
+    <li><strong>Day 5:</strong> Run five user interviews: two tourists/foreigners, one digital nomad, one crypto-paid freelancer, one merchant. Ask how they pay today and what breaks.</li>
+    <li><strong>Day 6:</strong> Publish a small waitlist/demo page with one CTA: "Pay like a local in LATAM, starting in Argentina." Measure signups and demo requests.</li>
+    <li><strong>Day 7:</strong> Re-score. If no live demo and no user/merchant proof, keep building but do not submit broad claims.</li>
+  </ol>
+
+  <h2>Final Recommendation</h2>
+  <p><strong>Go, proof-gated.</strong> Cachin is worth continuing because the pain is real, the founder fit is strong, the MVP is not imaginary, and the category is clearly moving. But the market has already noticed the same opportunity. The submission will only land if it is evidence-heavy and specific: LATAM scope, Argentina MVP proof, clear KYC/support, merchant upgrade rails, and a simple explanation of why Cachin wins despite similar products.</p>
+
+  <h2>Sources Used</h2>
+  <ul>
+    <li><a href="https://cacaocash.com/">CacaoCash</a></li>
+    <li><a href="https://www.getsurf.cash/">SurfCash</a> and <a href="https://solana.com/ar/podcasts/sol-brothers/episodes/payments-on-solana-how-to-skip-card-fees-forever-with-qr-codes-2026-03-04">Solana Media SurfCash episode</a></li>
+    <li><a href="https://sqril.io/">SQRIL</a></li>
+    <li><a href="https://apps.apple.com/us/app/wanderwallet-pay-like-a-local/id6744653963">WanderWallet App Store listing</a></li>
+    <li><a href="https://www.peanut.to/">Peanut</a></li>
+    <li><a href="https://www.offramp.xyz/">Offramp</a></li>
+    <li><a href="https://www.prnewswire.com/news-releases/minipay-connects-stablecoins-to-real-time-payment-in-latin-america-rolls-out-pix-mercado-pago-support-at-devconnect-302620567.html">Opera MiniPay LATAM payments announcement</a></li>
+    <li><a href="https://solana.com/docs/payments/accept-payments">Solana payments documentation</a></li>
+    <li><a href="https://github.com/solana-foundation/commerce-kit">Solana Foundation Commerce Kit</a></li>
+    <li><a href="https://github.com/solana-foundation/kora">Solana Foundation Kora</a></li>
+  </ul>
+</main>
+</body>
+</html>

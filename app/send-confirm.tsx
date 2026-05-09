@@ -54,6 +54,7 @@ import {
 } from "@/utils/privyGaslessConfig";
 import { getSolanaRpcUrl } from "@/utils/solanaRpc";
 import { formatTokenUnits, parseDecimalToUnits } from "@/utils/tokenAmount";
+import { formatFiatValue, formatTokenAmountDisplay } from "@/utils/numberFormat";
 import { Colors } from "@/constants/theme";
 import { ChinPopoutOverlay, useChinPopout } from "@/components/ChinPopout";
 import { fetchArsPrice } from "@/utils/priceService";
@@ -127,19 +128,6 @@ function getErrorMessage(error: unknown, fallback: string): string {
   if (error instanceof Error && error.message) return error.message;
   if (typeof error === "string" && error.trim().length > 0) return error;
   return fallback;
-}
-
-function formatMoneyValue(value: number, currency: "USD" | "ARS"): string {
-  if (!Number.isFinite(value) || value <= 0) {
-    return currency === "ARS" ? "ARS$0.00" : "$0.00";
-  }
-
-  const formatted = value.toLocaleString("en-US", {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  });
-
-  return currency === "ARS" ? `ARS$${formatted}` : `$${formatted}`;
 }
 
 export default function SendConfirmScreen() {
@@ -232,8 +220,19 @@ export default function SendConfirmScreen() {
         ? amountValueUsd * arsRate
         : amountValueUsd
       : 0;
-  const primaryAmountLabel = formatMoneyValue(primaryFiatValue, primaryFiatCurrency);
-  const secondaryAmountLabel = formatMoneyValue(secondaryFiatValue, secondaryFiatCurrency);
+  const primaryAmountLabel = formatFiatValue(primaryFiatValue, {
+    context: "detailed",
+    currencyPrefix: primaryFiatCurrency === "ARS" ? "ARS$" : "$",
+  });
+  const secondaryAmountLabel = formatFiatValue(secondaryFiatValue, {
+    context: "detailed",
+    currencyPrefix: secondaryFiatCurrency === "ARS" ? "ARS$" : "$",
+  });
+  const assetAmountLabel = formatTokenAmountDisplay(amountValueUsd, {
+    context: "detailed",
+    tokenPriceUsd: 1,
+    tokenDecimals: assetDecimals,
+  });
   const keyQuorumId = useMemo(() => getPrivyGaslessKeyQuorumId(), []);
   const sessionSignerPolicyIds = useMemo(() => getPrivyGasSponsorPolicyIds(), []);
 
@@ -1038,7 +1037,7 @@ export default function SendConfirmScreen() {
                   {secondaryAmountLabel}
                 </Text>
                 <Text style={[styles.assetAmountText, { color: palette.secondaryText }]}>
-                  {assetSymbol} {amountDisplay}
+                  {assetSymbol} {assetAmountLabel}
                 </Text>
               </View>
 
@@ -1268,14 +1267,17 @@ const styles = StyleSheet.create({
     fontWeight: "600",
     marginBottom: 6,
     textAlign: "center",
+    fontVariant: ["tabular-nums"],
   },
   equivalentText: {
     fontSize: 13,
     marginTop: 2,
+    fontVariant: ["tabular-nums"],
   },
   assetAmountText: {
     fontSize: 12,
     marginTop: 4,
+    fontVariant: ["tabular-nums"],
   },
   metaRow: {
     flexDirection: "row",
@@ -1380,11 +1382,13 @@ const styles = StyleSheet.create({
     fontWeight: "700",
     marginBottom: 6,
     textAlign: "center",
+    fontVariant: ["tabular-nums"],
   },
   successAmountSecondary: {
     fontSize: 16,
     fontWeight: "600",
     marginTop: -6,
+    fontVariant: ["tabular-nums"],
   },
   successDetailCard: {
     marginTop: 18,

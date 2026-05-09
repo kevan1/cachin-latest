@@ -1,7 +1,7 @@
 import MaterialIcons from "@expo/vector-icons/MaterialIcons";
+import { useFocusEffect } from "@react-navigation/native";
 import { LinearGradient } from "expo-linear-gradient";
 import { useRouter } from "expo-router";
-import { useFocusEffect } from "@react-navigation/native";
 import {
   useCallback,
   useEffect,
@@ -16,29 +16,47 @@ import {
   Platform,
   Pressable,
   RefreshControl,
+  ScrollView,
   StyleSheet,
   Text,
+  TouchableOpacity,
   View,
 } from "react-native";
-import Animated, {
-  interpolate,
-  useAnimatedRef,
-  useAnimatedStyle,
-  useScrollOffset,
-} from "react-native-reanimated";
+import * as Haptics from "expo-haptics";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { GlassView } from "@/components/ui/GlassView";
+import { IconSymbol } from "@/components/ui/icon-symbol";
 import {
   loadCardSetupCompleted,
   saveCardSetupCompleted,
 } from "@/utils/cardSetupStorage";
+import { formatStableValue } from "@/utils/numberFormat";
 
-const HEADER_HEIGHT = 292;
 const REFRESH_DELAY_MS = 950;
-const DEFAULT_CARD_BALANCE = 2430.25;
+const DEFAULT_CARD_BALANCE = 126.78;
 
 type Benefit = {
   icon: ComponentProps<typeof MaterialIcons>["name"];
   title: string;
   description: string;
+};
+
+type ActionPill = {
+  icon: ComponentProps<typeof MaterialIcons>["name"];
+  label: string;
+  onPress: () => void;
+  primary?: boolean;
+};
+
+type CardTransaction = {
+  id: string;
+  merchant: string;
+  date: string;
+  amount: string;
+  icon: ComponentProps<typeof MaterialIcons>["name"];
+  avatarText?: string;
+  avatarBackground: string;
+  avatarColor: string;
 };
 
 const BENEFITS: Benefit[] = [
@@ -62,8 +80,50 @@ const BENEFITS: Benefit[] = [
   },
 ];
 
+const RECENT_TRANSACTIONS: CardTransaction[] = [
+  {
+    id: "higgsfield",
+    merchant: "Higgsfield Inc.",
+    date: "07 Mar 2026",
+    amount: "-$49.00",
+    icon: "gesture",
+    avatarBackground: "#CFFF18",
+    avatarColor: "#101010",
+  },
+  {
+    id: "chatgpt",
+    merchant: "Chat GPT",
+    date: "01 Mar 2026",
+    amount: "-$20.00",
+    icon: "all-inclusive",
+    avatarBackground: "#151515",
+    avatarColor: "#F5F5F5",
+  },
+  {
+    id: "aws",
+    merchant: "AWS",
+    date: "25 Mar 2026",
+    amount: "-$60.00",
+    icon: "cloud",
+    avatarText: "aws",
+    avatarBackground: "#061C2D",
+    avatarColor: "#FFFFFF",
+  },
+  {
+    id: "spotify",
+    merchant: "Spotify",
+    date: "19 Mar 2026",
+    amount: "-$12.99",
+    icon: "music-note",
+    avatarBackground: "#143D22",
+    avatarColor: "#4ADE80",
+  },
+];
+
 export default function CardScreen() {
   const router = useRouter();
+  const insets = useSafeAreaInsets();
+  const isIOS = process.env.EXPO_OS === "ios";
   const [refreshing, setRefreshing] = useState(false);
   const [isCardConfigured, setIsCardConfigured] = useState(false);
   const [setupStateLoaded, setSetupStateLoaded] = useState(false);
@@ -71,8 +131,6 @@ export default function CardScreen() {
   const [isFrozen, setIsFrozen] = useState(false);
   const [balance, setBalance] = useState(DEFAULT_CARD_BALANCE);
   const refreshTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const scrollRef = useAnimatedRef<Animated.ScrollView>();
-  const scrollOffset = useScrollOffset(scrollRef);
 
   useEffect(() => {
     return () => {
@@ -101,26 +159,13 @@ export default function CardScreen() {
     }, [syncCardSetupState]),
   );
 
-  const headerAnimatedStyle = useAnimatedStyle(() => {
-    return {
-      transform: [
-        {
-          translateY: interpolate(
-            scrollOffset.value,
-            [-HEADER_HEIGHT, 0, HEADER_HEIGHT],
-            [-HEADER_HEIGHT / 2, 0, HEADER_HEIGHT * 0.75],
-          ),
-        },
-        {
-          scale: interpolate(
-            scrollOffset.value,
-            [-HEADER_HEIGHT, 0, HEADER_HEIGHT],
-            [1.95, 1, 1],
-          ),
-        },
-      ],
-    };
-  });
+  const balanceParts = useMemo(() => {
+    const [whole, cents = "00"] = formatStableValue(balance, {
+      context: "detailed",
+    }).split(".");
+
+    return { whole, cents };
+  }, [balance]);
 
   const handleRefresh = useCallback(() => {
     if (refreshTimeoutRef.current !== null) {
@@ -145,18 +190,9 @@ export default function CardScreen() {
     router.push("/card-setup-onboarding");
   }, [router]);
 
-  const formattedBalance = useMemo(
-    () =>
-      `$${balance.toLocaleString("en-US", {
-        minimumFractionDigits: 2,
-        maximumFractionDigits: 2,
-      })}`,
-    [balance],
-  );
-
   const handleTopUp = useCallback(() => {
-    setBalance((previous) => previous + 150);
-    Alert.alert("Top up complete", "$150.00 was added to your card balance.");
+    setBalance((previous) => previous + 50);
+    Alert.alert("Top up complete", "$50.00 was added to your card balance.");
   }, []);
 
   const handleToggleFreeze = useCallback(() => {
@@ -173,11 +209,25 @@ export default function CardScreen() {
   }, []);
 
   const handleOpenSettings = useCallback(() => {
+    void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     setShowSettingsSheet(true);
   }, []);
 
   const handleCloseSettings = useCallback(() => {
     setShowSettingsSheet(false);
+  }, []);
+
+  const handleLimitsPress = useCallback(() => {
+    Alert.alert("Card limits", "Daily use limit is set to $500.00.");
+  }, []);
+
+  const handleProfilePress = useCallback(() => {
+    void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    router.navigate("/profile");
+  }, [router]);
+
+  const handleTransactionPress = useCallback((transaction: CardTransaction) => {
+    Alert.alert(transaction.merchant, `${transaction.date}\n${transaction.amount}`);
   }, []);
 
   const handleRemoveCard = useCallback(() => {
@@ -204,6 +254,7 @@ export default function CardScreen() {
   }, []);
 
   const handleChangePin = useCallback(() => {
+    setShowSettingsSheet(false);
     router.push("/card-setup-onboarding");
   }, [router]);
 
@@ -211,18 +262,110 @@ export default function CardScreen() {
     Alert.alert("Biometrics disabled", "You can re-enable this during card setup.");
   }, []);
 
+  const actionPills = useMemo<ActionPill[]>(
+    () => [
+      {
+        icon: "add",
+        label: "Top up",
+        onPress: handleTopUp,
+        primary: true,
+      },
+      {
+        icon: "credit-card",
+        label: "Card Details",
+        onPress: handleOpenSettings,
+      },
+      {
+        icon: isFrozen ? "lock-open" : "lock-outline",
+        label: isFrozen ? "Unfreeze" : "Freeze",
+        onPress: handleToggleFreeze,
+      },
+      {
+        icon: "tune",
+        label: "Limits",
+        onPress: handleLimitsPress,
+      },
+    ],
+    [
+      handleLimitsPress,
+      handleOpenSettings,
+      handleToggleFreeze,
+      handleTopUp,
+      isFrozen,
+    ],
+  );
+
   if (!setupStateLoaded) {
     return <View style={styles.screen} />;
   }
 
   return (
     <View style={styles.screen}>
-      <Animated.ScrollView
-        ref={scrollRef}
+      {isCardConfigured ? (
+        <View
+          pointerEvents="box-none"
+          style={[
+            styles.fixedHeader,
+            { paddingTop: Math.max(insets.top + 6, 6) },
+          ]}
+        >
+          <TouchableOpacity
+            style={styles.headerIconHit}
+            activeOpacity={0.85}
+            onPress={handleProfilePress}
+          >
+            <GlassView
+              style={[
+                styles.headerIconButton,
+                isIOS ? styles.headerIconButtonIos : null,
+              ]}
+              intensity={isIOS ? 16 : 30}
+              interactive
+            >
+              <IconSymbol
+                name="person.crop.circle"
+                size={24}
+                color="rgba(0,0,0,0.72)"
+              />
+            </GlassView>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={styles.headerIconHit}
+            activeOpacity={0.85}
+            onPress={handleOpenSettings}
+          >
+            <GlassView
+              style={[
+                styles.headerIconButton,
+                isIOS ? styles.headerIconButtonIos : null,
+              ]}
+              intensity={isIOS ? 16 : 30}
+              interactive
+            >
+              <IconSymbol
+                name="creditcard"
+                size={23}
+                color="rgba(0,0,0,0.72)"
+              />
+            </GlassView>
+          </TouchableOpacity>
+        </View>
+      ) : null}
+
+      <ScrollView
         style={styles.container}
-        contentContainerStyle={styles.contentContainer}
+        contentContainerStyle={[
+          styles.contentContainer,
+          {
+            paddingTop: isCardConfigured
+              ? Math.max(insets.top + 64, 76)
+              : Math.max(insets.top + 10, 34),
+            paddingBottom: Math.max(insets.bottom + 108, 136),
+          },
+        ]}
+        contentInsetAdjustmentBehavior="automatic"
         showsVerticalScrollIndicator={false}
-        scrollEventThrottle={16}
         refreshControl={
           <RefreshControl
             refreshing={refreshing}
@@ -232,152 +375,216 @@ export default function CardScreen() {
           />
         }
       >
-        <Animated.View style={[styles.header, headerAnimatedStyle]}>
-          <LinearGradient
-            colors={["#121416", "#1C1F22", "#111215"]}
-            start={{ x: 0, y: 0 }}
-            end={{ x: 1, y: 1 }}
-            style={styles.headerGradient}
-          >
+        {isCardConfigured ? (
+          <>
+            <View style={styles.balanceHero}>
+              <Text style={styles.balanceLabel}>Your Card Balance</Text>
+              <Text style={styles.balanceValue} selectable>
+                {balanceParts.whole}
+                <Text style={styles.balanceCents}>.{balanceParts.cents}</Text>
+              </Text>
+            </View>
+
             <LinearGradient
-              colors={["#A99B7B", "#8E8166", "#6E6451"]}
+              colors={["#1B1B1B", "#090909", "#000000"]}
+              locations={[0, 0.48, 1]}
               start={{ x: 0, y: 0 }}
               end={{ x: 1, y: 1 }}
-              style={styles.generatedCard}
+              style={styles.cardMock}
             >
-              <View style={styles.chip} />
+              <View style={styles.cardFacetLeft} />
+              <View style={styles.cardFacetCenter} />
+              <View style={styles.cardFacetRight} />
+              <View style={styles.cardMockBorder} />
+
+              <View style={styles.cardMockTop}>
+                <View>
+                  <Text style={styles.visaText}>VISA</Text>
+                  <Text style={styles.platinumText}>Platinum</Text>
+                </View>
+                <Image
+                  source={require("@/assets/images/logomark.png")}
+                  resizeMode="contain"
+                  style={styles.cardLogomark}
+                />
+              </View>
+
+              <View style={styles.cardMockBottom}>
+                <Text style={styles.cardUseText}>DAILY USE | ** 1292</Text>
+                {isFrozen ? (
+                  <View style={styles.frozenBadge}>
+                    <Text style={styles.frozenBadgeText}>Frozen</Text>
+                  </View>
+                ) : null}
+              </View>
+            </LinearGradient>
+
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={styles.actionRail}
+            >
+              {actionPills.map((action) => (
+                <Pressable
+                  key={action.label}
+                  style={[
+                    styles.actionPill,
+                    action.primary ? styles.actionPillPrimary : null,
+                  ]}
+                  onPress={action.onPress}
+                >
+                  <MaterialIcons
+                    name={action.icon}
+                    size={18}
+                    color={action.primary ? "#FFFFFF" : "#F3F5F8"}
+                  />
+                  <Text
+                    style={[
+                      styles.actionPillText,
+                      action.primary ? styles.actionPillPrimaryText : null,
+                    ]}
+                  >
+                    {action.label}
+                  </Text>
+                </Pressable>
+              ))}
+            </ScrollView>
+
+            <View style={styles.transactionsSection}>
+              <Text style={styles.sectionTitle}>Recent Transactions</Text>
+
+              <View style={styles.transactionList}>
+                {RECENT_TRANSACTIONS.map((transaction) => (
+                  <Pressable
+                    key={transaction.id}
+                    style={styles.transactionRow}
+                    onPress={() => handleTransactionPress(transaction)}
+                  >
+                    <View
+                      style={[
+                        styles.transactionAvatar,
+                        { backgroundColor: transaction.avatarBackground },
+                      ]}
+                    >
+                      {transaction.avatarText ? (
+                        <Text
+                          style={[
+                            styles.transactionAvatarText,
+                            { color: transaction.avatarColor },
+                          ]}
+                        >
+                          {transaction.avatarText}
+                        </Text>
+                      ) : (
+                        <MaterialIcons
+                          name={transaction.icon}
+                          size={23}
+                          color={transaction.avatarColor}
+                        />
+                      )}
+                    </View>
+
+                    <View style={styles.transactionBody}>
+                      <Text style={styles.transactionMerchant}>{transaction.merchant}</Text>
+                      <Text style={styles.transactionDate}>{transaction.date}</Text>
+                    </View>
+
+                    <Text style={styles.transactionAmount}>{transaction.amount}</Text>
+                  </Pressable>
+                ))}
+              </View>
+            </View>
+          </>
+        ) : (
+          <View style={styles.waitlistContent}>
+            <LinearGradient
+              colors={["#111315", "#1B1E22", "#0A0B0C"]}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 1 }}
+              style={styles.waitlistCardPreview}
+            >
               <Image
                 source={require("@/assets/images/logomark.png")}
                 resizeMode="contain"
-                style={styles.logo}
+                style={styles.waitlistCardLogo}
               />
-              <View style={styles.cardFooterMark}>
-                <View style={styles.footerCircle} />
-                <View style={[styles.footerCircle, styles.footerCircleOverlap]} />
-              </View>
+              <Text style={styles.waitlistCardText}>CACHIN CARD</Text>
             </LinearGradient>
-            <LinearGradient
-              pointerEvents="none"
-              colors={["rgba(9,10,11,0)", "rgba(9,10,11,0.78)", "#090A0B"]}
-              locations={[0, 0.65, 1]}
-              start={{ x: 0.5, y: 0 }}
-              end={{ x: 0.5, y: 1 }}
-              style={styles.headerFade}
-            />
-          </LinearGradient>
-        </Animated.View>
 
-        <View style={styles.body}>
-          {isCardConfigured ? (
-            <>
-              <View style={styles.accountHeaderRow}>
-                <Text style={styles.title}>Your card is ready</Text>
-                <Pressable style={styles.settingsButton} onPress={handleOpenSettings}>
-                  <MaterialIcons name="settings" size={19} color="#F4F4F5" />
-                </Pressable>
-              </View>
-              <Text style={styles.subtitle}>
-                Your card works like a prepaid account. Top up from your wallet
-                and freeze it instantly whenever needed.
-              </Text>
+            <Text style={styles.title}>You&apos;re on the waitlist</Text>
+            <Text style={styles.subtitle}>
+              Get early access to a self-custody card experience powered by your
+              USDC. You spend from your wallet and keep full control of your funds.
+            </Text>
 
-              <View style={styles.accountCard}>
-                <View style={styles.accountCardTop}>
-                  <Text style={styles.accountCardLabel}>Cachin prepaid</Text>
-                  <MaterialIcons name="credit-card" size={22} color="#E9EDF5" />
-                </View>
-                <Text style={styles.accountCardNumber}>•••• 4821</Text>
-                <View style={styles.accountCardBottom}>
-                  <Text style={styles.accountCardName}>Main card</Text>
-                  <Text
-                    style={[
-                      styles.accountCardStatus,
-                      isFrozen ? styles.accountCardStatusFrozen : null,
-                    ]}
-                  >
-                    {isFrozen ? "Frozen" : "Active"}
-                  </Text>
-                </View>
-              </View>
-
-              <View style={styles.balancePanel}>
-                <Text style={styles.balanceLabel}>Card balance</Text>
-                <Text style={styles.balanceValue}>{formattedBalance}</Text>
-                <View style={styles.balanceActions}>
-                  <Pressable style={styles.balanceActionPrimary} onPress={handleTopUp}>
-                    <Text style={styles.balanceActionPrimaryText}>Top up</Text>
-                  </Pressable>
-                  <Pressable style={styles.balanceActionSecondary} onPress={handleToggleFreeze}>
-                    <Text style={styles.balanceActionSecondaryText}>
-                      {isFrozen ? "Unfreeze" : "Freeze"}
-                    </Text>
-                  </Pressable>
-                </View>
-              </View>
-
-              <View style={styles.cardHint}>
-                <Text style={styles.cardHintTitle}>Prepaid account behavior</Text>
-                <Text style={styles.cardHintText}>
-                  Spend only from available balance. Use settings to manage PIN,
-                  biometrics, and card removal.
-                </Text>
-              </View>
-            </>
-          ) : (
-            <>
-              <Text style={styles.title}>You're on the waitlist</Text>
-              <Text style={styles.subtitle}>
-                Get early access to a self-custody card experience powered by your
-                USDC. You spend from your wallet and keep full control of your
-                funds.
-              </Text>
-
-              <View style={styles.benefitsList}>
-                {BENEFITS.map((benefit) => (
-                  <View key={benefit.title} style={styles.benefitItem}>
-                    <View style={styles.benefitIconWrap}>
-                      <MaterialIcons
-                        name={benefit.icon}
-                        size={22}
-                        color="#F4F4F5"
-                      />
-                    </View>
-                    <View style={styles.benefitTextWrap}>
-                      <Text style={styles.benefitTitle}>{benefit.title}</Text>
-                      <Text style={styles.benefitDescription}>
-                        {benefit.description}
-                      </Text>
-                    </View>
+            <View style={styles.benefitsList}>
+              {BENEFITS.map((benefit) => (
+                <View key={benefit.title} style={styles.benefitItem}>
+                  <View style={styles.benefitIconWrap}>
+                    <MaterialIcons name={benefit.icon} size={22} color="#F4F4F5" />
                   </View>
-                ))}
-              </View>
+                  <View style={styles.benefitTextWrap}>
+                    <Text style={styles.benefitTitle}>{benefit.title}</Text>
+                    <Text style={styles.benefitDescription}>
+                      {benefit.description}
+                    </Text>
+                  </View>
+                </View>
+              ))}
+            </View>
 
-              <View style={styles.buttonStack}>
-                <Pressable style={styles.primaryButton} onPress={handleWaitlistPress}>
-                  <Text style={styles.primaryButtonText}>Join to the waitlist!</Text>
-                </Pressable>
-                <Pressable
-                  style={styles.secondaryButton}
-                  onPress={handleExistingCardPress}
-                >
-                  <Text style={styles.secondaryButtonText}>I already have a card</Text>
-                </Pressable>
-              </View>
-            </>
-          )}
-        </View>
-      </Animated.ScrollView>
+            <View style={styles.buttonStack}>
+              <Pressable style={styles.primaryButton} onPress={handleWaitlistPress}>
+                <Text style={styles.primaryButtonText}>Join to the waitlist!</Text>
+              </Pressable>
+              <Pressable style={styles.secondaryButton} onPress={handleExistingCardPress}>
+                <Text style={styles.secondaryButtonText}>I already have a card</Text>
+              </Pressable>
+            </View>
+          </View>
+        )}
+      </ScrollView>
 
       {isCardConfigured && showSettingsSheet ? (
         <View style={styles.settingsOverlay}>
           <Pressable style={styles.settingsScrim} onPress={handleCloseSettings} />
-          <View style={styles.settingsSheet}>
+          <View
+            style={[
+              styles.settingsSheet,
+              { paddingBottom: Math.max(insets.bottom + 10, 20) },
+            ]}
+          >
             <View style={styles.settingsSheetHeader}>
-              <Text style={styles.settingsSheetTitle}>Device settings</Text>
+              <Text style={styles.settingsSheetTitle}>Card Details</Text>
               <Pressable style={styles.settingsSheetClose} onPress={handleCloseSettings}>
                 <MaterialIcons name="close" size={18} color="#AEB8C9" />
               </Pressable>
             </View>
+
+            <View style={styles.cardDetailSummary}>
+              <Text style={styles.cardDetailLabel}>Daily use card</Text>
+              <Text style={styles.cardDetailValue}>VISA Platinum •• 1292</Text>
+            </View>
+
+            <Pressable style={styles.settingsRow} onPress={handleToggleFreeze}>
+              <View style={styles.settingsIconWrap}>
+                <MaterialIcons
+                  name={isFrozen ? "lock-open" : "lock-outline"}
+                  size={18}
+                  color="#F4F7FC"
+                />
+              </View>
+              <View style={styles.settingsTextWrap}>
+                <Text style={styles.settingsRowTitle}>
+                  {isFrozen ? "Unfreeze card" : "Freeze card"}
+                </Text>
+                <Text style={styles.settingsRowSubtitle}>
+                  {isFrozen
+                    ? "Allow new payments from this card"
+                    : "Block new payments until you unfreeze"}
+                </Text>
+              </View>
+            </Pressable>
 
             <Pressable style={styles.settingsRow} onPress={handleChangePin}>
               <View style={styles.settingsIconWrap}>
@@ -385,7 +592,9 @@ export default function CardScreen() {
               </View>
               <View style={styles.settingsTextWrap}>
                 <Text style={styles.settingsRowTitle}>Change PIN</Text>
-                <Text style={styles.settingsRowSubtitle}>Restart flow to set a new card PIN</Text>
+                <Text style={styles.settingsRowSubtitle}>
+                  Restart flow to set a new card PIN
+                </Text>
               </View>
             </Pressable>
 
@@ -395,7 +604,9 @@ export default function CardScreen() {
               </View>
               <View style={styles.settingsTextWrap}>
                 <Text style={styles.settingsRowTitle}>Disable biometrics</Text>
-                <Text style={styles.settingsRowSubtitle}>Require PIN for transaction approvals</Text>
+                <Text style={styles.settingsRowSubtitle}>
+                  Require PIN for transaction approvals
+                </Text>
               </View>
             </Pressable>
 
@@ -405,7 +616,9 @@ export default function CardScreen() {
               </View>
               <View style={styles.settingsTextWrap}>
                 <Text style={styles.settingsRowTitle}>Remove card</Text>
-                <Text style={styles.settingsRowSubtitle}>Restart onboarding from the beginning</Text>
+                <Text style={styles.settingsRowSubtitle}>
+                  Restart onboarding from the beginning
+                </Text>
               </View>
             </Pressable>
           </View>
@@ -415,253 +628,309 @@ export default function CardScreen() {
   );
 }
 
+const appFont = Platform.select({
+  ios: "System",
+  android: "sans-serif",
+  default: "System",
+});
+
 const styles = StyleSheet.create({
   screen: {
     flex: 1,
-    backgroundColor: "#090A0B",
+    backgroundColor: "#111111",
   },
   container: {
     flex: 1,
-    backgroundColor: "#090A0B",
+    backgroundColor: "#111111",
   },
   contentContainer: {
-    paddingBottom: 106,
+    paddingHorizontal: 15,
   },
-  header: {
-    height: HEADER_HEIGHT,
-    overflow: "hidden",
-  },
-  headerGradient: {
-    flex: 1,
-    alignItems: "center",
-    justifyContent: "center",
-    paddingTop: 18,
-    paddingHorizontal: 18,
-  },
-  generatedCard: {
-    width: "86%",
-    maxWidth: 332,
-    aspectRatio: 1.62,
-    borderRadius: 20,
-    borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.22)",
-    padding: 18,
-    justifyContent: "space-between",
-    transform: [{ rotate: "-10deg" }],
-    shadowColor: "#000000",
-    shadowOpacity: 0.35,
-    shadowRadius: 12,
-    shadowOffset: {
-      width: 0,
-      height: 10,
-    },
-  },
-  headerFade: {
+  fixedHeader: {
     position: "absolute",
+    top: 0,
     left: 0,
     right: 0,
-    bottom: 0,
-    height: 148,
-  },
-  chip: {
-    width: 44,
-    height: 30,
-    borderRadius: 7,
-    backgroundColor: "rgba(36,31,25,0.35)",
-    borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.35)",
-  },
-  logo: {
-    width: 134,
-    height: 46,
-    tintColor: "#FAFAFA",
-    alignSelf: "center",
-  },
-  cardFooterMark: {
     flexDirection: "row",
-    justifyContent: "flex-end",
-    opacity: 0.4,
-  },
-  footerCircle: {
-    width: 30,
-    height: 30,
-    borderRadius: 15,
-    backgroundColor: "#DBDBDC",
-  },
-  footerCircleOverlap: {
-    marginLeft: -12,
-    backgroundColor: "#9FA3A9",
-  },
-  body: {
-    marginTop: -8,
+    alignItems: "center",
+    justifyContent: "space-between",
     paddingHorizontal: 16,
-    paddingBottom: 16,
+    paddingBottom: 8,
+    zIndex: 20,
+  },
+  headerIconHit: {
+    borderRadius: 999,
+  },
+  headerIconButton: {
+    width: 52,
+    height: 52,
+    borderRadius: 26,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(255,255,255,0.04)",
+    borderColor: "rgba(255,255,255,0.18)",
+    boxShadow: "0 10px 22px rgba(0, 0, 0, 0.28)",
+  },
+  headerIconButtonIos: {
+    width: 50,
+    height: 50,
+    borderRadius: 25,
+    backgroundColor: "rgba(255,255,255,0.03)",
+    borderColor: "rgba(255,255,255,0.24)",
+  },
+  balanceHero: {
+    alignItems: "center",
+    paddingTop: 4,
+    paddingBottom: 22,
+  },
+  balanceLabel: {
+    color: "#787D86",
+    fontSize: 13,
+    lineHeight: 18,
+    fontWeight: "700",
+    fontFamily: appFont,
+  },
+  balanceValue: {
+    marginTop: 6,
+    color: "#FFFFFF",
+    fontSize: 44,
+    lineHeight: 50,
+    fontWeight: "800",
+    fontVariant: ["tabular-nums"],
+    fontFamily: appFont,
+  },
+  balanceCents: {
+    color: "rgba(255,255,255,0.28)",
+  },
+  cardMock: {
+    width: "100%",
+    aspectRatio: 1.58,
+    borderRadius: 15,
+    overflow: "hidden",
+    padding: 18,
+    justifyContent: "space-between",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.1)",
+    boxShadow: "0 14px 26px rgba(0, 0, 0, 0.38)",
+  },
+  cardMockBorder: {
+    ...StyleSheet.absoluteFillObject,
+    borderRadius: 15,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.08)",
+  },
+  cardFacetLeft: {
+    position: "absolute",
+    left: -42,
+    top: -18,
+    width: "54%",
+    height: "132%",
+    backgroundColor: "rgba(255,255,255,0.04)",
+    transform: [{ rotate: "45deg" }],
+  },
+  cardFacetCenter: {
+    position: "absolute",
+    left: "20%",
+    top: "22%",
+    width: "52%",
+    height: "82%",
+    backgroundColor: "rgba(255,255,255,0.035)",
+    transform: [{ rotate: "-34deg" }],
+  },
+  cardFacetRight: {
+    position: "absolute",
+    right: -70,
+    top: 10,
+    width: "70%",
+    height: "64%",
+    backgroundColor: "rgba(255,255,255,0.025)",
+    transform: [{ rotate: "-28deg" }],
+  },
+  cardMockTop: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    justifyContent: "space-between",
+  },
+  visaText: {
+    color: "rgba(255,255,255,0.36)",
+    fontSize: 34,
+    lineHeight: 34,
+    fontWeight: "900",
+    fontStyle: "italic",
+    fontFamily: appFont,
+  },
+  platinumText: {
+    marginTop: 2,
+    color: "rgba(255,255,255,0.28)",
+    fontSize: 13,
+    lineHeight: 16,
+    fontWeight: "500",
+    fontFamily: appFont,
+  },
+  cardLogomark: {
+    width: 34,
+    height: 34,
+    tintColor: "#FFFFFF",
+  },
+  cardMockBottom: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 12,
+  },
+  cardUseText: {
+    color: "rgba(255,255,255,0.72)",
+    fontSize: 11,
+    lineHeight: 15,
+    fontWeight: "800",
+    fontFamily: appFont,
+  },
+  frozenBadge: {
+    borderRadius: 10,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    backgroundColor: "rgba(255,255,255,0.1)",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.14)",
+  },
+  frozenBadgeText: {
+    color: "#FCA5A5",
+    fontSize: 10,
+    fontWeight: "800",
+    fontFamily: appFont,
+  },
+  actionRail: {
+    paddingTop: 24,
+    paddingBottom: 14,
+    gap: 8,
+  },
+  actionPill: {
+    height: 42,
+    borderRadius: 21,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 7,
+    paddingHorizontal: 15,
+    backgroundColor: "rgba(255,255,255,0.08)",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.08)",
+  },
+  actionPillPrimary: {
+    backgroundColor: "#3298FF",
+    borderColor: "rgba(255,255,255,0.18)",
+  },
+  actionPillText: {
+    color: "#F3F5F8",
+    fontSize: 14,
+    lineHeight: 18,
+    fontWeight: "800",
+    fontFamily: appFont,
+  },
+  actionPillPrimaryText: {
+    color: "#FFFFFF",
+  },
+  transactionsSection: {
+    paddingTop: 10,
+  },
+  sectionTitle: {
+    color: "rgba(255,255,255,0.36)",
+    fontSize: 18,
+    lineHeight: 24,
+    fontWeight: "800",
+    fontFamily: appFont,
+  },
+  transactionList: {
+    paddingTop: 14,
+    gap: 14,
+  },
+  transactionRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+    minHeight: 44,
+  },
+  transactionAvatar: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    alignItems: "center",
+    justifyContent: "center",
+    overflow: "hidden",
+  },
+  transactionAvatarText: {
+    fontSize: 16,
+    lineHeight: 20,
+    fontWeight: "800",
+    fontFamily: appFont,
+  },
+  transactionBody: {
+    flex: 1,
+    gap: 2,
+  },
+  transactionMerchant: {
+    color: "#F6F7F9",
+    fontSize: 16,
+    lineHeight: 20,
+    fontWeight: "800",
+    fontFamily: appFont,
+  },
+  transactionDate: {
+    color: "rgba(255,255,255,0.38)",
+    fontSize: 13,
+    lineHeight: 18,
+    fontWeight: "700",
+    fontFamily: appFont,
+  },
+  transactionAmount: {
+    color: "#F6F7F9",
+    fontSize: 16,
+    lineHeight: 20,
+    fontWeight: "700",
+    fontVariant: ["tabular-nums"],
+    fontFamily: appFont,
+  },
+  waitlistContent: {
+    paddingTop: 24,
+  },
+  waitlistCardPreview: {
+    width: "100%",
+    aspectRatio: 1.58,
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.16)",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 10,
+    marginBottom: 26,
+  },
+  waitlistCardLogo: {
+    width: 86,
+    height: 86,
+    tintColor: "#FFFFFF",
+  },
+  waitlistCardText: {
+    color: "#F5F5F5",
+    fontSize: 14,
+    fontWeight: "800",
+    fontFamily: appFont,
   },
   title: {
-    fontSize: 23,
-    lineHeight: 29,
+    fontSize: 25,
+    lineHeight: 31,
     fontWeight: "800",
     color: "#F9FAFB",
-    letterSpacing: -0.25,
-    fontFamily: Platform.select({
-      ios: "System",
-      android: "sans-serif",
-      default: "System",
-    }),
+    fontFamily: appFont,
   },
   subtitle: {
     marginTop: 8,
     fontSize: 15,
     lineHeight: 22,
     color: "#D1D5DB",
-    fontFamily: Platform.select({
-      ios: "System",
-      android: "sans-serif",
-      default: "System",
-    }),
-  },
-  accountHeaderRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    gap: 10,
-  },
-  settingsButton: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    alignItems: "center",
-    justifyContent: "center",
-    borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.24)",
-    backgroundColor: "rgba(255,255,255,0.08)",
-  },
-  accountCard: {
-    marginTop: 14,
-    borderRadius: 18,
-    borderWidth: 1,
-    borderColor: "rgba(140,150,170,0.22)",
-    backgroundColor: "rgba(20,27,39,0.92)",
-    paddingHorizontal: 14,
-    paddingVertical: 14,
-    minHeight: 154,
-    justifyContent: "space-between",
-  },
-  accountCardTop: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-  },
-  accountCardLabel: {
-    color: "#C6D0E1",
-    fontSize: 13,
-    fontWeight: "700",
-    textTransform: "uppercase",
-    letterSpacing: 0.6,
-  },
-  accountCardNumber: {
-    color: "#F4F7FC",
-    fontSize: 26,
-    fontWeight: "700",
-    letterSpacing: 0.8,
-  },
-  accountCardBottom: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-  },
-  accountCardName: {
-    color: "#AEB8C9",
-    fontSize: 14,
-    fontWeight: "700",
-  },
-  accountCardStatus: {
-    color: "#86EFAC",
-    fontSize: 13,
-    fontWeight: "700",
-  },
-  accountCardStatusFrozen: {
-    color: "#FCA5A5",
-  },
-  balancePanel: {
-    marginTop: 12,
-    borderRadius: 16,
-    borderWidth: 1,
-    borderColor: "rgba(140,150,170,0.2)",
-    backgroundColor: "rgba(20,27,39,0.76)",
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-    gap: 8,
-  },
-  balanceLabel: {
-    color: "#8D99AE",
-    fontSize: 13,
-    fontWeight: "700",
-    textTransform: "uppercase",
-    letterSpacing: 0.7,
-  },
-  balanceValue: {
-    color: "#EEF2F8",
-    fontSize: 34,
-    lineHeight: 38,
-    fontWeight: "800",
-    letterSpacing: -0.7,
-  },
-  balanceActions: {
-    flexDirection: "row",
-    gap: 10,
-  },
-  balanceActionPrimary: {
-    flex: 1,
-    height: 42,
-    borderRadius: 21,
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: "#F3EA3A",
-  },
-  balanceActionPrimaryText: {
-    color: "#111827",
-    fontSize: 14,
-    fontWeight: "800",
-  },
-  balanceActionSecondary: {
-    flex: 1,
-    height: 42,
-    borderRadius: 21,
-    alignItems: "center",
-    justifyContent: "center",
-    borderWidth: 1,
-    borderColor: "rgba(140,150,170,0.35)",
-    backgroundColor: "rgba(20,27,39,0.95)",
-  },
-  balanceActionSecondaryText: {
-    color: "#EEF2F8",
-    fontSize: 14,
-    fontWeight: "700",
-  },
-  cardHint: {
-    marginTop: 12,
-    borderRadius: 14,
-    borderWidth: 1,
-    borderColor: "rgba(140,150,170,0.18)",
-    backgroundColor: "rgba(20,27,39,0.58)",
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-  },
-  cardHintTitle: {
-    color: "#EEF2F8",
-    fontSize: 15,
-    fontWeight: "700",
-  },
-  cardHintText: {
-    marginTop: 4,
-    color: "#8D99AE",
-    fontSize: 13,
-    lineHeight: 18,
-    fontWeight: "600",
+    fontFamily: appFont,
   },
   benefitsList: {
-    marginTop: 14,
+    marginTop: 18,
     gap: 12,
   },
   benefitItem: {
@@ -670,9 +939,9 @@ const styles = StyleSheet.create({
     alignItems: "flex-start",
   },
   benefitIconWrap: {
-    width: 30,
-    height: 30,
-    borderRadius: 15,
+    width: 34,
+    height: 34,
+    borderRadius: 17,
     alignItems: "center",
     justifyContent: "center",
     backgroundColor: "rgba(255,255,255,0.12)",
@@ -689,25 +958,17 @@ const styles = StyleSheet.create({
     fontSize: 16,
     lineHeight: 20,
     fontWeight: "700",
-    fontFamily: Platform.select({
-      ios: "System",
-      android: "sans-serif-medium",
-      default: "System",
-    }),
+    fontFamily: appFont,
   },
   benefitDescription: {
     color: "#BFC5CD",
     fontSize: 13,
     lineHeight: 18,
     fontWeight: "500",
-    fontFamily: Platform.select({
-      ios: "System",
-      android: "sans-serif",
-      default: "System",
-    }),
+    fontFamily: appFont,
   },
   buttonStack: {
-    marginTop: 18,
+    marginTop: 22,
     gap: 9,
   },
   primaryButton: {
@@ -721,11 +982,7 @@ const styles = StyleSheet.create({
     color: "#171717",
     fontWeight: "800",
     fontSize: 16,
-    fontFamily: Platform.select({
-      ios: "System",
-      android: "sans-serif-medium",
-      default: "System",
-    }),
+    fontFamily: appFont,
   },
   secondaryButton: {
     height: 52,
@@ -740,11 +997,7 @@ const styles = StyleSheet.create({
     color: "#E5E7EB",
     fontWeight: "700",
     fontSize: 15,
-    fontFamily: Platform.select({
-      ios: "System",
-      android: "sans-serif-medium",
-      default: "System",
-    }),
+    fontFamily: appFont,
   },
   settingsOverlay: {
     ...StyleSheet.absoluteFillObject,
@@ -774,7 +1027,7 @@ const styles = StyleSheet.create({
     color: "#EEF2F8",
     fontSize: 15,
     fontWeight: "700",
-    letterSpacing: 0.2,
+    fontFamily: appFont,
   },
   settingsSheetClose: {
     width: 32,
@@ -785,6 +1038,31 @@ const styles = StyleSheet.create({
     backgroundColor: "rgba(255,255,255,0.05)",
     position: "absolute",
     right: 0,
+  },
+  cardDetailSummary: {
+    borderRadius: 16,
+    backgroundColor: "rgba(255,255,255,0.05)",
+    borderWidth: 1,
+    borderColor: "rgba(140,150,170,0.18)",
+    paddingHorizontal: 12,
+    paddingVertical: 12,
+    marginBottom: 8,
+  },
+  cardDetailLabel: {
+    color: "#8D99AE",
+    fontSize: 12,
+    lineHeight: 16,
+    fontWeight: "700",
+    textTransform: "uppercase",
+    fontFamily: appFont,
+  },
+  cardDetailValue: {
+    marginTop: 4,
+    color: "#EEF2F8",
+    fontSize: 17,
+    lineHeight: 22,
+    fontWeight: "800",
+    fontFamily: appFont,
   },
   settingsRow: {
     flexDirection: "row",
@@ -813,6 +1091,7 @@ const styles = StyleSheet.create({
     color: "#EEF2F8",
     fontSize: 14,
     fontWeight: "700",
+    fontFamily: appFont,
   },
   settingsRowSubtitle: {
     marginTop: 2,
@@ -820,5 +1099,6 @@ const styles = StyleSheet.create({
     fontSize: 13,
     lineHeight: 18,
     fontWeight: "600",
+    fontFamily: appFont,
   },
 });

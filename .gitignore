@@ -33,6 +33,10 @@ yarn-error.*
 .env
 .env*.local
 
+# local workspace/context exports
+.superstack/
+secreatsofcach/
+
 # builds
 android/
 ios/

@@ -16,6 +16,7 @@
         "EXPO_PUBLIC_TURNKEY_RPID": "qrwallet.kevan.ar",
         "EXPO_PUBLIC_APP_SCHEME": "qrwallet",
         "EXPO_PUBLIC_PRIVY_KEY_QUORUM_ID": "gfes1khol5pp2k4bx8ir9sjn",
+        "EXPO_PUBLIC_API_URL": "https://api.cachin.app",
         "EXPO_PUBLIC_FIREBASE_API_KEY": "AIzaSyDtzaJFSDlT2daAIF7EenA68AzUjVHdJ_4",
         "EXPO_PUBLIC_FIREBASE_AUTH_DOMAIN": "cachin-434ed.firebaseapp.com",
         "EXPO_PUBLIC_FIREBASE_PROJECT_ID": "cachin-434ed",

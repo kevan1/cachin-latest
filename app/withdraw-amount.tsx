@@ -13,23 +13,41 @@ import { useRouter, useLocalSearchParams } from 'expo-router';
 import { useState, useEffect } from 'react';
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 import { useEmbeddedSolanaWallet } from '@privy-io/expo';
-import { fetchAllTokenBalances } from '@/utils/balanceService';
-import { fetchTokenPrices } from '@/utils/priceService';
+import { fetchSolanaUsdcBalance } from '@/utils/balanceService';
 import { Colors } from '@/constants/theme';
 import { GlassView } from '@/components/ui/GlassView';
+import { normalizeDecimalInput } from '@/utils/tokenAmount';
+import {
+  formatDecimalForInput,
+  formatFiatValue,
+  formatTokenAmountDisplay,
+} from '@/utils/numberFormat';
+
+const USDC_DECIMALS = 6;
+
+function firstParam(value: string | string[] | undefined): string {
+  if (Array.isArray(value)) return value[0] ?? '';
+  return value ?? '';
+}
 
 export default function WithdrawAmountScreen() {
   const router = useRouter();
   const params = useLocalSearchParams();
   const { method } = params; // 'crypto', 'mercadopago', or 'bank'
   const { wallets } = useEmbeddedSolanaWallet();
-  const colorScheme = useColorScheme() ?? 'light';
+  const colorScheme = (useColorScheme() ?? 'light') as 'light' | 'dark';
   const palette = Colors[colorScheme];
-  
-  const [amount, setAmount] = useState('');
+  const prefilledAmount = firstParam(params.amount);
+  const prefilledCurrency = firstParam(params.currency).toUpperCase();
+  const prefilledPaymentAddress = firstParam(params.paymentAddress);
+  const prefilledSolanaTxSignature = firstParam(params.solanaTxSignature);
+  const prefilledRawQr = firstParam(params.rawQr);
+  const rail = firstParam(params.rail);
+
+  const [amount, setAmount] = useState(prefilledAmount);
   const [balance, setBalance] = useState<string>('0.00');
   const [isLoadingBalance, setIsLoadingBalance] = useState(true);
-  const [isUsdInput, setIsUsdInput] = useState(true); // true = USD input, false = ARS input
+  const [isUsdInput, setIsUsdInput] = useState(prefilledCurrency !== 'ARS'); // true = USD input, false = ARS input
   const arsRate = 1500; // 1 USD = 1500 ARS
 
   // Get full Solana address
@@ -52,17 +70,8 @@ export default function WithdrawAmountScreen() {
       
       try {
         setIsLoadingBalance(true);
-        const [balances, prices] = await Promise.all([
-          fetchAllTokenBalances(address),
-          fetchTokenPrices(),
-        ]);
-        
-        const totalUsd = 
-          (balances.sol * prices.sol) +
-          (balances.usdc * prices.usdc) +
-          (balances.usdt * prices.usdt);
-        
-        setBalance(totalUsd.toFixed(2));
+        const solanaUsdcBalance = await fetchSolanaUsdcBalance(address);
+        setBalance(formatDecimalForInput(solanaUsdcBalance, USDC_DECIMALS) || '0');
       } catch (error) {
         console.error('Error fetching balance:', error);
         setBalance('0.00');
@@ -84,7 +93,15 @@ export default function WithdrawAmountScreen() {
     if (method === 'bank' || method === 'mercadopago') {
       router.push({
         pathname: '/withdraw-bank',
-        params: { amount, currency },
+        params: {
+          amount,
+          currency,
+          method: firstParam(method),
+          paymentAddress: prefilledPaymentAddress,
+          solanaTxSignature: prefilledSolanaTxSignature,
+          rawQr: prefilledRawQr,
+          rail,
+        },
       });
     } else {
       router.push({
@@ -97,13 +114,9 @@ export default function WithdrawAmountScreen() {
   const handleSwap = () => {
     if (amount && parseFloat(amount) > 0) {
       if (isUsdInput) {
-        // Convert USD to ARS
-        const arsValue = (parseFloat(amount) * arsRate).toFixed(2);
-        setAmount(arsValue);
+        setAmount(formatDecimalForInput(parseFloat(amount) * arsRate, 2));
       } else {
-        // Convert ARS to USD
-        const usdValue = (parseFloat(amount) / arsRate).toFixed(2);
-        setAmount(usdValue);
+        setAmount(formatDecimalForInput(parseFloat(amount) / arsRate, USDC_DECIMALS));
       }
     }
     setIsUsdInput(!isUsdInput);
@@ -112,9 +125,15 @@ export default function WithdrawAmountScreen() {
   const calculateEquivalent = () => {
     const numAmount = parseFloat(amount) || 0;
     if (isUsdInput) {
-      return (numAmount * arsRate).toFixed(2);
+      return formatFiatValue(numAmount * arsRate, {
+        context: 'detailed',
+        currencyPrefix: 'ARS$',
+      });
     } else {
-      return (numAmount / arsRate).toFixed(2);
+      return formatFiatValue(numAmount / arsRate, {
+        context: 'detailed',
+        currencyPrefix: '$',
+      });
     }
   };
 
@@ -200,7 +219,9 @@ export default function WithdrawAmountScreen() {
               <TextInput
                 style={[styles.amountInput, { color: palette.primaryText }]}
                 value={amount}
-                onChangeText={setAmount}
+                onChangeText={(text) =>
+                  setAmount(normalizeDecimalInput(text, isUsdInput ? USDC_DECIMALS : 2))
+                }
                 keyboardType="decimal-pad"
                 placeholder="0.00"
                 placeholderTextColor={palette.secondaryText}
@@ -209,13 +230,17 @@ export default function WithdrawAmountScreen() {
             </View>
             
             <Text style={[styles.equivalentText, { color: palette.secondaryText }]}>
-               ≈ {isUsdInput ? 'ARS$' : '$'} {calculateEquivalent()}
+               ≈ {calculateEquivalent()}
             </Text>
             
             <Text style={[styles.balanceText, { color: palette.secondaryText }]}>
               {isLoadingBalance 
                 ? "Loading balance..." 
-                : `Available Balance: $${balance} USD`}
+                : `Available Solana USDC: ${formatTokenAmountDisplay(balance, {
+                    context: 'detailed',
+                    tokenPriceUsd: 1,
+                    tokenDecimals: USDC_DECIMALS,
+                  })} USDC`}
             </Text>
           </GlassView>
         </View>
@@ -318,13 +343,16 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     textAlign: 'left',
     minWidth: 100,
+    fontVariant: ['tabular-nums'],
   },
   equivalentText: {
     fontSize: 16,
     marginBottom: 16,
+    fontVariant: ['tabular-nums'],
   },
   balanceText: {
     fontSize: 13,
+    fontVariant: ['tabular-nums'],
   },
   footer: {
     marginBottom: 16,

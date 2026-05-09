@@ -1,9 +1,10 @@
-import type { RecentCardProps, SearchBarProps } from "@/typings/index";
 import BottomSheet, { BottomSheetScrollView } from "@gorhom/bottom-sheet";
-import { Image } from "expo-image";
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import { BlurView } from "expo-blur";
+import { LinearGradient } from "expo-linear-gradient";
+import * as Location from "expo-location";
+import { useRouter } from "expo-router";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  PermissionsAndroid,
   Platform,
   Pressable,
   StyleProp,
@@ -12,155 +13,57 @@ import {
   TextInput,
   View,
   ViewStyle,
+  useWindowDimensions,
 } from "react-native";
-import MapView, { Marker, PROVIDER_GOOGLE, UrlTile } from "react-native-maps";
+import MapView, {
+  Marker,
+  PROVIDER_GOOGLE,
+  UrlTile,
+} from "react-native-maps";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { MapFilterChips, type MerchantCategory } from "@/components/MapFilterChips";
+import { MapFilterChips } from "@/components/MapFilterChips";
+import {
+  ShopDetailContent,
+  ShopListContent,
+} from "@/components/map/shop-sheet-content";
+import { ShopMarker } from "@/components/map/shop-marker";
 import { GlassView } from "@/components/ui/GlassView";
 import { IconSymbol } from "@/components/ui/icon-symbol";
+import {
+  getOnboardedShops,
+  type CachinShop,
+} from "@/services/shopService";
 
-const JEVI_LOGO = require("../../assets/images/jevi-logo.png");
-
-type MapLocation = {
-  id: string;
-  title: string;
-  coordinate: {
-    latitude: number;
-    longitude: number;
-  };
-  category: MerchantCategory;
-  image: string;
-  rating: number;
-  distance: string;
-  openStatus: string;
-  address: string;
-  discount?: string;
-  acceptsCachin?: boolean;
-};
-
-const LOCATIONS: MapLocation[] = [
-  {
-    id: "1",
-    title: "Tazzino - Villa Crespo",
-    coordinate: { latitude: -34.5959, longitude: -58.4326 },
-    category: "Coffee",
-    image:
-      "https://images.unsplash.com/photo-1554118811-1e0d58224f24?q=80&w=1000&auto=format&fit=crop",
-    rating: 4.8,
-    discount: "-20%",
-    distance: "200 m",
-    openStatus: "Abre Mar 08:30hs",
-    address: "Av. Corrientes 5000",
-    acceptsCachin: true,
-  },
-  {
-    id: "2",
-    title: "4090 Burger & Fries",
-    coordinate: { latitude: -34.5843, longitude: -58.4286 },
-    category: "Burger",
-    image:
-      "https://images.unsplash.com/photo-1568901346375-23c9450c58cd?q=80&w=1000&auto=format&fit=crop",
-    rating: 5.0,
-    discount: "-25%",
-    distance: "1.2 km",
-    openStatus: "Abierto ahora",
-    address: "Nicaragua 4090",
-    acceptsCachin: true,
-  },
-  {
-    id: "3",
-    title: "Quebracho Bar",
-    coordinate: { latitude: -34.587, longitude: -58.43 },
-    category: "Bar",
-    image:
-      "https://images.unsplash.com/photo-1514362545857-3bc16c4c7d1b?q=80&w=1000&auto=format&fit=crop",
-    rating: 4.5,
-    distance: "800 m",
-    openStatus: "Cierra 02:00hs",
-    address: "Humboldt 1500",
-  },
-  {
-    id: "4",
-    title: "Supermercado Coto",
-    coordinate: { latitude: -34.6, longitude: -58.42 },
-    category: "Supermarket",
-    image:
-      "https://images.unsplash.com/photo-1534723452862-4c874018d66d?q=80&w=1000&auto=format&fit=crop",
-    rating: 4.2,
-    distance: "1.5 km",
-    openStatus: "Abierto 24hs",
-    address: "Av. Diaz Velez 4500",
-    acceptsCachin: true,
-  },
-  {
-    id: "5",
-    title: "Zara - Palermo Soho",
-    coordinate: { latitude: -34.5889, longitude: -58.4225 },
-    category: "Clothes",
-    image:
-      "https://images.unsplash.com/photo-1441986300917-64674bd600d8?q=80&w=1000&auto=format&fit=crop",
-    rating: 4.6,
-    distance: "1.8 km",
-    openStatus: "Abre 10:00hs",
-    address: "Gurruchaga 1500",
-  },
-  {
-    id: "jevi-1",
-    title: "El Jevi Kiosco - Charcas",
-    coordinate: { latitude: -34.5903433, longitude: -58.4139933 },
-    category: "Kiosko",
-    image:
-      "https://images.unsplash.com/photo-1542838132-92c53300491e?q=80&w=1000&auto=format&fit=crop",
-    rating: 4.4,
-    distance: "900 m",
-    openStatus: "Abierto 24hs",
-    address: "Charcas 3405, CABA",
-    acceptsCachin: true,
-  },
-  {
-    id: "jevi-2",
-    title: "El Jevi Kiosco - Pueyrredon",
-    coordinate: { latitude: -34.5959475, longitude: -58.4030948 },
-    category: "Kiosko",
-    image:
-      "https://images.unsplash.com/photo-1542838132-92c53300491e?q=80&w=1000&auto=format&fit=crop",
-    rating: 4.5,
-    distance: "1.2 km",
-    openStatus: "Abierto 24hs",
-    address: "Av. Pueyrredon 1270, CABA",
-    acceptsCachin: true,
-  },
-  {
-    id: "jevi-3",
-    title: "El Jevi Kiosco - Cabrera",
-    coordinate: { latitude: -34.5966556, longitude: -58.4156186 },
-    category: "Kiosko",
-    image:
-      "https://images.unsplash.com/photo-1542838132-92c53300491e?q=80&w=1000&auto=format&fit=crop",
-    rating: 4.4,
-    distance: "1.0 km",
-    openStatus: "Abierto 24hs",
-    address: "Cabrera 3501, CABA",
-    acceptsCachin: true,
-  },
-  {
-    id: "jevi-4",
-    title: "El Jevi Kiosco - Scalabrini Ortiz",
-    coordinate: { latitude: -34.5907049, longitude: -58.4250183 },
-    category: "Kiosko",
-    image:
-      "https://images.unsplash.com/photo-1542838132-92c53300491e?q=80&w=1000&auto=format&fit=crop",
-    rating: 4.5,
-    distance: "1.6 km",
-    openStatus: "Abierto 24hs",
-    address: "Av. Raul Scalabrini Ortiz 1602, CABA",
-    acceptsCachin: true,
-  },
-];
-
-type MapSearchBarProps = SearchBarProps & {
+type MapSearchBarProps = {
+  placeholder?: string;
+  onChangeText?: (text: string) => void;
+  value?: string;
+  onFocus?: () => void;
+  onBlur?: () => void;
+  onListPress?: () => void;
   style?: StyleProp<ViewStyle>;
 };
+
+const INITIAL_REGION = {
+  latitude: -34.5959,
+  longitude: -58.4326,
+  latitudeDelta: 0.0422,
+  longitudeDelta: 0.0221,
+};
+
+const SELECTED_REGION_DELTA = {
+  latitudeDelta: 0.018,
+  longitudeDelta: 0.012,
+};
+
+const USER_LOCATION_REGION_DELTA = {
+  latitudeDelta: 0.012,
+  longitudeDelta: 0.008,
+};
+
+function normalizeSearch(value: string): string {
+  return value.trim().toLowerCase();
+}
 
 const SearchBar: React.FC<MapSearchBarProps> = ({
   placeholder = "Search...",
@@ -168,6 +71,7 @@ const SearchBar: React.FC<MapSearchBarProps> = ({
   value,
   onFocus,
   onBlur,
+  onListPress,
   style,
 }) => {
   return (
@@ -184,15 +88,22 @@ const SearchBar: React.FC<MapSearchBarProps> = ({
           style={searchStyles.input}
           onChangeText={onChangeText}
           value={value}
+          autoCapitalize="none"
+          autoCorrect={false}
+          returnKeyType="search"
         />
-        <View style={searchStyles.trailingIconPadding}>
-          <IconSymbol name="mic" color="#8E8E93" size={20} />
-        </View>
       </GlassView>
       <View style={searchStyles.avatarContainer}>
-        <View style={searchStyles.listButton}>
+        <Pressable
+          accessibilityRole="button"
+          onPress={onListPress}
+          style={({ pressed }) => [
+            searchStyles.listButton,
+            pressed && searchStyles.listButtonPressed,
+          ]}
+        >
           <IconSymbol name="list.bullet" color="#000" size={20} />
-        </View>
+        </Pressable>
       </View>
     </View>
   );
@@ -216,7 +127,6 @@ const searchStyles = StyleSheet.create({
     height: 50,
     flexDirection: "row",
     alignItems: "center",
-    justifyContent: "space-between",
     overflow: "hidden",
     borderWidth: 1,
     borderColor: "rgba(0, 0, 0, 0.05)",
@@ -226,12 +136,10 @@ const searchStyles = StyleSheet.create({
   leadingIconPadding: {
     paddingLeft: 15,
   },
-  trailingIconPadding: {
-    paddingRight: 15,
-  },
   input: {
     flex: 1,
     paddingHorizontal: 10,
+    paddingRight: 15,
     fontSize: 17,
     color: "#000",
     height: "100%",
@@ -252,422 +160,26 @@ const searchStyles = StyleSheet.create({
     alignItems: "center",
     boxShadow: "0 2px 8px rgba(0, 0, 0, 0.1)",
   },
-});
-
-const RecentCard: React.FC<RecentCardProps> = ({
-  icon,
-  iconColor,
-  iconBackground,
-  title,
-  subtitle,
-  onPress,
-}) => {
-  return (
-    <View style={recentCardStyles.wrapper}>
-      <Pressable style={recentCardStyles.container} onPress={onPress}>
-        <View
-          style={[
-            recentCardStyles.iconContainer,
-            { backgroundColor: iconBackground },
-          ]}
-        >
-          <IconSymbol name={icon} size={24} color={iconColor} />
-        </View>
-        <View style={recentCardStyles.textContainer}>
-          <Text style={recentCardStyles.title}>{title}</Text>
-          <Text style={recentCardStyles.subtitle}>{subtitle}</Text>
-        </View>
-      </Pressable>
-    </View>
-  );
-};
-
-const recentCardStyles = StyleSheet.create({
-  wrapper: {
-    backgroundColor: "rgba(58, 58, 60, 0.6)",
-    borderRadius: 12,
-    marginBottom: 8,
-    overflow: "hidden",
-  },
-  container: {
-    flexDirection: "row",
-    alignItems: "center",
-    padding: 12,
-    gap: 12,
-  },
-  iconContainer: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    justifyContent: "center",
-    alignItems: "center",
-  },
-  textContainer: {
-    flex: 1,
-    gap: 2,
-  },
-  title: {
-    color: "#FFFFFF",
-    fontSize: 17,
-    fontWeight: "600",
-  },
-  subtitle: {
-    color: "#8E8E93",
-    fontSize: 15,
-  },
-});
-
-function getStatusTone(openStatus: string) {
-  if (openStatus.includes("Abierto")) return "open";
-  if (openStatus.includes("Cierra")) return "closing";
-  if (openStatus.includes("Abre")) return "closed";
-  return "neutral";
-}
-
-const LocationCard = ({
-  location,
-  onClose,
-}: {
-  location: MapLocation;
-  onClose: () => void;
-}) => {
-  const tone = getStatusTone(location.openStatus);
-  const isJevi = location.id.startsWith("jevi-") || location.category === "Kiosko";
-
-  return (
-    <View style={locationCardStyles.container}>
-      <View style={locationCardStyles.card}>
-        <View style={locationCardStyles.imageContainer}>
-          <Image
-            source={{ uri: location.image }}
-            style={locationCardStyles.image}
-            contentFit="cover"
-          />
-          <View
-            style={[
-              locationCardStyles.statusTag,
-              tone === "open" && locationCardStyles.statusTagOpen,
-              tone === "closing" && locationCardStyles.statusTagClosing,
-              tone === "closed" && locationCardStyles.statusTagClosed,
-            ]}
-          >
-            <Text
-              style={[
-                locationCardStyles.statusText,
-                tone === "open" && locationCardStyles.statusTextOpen,
-                tone === "closing" && locationCardStyles.statusTextClosing,
-                tone === "closed" && locationCardStyles.statusTextClosed,
-              ]}
-            >
-              {location.openStatus}
-            </Text>
-          </View>
-          <View style={locationCardStyles.logoContainer}>
-            {isJevi ? (
-              <Image
-                source={JEVI_LOGO}
-                style={locationCardStyles.logoImage}
-                contentFit="contain"
-              />
-            ) : (
-              <View style={locationCardStyles.genericLogo} />
-            )}
-          </View>
-          <Pressable style={locationCardStyles.closeButton} onPress={onClose}>
-            <IconSymbol name="xmark" size={16} color="#111827" />
-          </Pressable>
-        </View>
-
-        <View style={locationCardStyles.content}>
-          <Text style={locationCardStyles.title}>{location.title}</Text>
-
-          <View style={locationCardStyles.detailsRow}>
-            <Text style={locationCardStyles.ratingText}>⭐ {location.rating}</Text>
-            <Text style={locationCardStyles.distanceText}>🏃 {location.distance}</Text>
-            <View style={locationCardStyles.categoryBadge}>
-              <Text style={locationCardStyles.categoryText}>{location.category}</Text>
-            </View>
-          </View>
-
-          <Pressable style={locationCardStyles.payButton} onPress={() => {}}>
-            <Text style={locationCardStyles.payButtonText}>Pagar con Cachin</Text>
-          </Pressable>
-        </View>
-      </View>
-    </View>
-  );
-};
-
-const locationCardStyles = StyleSheet.create({
-  container: {
-    position: "absolute",
-    bottom: 100,
-    left: 20,
-    right: 20,
-    zIndex: 20,
-  },
-  card: {
-    backgroundColor: "#FFF",
-    borderRadius: 20,
-    borderCurve: "continuous",
-    overflow: "hidden",
-    boxShadow: "0 4px 12px rgba(0, 0, 0, 0.2)",
-  },
-  imageContainer: {
-    height: 160,
-    width: "100%",
-    position: "relative",
-  },
-  image: {
-    width: "100%",
-    height: "100%",
-  },
-  statusTag: {
-    position: "absolute",
-    top: 12,
-    left: 12,
-    backgroundColor: "#F1F5F9",
-    paddingHorizontal: 10,
-    paddingVertical: 5,
-    borderRadius: 10,
-  },
-  statusText: {
-    color: "#0F172A",
-    fontSize: 12,
-    fontWeight: "700",
-  },
-  statusTagOpen: {
-    backgroundColor: "#DCFCE7",
-  },
-  statusTextOpen: {
-    color: "#166534",
-  },
-  statusTagClosing: {
-    backgroundColor: "#FFEDD5",
-  },
-  statusTextClosing: {
-    color: "#9A3412",
-  },
-  statusTagClosed: {
-    backgroundColor: "#FFE4E6",
-  },
-  statusTextClosed: {
-    color: "#9F1239",
-  },
-  logoContainer: {
-    position: "absolute",
-    bottom: 12,
-    left: 12,
-    width: 32,
-    height: 32,
-    borderRadius: 8,
-    backgroundColor: "#FFD700",
-    justifyContent: "center",
-    alignItems: "center",
-  },
-  logoImage: {
-    width: 22,
-    height: 22,
-  },
-  genericLogo: {
-    width: 18,
-    height: 18,
-    borderRadius: 5,
-    backgroundColor: "#EF4444",
-  },
-  closeButton: {
-    position: "absolute",
-    top: 12,
-    right: 12,
-    width: 28,
-    height: 28,
-    borderRadius: 14,
-    backgroundColor: "rgba(255, 255, 255, 0.9)",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  content: {
-    padding: 16,
-    gap: 10,
-  },
-  title: {
-    fontSize: 18,
-    fontWeight: "700",
-    color: "#000",
-  },
-  detailsRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    flexWrap: "wrap",
-    gap: 8,
-  },
-  ratingText: {
-    fontSize: 13,
-    fontWeight: "600",
-    color: "#000",
-  },
-  distanceText: {
-    fontSize: 13,
-    fontWeight: "600",
-    color: "#4B5563",
-  },
-  categoryBadge: {
-    backgroundColor: "#F1F5F9",
-    borderRadius: 6,
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-  },
-  categoryText: {
-    fontSize: 12,
-    fontWeight: "600",
-    color: "#64748B",
-  },
-  payButton: {
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: "#10A5F5",
-    borderRadius: 12,
-    paddingVertical: 12,
-  },
-  payButtonText: {
-    color: "#FFFFFF",
-    fontSize: 14,
-    fontWeight: "700",
-  },
-});
-
-const MarkerContent = ({
-  location,
-  isSelected,
-}: {
-  location: MapLocation;
-  isSelected: boolean;
-}) => {
-  const isJevi = location.id.startsWith("jevi-") || location.category === "Kiosko";
-  const markerLabel = isJevi ? "EL Jevi" : location.title.split(" ")[0];
-
-  return (
-    <View style={markerStyles.container}>
-      {location.discount && (
-        <View style={markerStyles.discountBubble}>
-          <Text style={markerStyles.discountText}>{location.discount}</Text>
-        </View>
-      )}
-      <View style={[markerStyles.marker, isSelected && markerStyles.selectedMarker]}>
-        {isJevi ? (
-          <Image source={JEVI_LOGO} style={markerStyles.jeviLogo} contentFit="contain" />
-        ) : (
-          <>
-            {location.category === "Coffee" && <Text>☕</Text>}
-            {location.category === "Burger" && <Text>🍔</Text>}
-            {location.category === "Bar" && <Text>🍸</Text>}
-            {location.category === "Supermarket" && <Text>🛒</Text>}
-            {location.category === "Clothes" && <Text>👕</Text>}
-            {location.category === "Kiosko" && <Text>🧃</Text>}
-          </>
-        )}
-        <View style={markerStyles.ratingBadge}>
-          <Text style={markerStyles.ratingBadgeText}>{location.rating.toFixed(1)}</Text>
-        </View>
-      </View>
-      <View style={markerStyles.arrow} />
-      <Text style={[markerStyles.label, isSelected && markerStyles.selectedLabel]}>
-        {markerLabel}
-      </Text>
-    </View>
-  );
-};
-
-const markerStyles = StyleSheet.create({
-  container: {
-    alignItems: "center",
-  },
-  discountBubble: {
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    borderRadius: 4,
-    marginBottom: 4,
-    backgroundColor: "#333",
-  },
-  discountText: {
-    color: "#FFF",
-    fontSize: 10,
-    fontWeight: "700",
-  },
-  marker: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    borderCurve: "continuous",
-    backgroundColor: "#FFF",
-    justifyContent: "center",
-    alignItems: "center",
-    boxShadow: "0 2px 4px rgba(0, 0, 0, 0.2)",
-    borderWidth: 1,
-    borderColor: "rgba(0,0,0,0.05)",
-  },
-  selectedMarker: {
-    transform: [{ scale: 1.1 }],
-    borderColor: "#000",
-    borderWidth: 2,
-  },
-  jeviLogo: {
-    width: 22,
-    height: 22,
-  },
-  ratingBadge: {
-    position: "absolute",
-    top: -4,
-    right: -4,
-    backgroundColor: "#000",
-    borderRadius: 6,
-    paddingHorizontal: 4,
-    paddingVertical: 2,
-  },
-  ratingBadgeText: {
-    color: "#FFF",
-    fontSize: 10,
-    fontWeight: "700",
-  },
-  arrow: {
-    width: 0,
-    height: 0,
-    backgroundColor: "transparent",
-    borderStyle: "solid",
-    borderLeftWidth: 6,
-    borderRightWidth: 6,
-    borderBottomWidth: 0,
-    borderTopWidth: 8,
-    borderLeftColor: "transparent",
-    borderRightColor: "transparent",
-    borderTopColor: "#FFF",
-    marginTop: -1,
-    marginBottom: 2,
-    boxShadow: "0 2px 2px rgba(0, 0, 0, 0.1)",
-  },
-  label: {
-    fontSize: 12,
-    color: "#555",
-    marginTop: 2,
-    backgroundColor: "rgba(255,255,255,0.8)",
-    paddingHorizontal: 4,
-    borderRadius: 4,
-    overflow: "hidden",
-  },
-  selectedLabel: {
-    color: "#000",
-    fontWeight: "700",
+  listButtonPressed: {
+    opacity: 0.76,
   },
 });
 
 const Maps: React.FC = (): React.ReactElement => {
+  const router = useRouter();
   const bottomSheetRef = useRef<BottomSheet>(null);
+  const mapRef = useRef<MapView>(null);
   const insets = useSafeAreaInsets();
+  const { height: windowHeight } = useWindowDimensions();
   const isAndroid = Platform.OS === "android";
 
+  const [shops, setShops] = useState<CachinShop[]>([]);
+  const [isLoadingShops, setIsLoadingShops] = useState(true);
   const [searchText, setSearchText] = useState("");
   const [activeCategory, setActiveCategory] = useState<string | null>(null);
-  const [selectedLocationId, setSelectedLocationId] = useState<string | null>(null);
+  const [selectedShopId, setSelectedShopId] = useState<string | null>(null);
+  const [hasLocationPermission, setHasLocationPermission] = useState(false);
+  const [isLocatingUser, setIsLocatingUser] = useState(false);
 
   const googleMapsKey = process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY
     ?.trim()
@@ -676,77 +188,225 @@ const Maps: React.FC = (): React.ReactElement => {
     !isAndroid || /^AIza[A-Za-z0-9_-]{35}$/.test(googleMapsKey ?? "");
 
   useEffect(() => {
-    if (!isAndroid) {
-      return;
-    }
+    let isMounted = true;
 
-    void PermissionsAndroid.request(
-      PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION,
-      {
-        title: "Acceder a tu ubicación",
-        message: "Necesitamos tu ubicación para mostrarte comercios cercanos.",
-        buttonPositive: "Permitir",
-        buttonNegative: "Ahora no",
-      }
+    Location.getForegroundPermissionsAsync()
+      .then((permission) => {
+        if (!isMounted) return;
+        setHasLocationPermission(permission.granted);
+      })
+      .catch(() => undefined);
+
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    let isMounted = true;
+
+    const loadShops = async () => {
+      setIsLoadingShops(true);
+      const nextShops = await getOnboardedShops();
+      if (!isMounted) return;
+      setShops(nextShops);
+      setIsLoadingShops(false);
+    };
+
+    void loadShops();
+
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
+  const categories = useMemo(() => {
+    return Array.from(new Set(shops.map((shop) => shop.category).filter(Boolean))).sort(
+      (a, b) => a.localeCompare(b)
     );
-  }, [isAndroid]);
+  }, [shops]);
 
-  const filteredLocations = useMemo(() => {
-    if (activeCategory) {
-      return LOCATIONS.filter((location) => location.category === activeCategory);
+  useEffect(() => {
+    if (activeCategory && !categories.includes(activeCategory)) {
+      setActiveCategory(null);
     }
+  }, [activeCategory, categories]);
 
-    return LOCATIONS;
-  }, [activeCategory]);
+  const filteredShops = useMemo(() => {
+    const normalizedSearch = normalizeSearch(searchText);
 
-  const selectedLocation = useMemo(
-    () => filteredLocations.find((location) => location.id === selectedLocationId) ?? null,
-    [filteredLocations, selectedLocationId]
+    return shops.filter((shop) => {
+      const matchesCategory = !activeCategory || shop.category === activeCategory;
+      if (!matchesCategory) return false;
+
+      if (!normalizedSearch) return true;
+
+      return (
+        shop.name.toLowerCase().includes(normalizedSearch) ||
+        shop.address.toLowerCase().includes(normalizedSearch) ||
+        shop.category.toLowerCase().includes(normalizedSearch) ||
+        shop.cachinUsername?.toLowerCase().includes(normalizedSearch)
+      );
+    });
+  }, [activeCategory, searchText, shops]);
+
+  const selectedShop = useMemo(
+    () => filteredShops.find((shop) => shop.id === selectedShopId) ?? null,
+    [filteredShops, selectedShopId]
   );
 
   useEffect(() => {
-    if (
-      selectedLocationId &&
-      !filteredLocations.some((location) => location.id === selectedLocationId)
-    ) {
-      setSelectedLocationId(null);
+    if (selectedShopId && !filteredShops.some((shop) => shop.id === selectedShopId)) {
+      setSelectedShopId(null);
+      bottomSheetRef.current?.collapse();
     }
-  }, [filteredLocations, selectedLocationId]);
+  }, [filteredShops, selectedShopId]);
 
-  const snapPoints = useMemo(() => ["15%", "90%"], []);
+  const snapPoints = useMemo(() => ["32%", "58%", "88%"], []);
+  const sheetContentBottomPadding = isAndroid
+    ? 132
+    : Math.max(insets.bottom + 104, 140);
+  const navBarScrimHeight = isAndroid
+    ? 96
+    : Math.max(insets.bottom + 58, 92);
+  const topInset = insets.top + 118;
+  const locationButtonBottom = Math.round(windowHeight * 0.32) + 18;
 
-  const onMarkerPress = (id: string) => {
-    setSelectedLocationId(id);
+  const focusShopOnMap = useCallback((shop: CachinShop) => {
+    mapRef.current?.animateToRegion(
+      {
+        latitude: shop.latitude,
+        longitude: shop.longitude,
+        ...SELECTED_REGION_DELTA,
+      },
+      360
+    );
+  }, []);
+
+  const handleSelectShop = useCallback(
+    (shop: CachinShop) => {
+      setSelectedShopId(shop.id);
+      focusShopOnMap(shop);
+      bottomSheetRef.current?.snapToIndex(1);
+    },
+    [focusShopOnMap]
+  );
+
+  const handleClearSelection = useCallback(() => {
+    setSelectedShopId(null);
     bottomSheetRef.current?.collapse();
-  };
+  }, []);
+
+  const handleOpenList = useCallback(() => {
+    setSelectedShopId(null);
+    bottomSheetRef.current?.snapToIndex(2);
+  }, []);
+
+  const focusUserLocationOnMap = useCallback(
+    (coordinate: { latitude: number; longitude: number }) => {
+      setSelectedShopId(null);
+      bottomSheetRef.current?.collapse();
+      mapRef.current?.animateToRegion(
+        {
+          ...coordinate,
+          ...USER_LOCATION_REGION_DELTA,
+        },
+        360
+      );
+    },
+    []
+  );
+
+  const handleFocusUserLocation = useCallback(async () => {
+    setIsLocatingUser(true);
+
+    try {
+      const currentPermission = await Location.getForegroundPermissionsAsync();
+      const permission = currentPermission.granted
+        ? currentPermission
+        : await Location.requestForegroundPermissionsAsync();
+
+      setHasLocationPermission(permission.granted);
+
+      if (!permission.granted) {
+        return;
+      }
+
+      const currentPosition = await Location.getCurrentPositionAsync({
+        accuracy: Location.Accuracy.Balanced,
+      });
+      const nextLocation = {
+        latitude: currentPosition.coords.latitude,
+        longitude: currentPosition.coords.longitude,
+      };
+
+      focusUserLocationOnMap(nextLocation);
+    } catch (error) {
+      console.warn("[Map] Failed to get current location", error);
+    } finally {
+      setIsLocatingUser(false);
+    }
+  }, [focusUserLocationOnMap]);
+
+  const handlePayWithCachin = useCallback(
+    (shop: CachinShop) => {
+      const username = shop.cachinUsername?.trim();
+      if (username) {
+        router.push({
+          pathname: "/send-amount",
+          params: {
+            recipient: username,
+            username,
+          },
+        });
+        return;
+      }
+
+      const address = shop.solanaAddress?.trim();
+      if (address) {
+        router.push({
+          pathname: "/send-amount",
+          params: {
+            recipient: shop.name,
+            address,
+          },
+        });
+      }
+    },
+    [router]
+  );
 
   return (
     <View style={styles.container}>
       <SearchBar
         style={{ top: insets.top + 8 }}
         onFocus={() => undefined}
-        placeholder="Buscá en Buenos Aires"
+        placeholder="Search Cachin shops"
         value={searchText}
         onChangeText={setSearchText}
+        onListPress={handleOpenList}
       />
 
       <View style={[styles.filterChipsContainer, { top: insets.top + 72 }]}>
         <MapFilterChips
           activeCategory={activeCategory}
+          categories={categories}
           onCategoryPress={setActiveCategory}
         />
       </View>
 
       <MapView
+        ref={mapRef}
         provider={isAndroid ? PROVIDER_GOOGLE : undefined}
         mapType={isAndroid && !hasAndroidGoogleMapsKey ? "none" : "standard"}
         showsTraffic={false}
-        showsUserLocation={true}
+        showsUserLocation={hasLocationPermission}
+        showsMyLocationButton={false}
         style={styles.map}
         showsCompass={false}
         showsIndoors={false}
         showsScale={false}
-        showsPointsOfInterest={false}
+        showsPointsOfInterests={false}
         customMapStyle={[
           {
             featureType: "poi",
@@ -754,13 +414,8 @@ const Maps: React.FC = (): React.ReactElement => {
             stylers: [{ visibility: "off" }],
           },
         ]}
-        initialRegion={{
-          latitude: -34.5959,
-          longitude: -58.4326,
-          latitudeDelta: 0.0422,
-          longitudeDelta: 0.0221,
-        }}
-        onPress={() => setSelectedLocationId(null)}
+        initialRegion={INITIAL_REGION}
+        onPress={handleClearSelection}
       >
         {isAndroid && !hasAndroidGoogleMapsKey && (
           <UrlTile
@@ -769,16 +424,14 @@ const Maps: React.FC = (): React.ReactElement => {
           />
         )}
 
-        {filteredLocations.map((location) => (
+        {filteredShops.map((shop) => (
           <Marker
-            key={location.id}
-            coordinate={location.coordinate}
-            onPress={() => onMarkerPress(location.id)}
+            key={shop.id}
+            coordinate={{ latitude: shop.latitude, longitude: shop.longitude }}
+            stopPropagation
+            onPress={() => handleSelectShop(shop)}
           >
-            <MarkerContent
-              location={location}
-              isSelected={selectedLocationId === location.id}
-            />
+            <ShopMarker shop={shop} isSelected={selectedShopId === shop.id} />
           </Marker>
         ))}
       </MapView>
@@ -791,46 +444,77 @@ const Maps: React.FC = (): React.ReactElement => {
         </View>
       )}
 
-      {selectedLocation && (
-        <LocationCard
-          location={selectedLocation}
-          onClose={() => setSelectedLocationId(null)}
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel="Center map on current location"
+        onPress={handleFocusUserLocation}
+        style={({ pressed }) => [
+          styles.locationButton,
+          { bottom: locationButtonBottom },
+          isLocatingUser && styles.locationButtonLocating,
+          pressed && styles.locationButtonPressed,
+        ]}
+      >
+        <IconSymbol
+          name="location.fill"
+          size={21}
+          color={isLocatingUser ? "#007AFF" : "#111114"}
         />
-      )}
+      </Pressable>
 
-      {!selectedLocation && (
-        <BottomSheet
-          ref={bottomSheetRef}
-          index={0}
-          snapPoints={snapPoints}
-          enablePanDownToClose={false}
-          backgroundStyle={styles.bottomSheetBackground}
-          handleIndicatorStyle={styles.handleIndicator}
+      <BottomSheet
+        ref={bottomSheetRef}
+        index={0}
+        snapPoints={snapPoints}
+        topInset={topInset}
+        bottomInset={0}
+        enablePanDownToClose={false}
+        backgroundStyle={styles.bottomSheetBackground}
+        handleIndicatorStyle={styles.handleIndicator}
+      >
+        <BottomSheetScrollView
+          contentContainerStyle={[
+            styles.scrollContent,
+            { paddingBottom: sheetContentBottomPadding },
+          ]}
         >
-          <BottomSheetScrollView contentContainerStyle={styles.scrollContent}>
-            <Text style={styles.sheetTitle}>Explorá Buenos Aires</Text>
-            <View style={styles.sheetList}>
-              {filteredLocations.map((location) => (
-                <RecentCard
-                  key={location.id}
-                  icon="map.fill"
-                  iconColor="#FFF"
-                  iconBackground="#007AFF"
-                  title={location.title}
-                  subtitle={location.address || location.category}
-                  onPress={() => setSelectedLocationId(location.id)}
-                />
-              ))}
-            </View>
+          {selectedShop ? (
+            <ShopDetailContent
+              shop={selectedShop}
+              onBack={handleClearSelection}
+              onPay={handlePayWithCachin}
+            />
+          ) : (
+            <ShopListContent
+              shops={filteredShops}
+              isLoading={isLoadingShops}
+              searchText={searchText}
+              activeCategory={activeCategory}
+              onSelectShop={handleSelectShop}
+            />
+          )}
+        </BottomSheetScrollView>
+      </BottomSheet>
 
-            {filteredLocations.length === 0 && (
-              <Text style={styles.emptyStateText}>
-                No encontramos comercios para ese filtro.
-              </Text>
-            )}
-          </BottomSheetScrollView>
-        </BottomSheet>
-      )}
+      <View
+        pointerEvents="none"
+        style={[styles.navBarScrim, { height: navBarScrimHeight }]}
+      >
+        <BlurView
+          intensity={18}
+          tint="dark"
+          style={StyleSheet.absoluteFill}
+        />
+        <LinearGradient
+          colors={[
+            "rgba(0,0,0,0)",
+            "rgba(0,0,0,0.34)",
+            "rgba(0,0,0,0.78)",
+          ]}
+          locations={[0, 0.54, 1]}
+          style={StyleSheet.absoluteFill}
+        />
+      </View>
     </View>
   );
 };
@@ -866,38 +550,48 @@ const styles = StyleSheet.create({
     fontWeight: "600",
     textAlign: "center",
   },
+  locationButton: {
+    position: "absolute",
+    right: 18,
+    zIndex: 18,
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    borderCurve: "continuous",
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#FFFFFF",
+    borderWidth: 1,
+    borderColor: "rgba(0,0,0,0.06)",
+    boxShadow: "0 4px 12px rgba(0, 0, 0, 0.18)",
+  },
+  locationButtonPressed: {
+    transform: [{ scale: 0.96 }],
+  },
+  locationButtonLocating: {
+    borderColor: "rgba(0, 122, 255, 0.34)",
+  },
   bottomSheetBackground: {
-    backgroundColor: "rgba(30, 30, 32, 0.98)",
-    borderTopLeftRadius: 36,
-    borderTopRightRadius: 36,
+    backgroundColor: "rgba(22, 22, 24, 0.98)",
+    borderTopLeftRadius: 34,
+    borderTopRightRadius: 34,
     borderCurve: "continuous",
     borderWidth: 1,
     borderColor: "rgba(255, 255, 255, 0.08)",
     boxShadow: "0 12px 24px rgba(0, 0, 0, 0.55)",
   },
   handleIndicator: {
-    backgroundColor: "#D1D1D6",
+    width: 44,
+    backgroundColor: "rgba(255,255,255,0.42)",
   },
   scrollContent: {
-    paddingHorizontal: 16,
-    paddingTop: 12,
-    paddingBottom: 40,
+    paddingTop: 8,
   },
-  sheetTitle: {
-    fontSize: 20,
-    fontWeight: "700",
-    marginBottom: 20,
-    textAlign: "center",
-    color: "#FFF",
-  },
-  sheetList: {
-    gap: 10,
-  },
-  emptyStateText: {
-    marginTop: 20,
-    textAlign: "center",
-    color: "#B3B3B3",
-    fontSize: 14,
-    fontWeight: "600",
+  navBarScrim: {
+    position: "absolute",
+    left: 0,
+    right: 0,
+    bottom: 0,
+    zIndex: 30,
   },
 });

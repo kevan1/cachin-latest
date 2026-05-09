@@ -79,6 +79,10 @@ function normalizeUrlWithPath(input: string): string | null {
   }
 }
 
+function normalizeUrlWithOptionalScheme(input: string): string | null {
+  return normalizeUrlWithPath(input) ?? normalizeUrlWithPath(`https://${input}`);
+}
+
 export function getPrivyAppId(): string | null {
   const { expoExtra, manifestExtra, manifest2Extra, manifest2ExpoClientExtra } =
     getRuntimeExtras();
@@ -196,6 +200,52 @@ export function getPrivyExportPageUrl(params?: {
   }
   if (chain) {
     url.searchParams.set("chain", chain);
+  }
+
+  return url.toString();
+}
+
+export function getIdentityVerificationUrl(params?: {
+  userId?: string | null;
+  address?: string | null;
+}): string | null {
+  const { expoExtra, manifestExtra, manifest2Extra, manifest2ExpoClientExtra } =
+    getRuntimeExtras();
+
+  const explicit = pickFirstNonEmpty(
+    process.env.EXPO_PUBLIC_SUMSUB_VERIFICATION_URL,
+    process.env.SUMSUB_VERIFICATION_URL,
+    process.env.EXPO_PUBLIC_KYC_VERIFICATION_URL,
+    process.env.KYC_VERIFICATION_URL,
+    expoExtra.sumsubVerificationUrl,
+    expoExtra.kycVerificationUrl,
+    manifestExtra.sumsubVerificationUrl,
+    manifestExtra.kycVerificationUrl,
+    manifest2Extra.sumsubVerificationUrl,
+    manifest2Extra.kycVerificationUrl,
+    manifest2ExpoClientExtra.sumsubVerificationUrl,
+    manifest2ExpoClientExtra.kycVerificationUrl
+  );
+
+  if (!explicit) {
+    return null;
+  }
+
+  const normalizedBase = normalizeUrlWithOptionalScheme(explicit);
+  if (!normalizedBase) {
+    return null;
+  }
+
+  const url = new URL(normalizedBase);
+  const userId = normalizeValue(params?.userId);
+  const address = normalizeValue(params?.address);
+
+  if (userId) {
+    url.searchParams.set("userId", userId);
+  }
+
+  if (address) {
+    url.searchParams.set("address", address);
   }
 
   return url.toString();

@@ -90,7 +90,7 @@ function getAuthorizationSignature({
   });
   const signatureBuffer = crypto.sign(
     "sha256",
-    Buffer.from(serializedPayload),
+    new TextEncoder().encode(serializedPayload),
     privateKey
   );
 

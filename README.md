@@ -142,12 +142,19 @@ This repo includes production-ready Vercel API routes in a dedicated backend app
 - `POST /api/privy-solana-wallet`
 - `POST /api/privy-solana-sponsor`
 - `POST /api/solana-paymaster`
+- `POST /api/identity-verification-link`
+- `POST /api/push/register`
+- `POST /api/push/unregister`
+- `POST /api/push/helius-webhook`
+- `POST /api/push/helius-sync`
 
 They live in:
 
 - [`backend/api/privy-solana-wallet.ts`](./backend/api/privy-solana-wallet.ts)
 - [`backend/api/privy-solana-sponsor.ts`](./backend/api/privy-solana-sponsor.ts)
 - [`backend/api/solana-paymaster.ts`](./backend/api/solana-paymaster.ts)
+- [`backend/api/identity-verification-link.ts`](./backend/api/identity-verification-link.ts)
+- [`backend/api/push/[action].ts`](./backend/api/push/[action].ts)
 
 ### Deploy
 
@@ -164,6 +171,22 @@ They live in:
    - `PAYMASTER_SECRET_KEY` (required for `/api/solana-paymaster`)
    - `PAYMASTER_PUBLIC_KEY` (recommended safety check against wrong key)
    - `SOLANA_RPC` (optional, defaults to `EXPO_PUBLIC_SOLANA_RPC` or Solana mainnet)
+   - `P2P_EVM_RPC` (required for `/api/p2p/*`; `P2P_ENV_RPC` is also accepted as a legacy alias)
+   - `P2P_EVM_CHAIN` (optional; `base` for mainnet, otherwise Base Sepolia is used)
+   - `P2P_EVM_CHAIN_ID` (optional; `8453` selects Base mainnet)
+   - `P2P_DIAMOND_ADDRESS` (required for `/api/p2p/*`)
+   - `P2P_USDC_ADDRESS` (required for `/api/p2p/*`)
+   - `P2P_SUBGRAPH_URL` (required for `/api/p2p/*`)
+   - `P2P_RELAYER_PRIVATE_KEY` (required for `/api/p2p/*`)
+   - `P2P_BRIDGE_SIM_FEE_BPS` (optional)
+   - `MANTECA_API_KEY` / `MANTECA_API_BASE_URL` / `MANTECA_QR_PAYMENT_URL` / `MANTECA_QR_PAYMENT_PATH` (required only for `/api/manteca/*`)
+   - `SUMSUB_APP_TOKEN` / `SUMSUB_SECRET_KEY` / `SUMSUB_LEVEL_NAME` (required for `/api/identity-verification-link`)
+   - `SUMSUB_WEBSDK_TTL` / `SUMSUB_CALLBACK_URL` (optional for `/api/identity-verification-link`)
+   - `PRIVY_JWT_VERIFICATION_KEY` (required for `/api/push/register` and `/api/push/unregister`)
+   - `FIREBASE_SERVICE_ACCOUNT_JSON` (required for push registration state; JSON or base64-encoded JSON)
+   - `HELIUS_API_KEY` / `HELIUS_WEBHOOK_ID` / `HELIUS_WEBHOOK_AUTH_HEADER` (required for Helius receive push notifications)
+   - `HELIUS_WEBHOOK_URL` (optional; defaults to `https://api.cachin.app/api/push/helius-webhook`)
+   - `PUSH_ADMIN_SECRET` (required for `/api/push/helius-sync`)
 4. Deploy from `backend/`:
 
 ```bash
@@ -188,4 +211,9 @@ curl -X POST https://api.cachin.app/api/privy-solana-wallet \
 curl -X POST https://api.cachin.app/api/solana-paymaster \
   -H "Content-Type: application/json" \
   -d '{"transaction":"<base64-serialized-transaction-with-user-signature>"}'
+```
+
+```bash
+curl -X POST https://api.cachin.app/api/push/helius-sync \
+  -H "Authorization: Bearer <PUSH_ADMIN_SECRET>"
 ```

@@ -1,0 +1,129 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Cachin Hackathon Submission V2</title>
+  <style>
+    body { margin:0; background:#f8fafc; color:#07111f; font-family:Inter,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; }
+    main { max-width:980px; margin:auto; padding:48px 24px 80px; }
+    h1 { font-size:44px; letter-spacing:-.03em; margin:8px 0 10px; }
+    h2 { margin-top:38px; border-top:1px solid #dbe3ef; padding-top:28px; }
+    p,li { color:#475569; line-height:1.65; }
+    .box { border:1px solid #dbe3ef; background:#fff; border-radius:18px; padding:24px; margin:18px 0; box-shadow:0 10px 28px rgba(15,23,42,.05); }
+    .label { font-size:12px; font-weight:900; letter-spacing:.12em; color:#2563eb; text-transform:uppercase; }
+    code { background:#eef4ff; padding:2px 5px; border-radius:5px; }
+    .todo { color:#b45309; font-weight:800; }
+  </style>
+</head>
+<body>
+<main>
+  <p class="label">V2 draft</p>
+  <h1>Cachin Hackathon Submission</h1>
+  <p>This version uses the corrected LATAM-first positioning and keeps founder-provided claims clearly marked until proof is attached.</p>
+
+  <section class="box">
+    <p class="label">Project</p>
+    <h2 style="border:0; padding:0; margin:0;">Cachin</h2>
+    <p><strong>Tagline:</strong> Spend more effortlessly across LATAM.</p>
+    <p><strong>Short hook:</strong> Cachin lets tourists and foreigners fund globally, scan supported local QRs across LATAM, confirm the FX, and pay like locals. The MVP starts in Argentina.</p>
+    <p><strong>Origin hook:</strong> Built from LATAM for the world.</p>
+    <p><strong>Best track:</strong> Payments / Consumer / Stablecoins. Add Visa side-track only if the card/BIN story is demo-ready.</p>
+  </section>
+
+  <h2>Project Description</h2>
+  <p>Latin America is QR-first, but foreign money is not. Tourists, foreigners, digital nomads, and freelancers paid in crypto often arrive with dollars, euros, cards, or crypto balances, while local merchants expect QR payments.</p>
+  <p>Cachin lets users fund a mobile wallet globally and pay locally across LATAM QR rails. The first MVP/proof wedge is Argentina: a user can add funds through crypto, card, SWIFT, or IBAN, scan a supported local QR such as Mercado Pago or MODO, review the FX/fees/final total, and complete the payment. The merchant does not need to change behavior for the basic flow.</p>
+  <p>If a merchant onboards into Cachin, they unlock the enhanced layer: lower fees, instant settlement, discounts, POS tools, and direct merchant-side confirmation. Founder-provided merchant economics: card fees can range from 3-7%, and settlement can take 15-30 days unless merchants pay more.</p>
+  <p>The product is LATAM-first. Argentina is the clearest initial wedge because QR payments, foreigner payment friction, and exchange-rate differences are highly visible. Founder-provided Argentina example: card dollar around 1365 versus crypto dollar around 1470. Manteca is the preferred provider path for broader LATAM coverage; use the exact founder-stated 15-country claim only after provider proof is attached.</p>
+  <p>Cachin is built from LATAM for the world. The founder is Argentine and has lived the payment friction directly: local QR behavior, card-fee pain for merchants, exchange-rate gaps, and the reality of visitors who cannot pay like locals.</p>
+  <p>Cachin is also building defensibility beyond the app: onboarded local merchants, merchant discounts, and a founder-built Cachin POS that generates QR payments. The self-custodial cold-wallet/Visa card direction is a separate product line being worked on with a partner; Cachin can be the first wallet implementation, but it is not required for the core Cachin payment wedge.</p>
+
+  <h2>What Is Built</h2>
+  <ul>
+    <li>iOS and Android app, founder-stated as functioning.</li>
+    <li>Seeker-ready direction for Solana Mobile users traveling through LATAM.</li>
+    <li>QR payment flow.</li>
+    <li>LATAM QR direction with Argentina MVP proof: scan supported local QR codes such as Mercado Pago or MODO in the demo market.</li>
+    <li>Sumsub KYC for supported local QR payments.</li>
+    <li>Crisp immediate 1:1 support.</li>
+    <li>Merchant QR / local shop payment upgrade flow.</li>
+    <li>P2P/Manteca-style local payment rail integration work.</li>
+    <li>Several onboarded merchants, founder-provided and proof pending.</li>
+    <li>CachinPOS separate repo and GitHub remote verified; physical POS device founder-provided.</li>
+    <li>Cachin card/cold-wallet payment flow, founder-provided and proof pending.</li>
+  </ul>
+
+  <h2>Evidence Package</h2>
+  <p>The submission should link proof artifacts instead of relying on strong claims. The local source of truth is:</p>
+  <ul>
+    <li><code>docs/proof/merchants/merchant-list.md</code> for merchant acceptance and discounts.</li>
+    <li><code>docs/proof/pos/cachinpos-proof.md</code> for the CachinPOS repo, device photo, and POS demo.</li>
+    <li><code>docs/proof/card/card-proof.md</code> for the EAL6+ card prototype, repo, and technical note.</li>
+    <li><code>docs/proof/providers/rails-proof.md</code> for Manteca trial/coverage/pricing and P2P.me backup evidence.</li>
+    <li><code>docs/proof/partnerships/fiserv-clover-proof.md</code> for Fiserv/Clover active-conversation proof.</li>
+    <li><code>docs/proof/metrics/merchant-economics.md</code> for card fees, settlement delay, discounts, and rate spread proof.</li>
+    <li><code>docs/proof/origin/origin-timeline.md</code> for prior public submission and founder-origin proof.</li>
+    <li><code>docs/proof/support/support-and-refunds.md</code> for Crisp support, refund education, failed payment states, and trust proof.</li>
+  </ul>
+
+  <h2>Demo Link</h2>
+  <p class="todo">TBD: add TestFlight, APK, web demo, or video demo URL.</p>
+
+  <h2>Source Code</h2>
+  <p class="todo">TBD: confirm public app repo URL and final submission branch.</p>
+  <p><strong>POS repo:</strong> <code>https://github.com/kevan1/CachinPOS</code> exists as the verified GitHub remote. Confirm visibility before submission.</p>
+
+  <h2>3-Minute Demo Script</h2>
+  <h3>0:00-0:20 Hook</h3>
+  <p>"LATAM pays by QR. Foreigners cannot easily use those local rails. Cachin fixes that: fund globally, scan a supported local QR, review the FX, pay like a local. The MVP proves it in Argentina first."</p>
+  <h3>0:20-0:40 Product</h3>
+  <p>"This is Cachin: a mobile payment app built from LATAM for the world, starting with an Argentina MVP for tourists and foreigners. Users do not need to understand crypto. They scan, confirm, pay, and have immediate support if something goes wrong."</p>
+  <h3>0:40-1:40 Consumer Demo</h3>
+  <p>Show app open, funded balance, supported Mercado Pago/MODO-style QR scan, pre-payment confirmation with amount, destination, FX/rate, fee, discount if any, final total, payment confirmation, activity/payment proof, and Crisp support entry point.</p>
+  <h3>1:40-2:20 Merchant Demo</h3>
+  <p>Optional secondary demo: show onboarded Cachin merchant/POS generating QR and/or merchant receiving instant confirmation. If possible, show discount or settlement proof.</p>
+  <h3>2:20-2:45 Moat</h3>
+  <p>"Cachin starts with LATAM QR utility for tourists, then expands through onboarded merchants, POS, Seeker readiness, and rail-agnostic provider strategy: Manteca for the preferred demo path and P2P.me as backup. The card is a separate product line where Cachin can become the first wallet implementation."</p>
+  <h3>2:45-3:00 Close</h3>
+  <p>"Spend more effortlessly. Scan, pay, done."</p>
+
+  <h2>Judging Optimization</h2>
+  <ul>
+    <li><strong>Functionality:</strong> show a live or recorded supported local QR payment in the Argentina MVP, not just UI.</li>
+    <li><strong>Innovation:</strong> global funding into local QR payments, with merchant onboarding as the upgrade layer.</li>
+    <li><strong>Technical execution:</strong> show mobile app, QR routing, KYC state, pre-payment confirmation, payment proof, support path, and optional POS flow.</li>
+    <li><strong>Impact:</strong> show tourist convenience first, then merchant economics for onboarded merchants.</li>
+    <li><strong>Presentation:</strong> use "Spend more effortlessly" and "Scan, pay, done."</li>
+  </ul>
+
+  <h2>Competition</h2>
+  <p>CacaoCash publicly positions around paying any QR in Latin America like a local. This validates the market and raises urgency. Cachin should differentiate by showing LATAM QR scope, the Argentina MVP demo, Sumsub KYC path, Crisp support, local founder execution, and merchant upgrade rails. Do not accuse competitors of copying in the public submission; use the safer and stronger line: built from LATAM for the world.</p>
+
+  <h2>Claim-Safe Language</h2>
+  <ul>
+    <li>Say <strong>"active conversations with Fiserv/Clover"</strong>, not "partnership," unless written confirmation exists.</li>
+    <li>Say <strong>"Manteca demo/provider path"</strong>, not "live in 15 countries," until coverage and production access are proven.</li>
+    <li>Say <strong>"separate card product line / first Cachin wallet implementation"</strong>, not "global Visa card," until the card submission is ready.</li>
+    <li>Say <strong>"Sumsub KYC for supported local QR payments"</strong> and <strong>"lower-friction direct transfers for onboarded merchants, subject to limits/compliance"</strong>, not broad "no KYC."</li>
+    <li>Say <strong>"Built from LATAM for the world"</strong>, not public copying accusations.</li>
+  </ul>
+
+  <h2>Proof Checklist Before Submission</h2>
+  <ul>
+    <li class="todo">LATAM QR payment video, demonstrated in Argentina MVP: scan -> confirm FX/fees/final total -> pay -> receipt.</li>
+    <li class="todo">Sumsub KYC proof and state handling.</li>
+    <li class="todo">Crisp support/refund explanation in <code>docs/proof/support/support-and-refunds.md</code>.</li>
+    <li class="todo">Merchant upgrade proof in <code>docs/proof/merchants/merchant-list.md</code>.</li>
+    <li class="todo">Cachin POS video and device photo in <code>docs/proof/pos/</code>.</li>
+    <li class="todo">Cachin card/cold-wallet payment proof in <code>docs/proof/card/</code>.</li>
+    <li class="todo">Manteca trial, coverage, and pricing proof in <code>docs/proof/providers/rails-proof.md</code>.</li>
+    <li class="todo">P2P.me backup rail proof in <code>docs/proof/providers/rails-proof.md</code>.</li>
+    <li class="todo">Seeker readiness proof.</li>
+    <li class="todo">Fiserv/Clover conversation status in <code>docs/proof/partnerships/fiserv-clover-proof.md</code>.</li>
+    <li class="todo">Dated rate comparison for Argentina example in <code>docs/proof/metrics/merchant-economics.md</code>.</li>
+    <li class="todo">Previous public hackathon submission proof in <code>docs/proof/origin/origin-timeline.md</code>.</li>
+  </ul>
+</main>
+</body>
+</html>

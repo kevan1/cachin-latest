@@ -22,8 +22,12 @@ import { GlassView } from "@/components/ui/GlassView";
 import { getSelectedCurrency } from "@/utils/userStorage";
 import { fetchArsPrice } from "@/utils/priceService";
 import { getSolanaRpcUrl } from "@/utils/solanaRpc";
-import { formatAmount } from "@/utils/formatAmount";
 import { formatTokenUnits, normalizeDecimalInput, parseDecimalToUnits } from "@/utils/tokenAmount";
+import {
+  formatDecimalForInput,
+  formatFiatValue,
+  formatTokenAmountDisplay,
+} from "@/utils/numberFormat";
 import { useEmbeddedSolanaWallet } from "@privy-io/expo";
 
 const USDC_MINT_ADDRESS = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
@@ -34,19 +38,6 @@ const DEFAULT_ARS_RATE = 1500;
 function formatAddress(address: string): string {
   if (!address) return "Not connected";
   return `${address.slice(0, 4)}...${address.slice(-4)}`;
-}
-
-function formatNumericDisplay(value: number, maxFractionDigits: number): string {
-  if (!Number.isFinite(value) || value <= 0) return "0";
-  return value.toLocaleString("en-US", {
-    minimumFractionDigits: 0,
-    maximumFractionDigits: maxFractionDigits,
-  });
-}
-
-function toInputDecimal(value: number, maxFractionDigits: number): string {
-  if (!Number.isFinite(value) || value <= 0) return "";
-  return value.toFixed(maxFractionDigits).replace(/\.?0+$/, "");
 }
 
 export default function SendLinkScreen() {
@@ -156,7 +147,7 @@ export default function SendLinkScreen() {
   }, [walletAddress]);
 
   const normalizedAmount = useMemo(() => {
-    const normalizedInput = normalizeDecimalInput(amount, 2);
+    const normalizedInput = normalizeDecimalInput(amount, isUsdInput ? USDC_DECIMALS : 2);
     if (!normalizedInput) return "";
     if (isUsdInput) return normalizedInput;
 
@@ -177,27 +168,41 @@ export default function SendLinkScreen() {
     return isUsdInput ? balanceNumber : balanceNumber * arsRate;
   }, [arsRate, balanceNumber, isUsdInput]);
   const availableDisplayAmount = useMemo(
-    () => formatNumericDisplay(availableInputAmount, 2),
-    [availableInputAmount]
+    () =>
+      formatFiatValue(availableInputAmount, {
+        context: "detailed",
+        currencyPrefix: isUsdInput ? "$" : "ARS$",
+      }),
+    [availableInputAmount, isUsdInput]
   );
   const equivalentDisplayAmount = useMemo(() => {
     const parsedAmount = Number.parseFloat(amount);
+    const prefix = isUsdInput ? "ARS$" : "$";
     if (!Number.isFinite(parsedAmount) || parsedAmount <= 0 || arsRate <= 0) {
-      return "0";
+      return formatFiatValue(0, {
+        context: "detailed",
+        currencyPrefix: prefix,
+      });
     }
 
     if (isUsdInput) {
-      return formatAmount(parsedAmount * arsRate, { maxFractionDigits: 2 });
+      return formatFiatValue(parsedAmount * arsRate, {
+        context: "detailed",
+        currencyPrefix: prefix,
+      });
     }
 
-    return formatNumericDisplay(parsedAmount / arsRate, 2);
+    return formatFiatValue(parsedAmount / arsRate, {
+      context: "detailed",
+      currencyPrefix: prefix,
+    });
   }, [amount, arsRate, isUsdInput]);
   const canPrefillMax =
     !isLoadingBalance && balanceUnits > 0n && Number.isFinite(balanceNumber) && balanceNumber > 0;
   const amountInputWidth = Math.min(240, Math.max(120, Math.max(amount.length, 4) * 20));
 
   const handleAmountChange = (text: string) => {
-    setAmount(normalizeDecimalInput(text, 2));
+    setAmount(normalizeDecimalInput(text, isUsdInput ? USDC_DECIMALS : 2));
   };
 
   const handleSwapInputCurrency = () => {
@@ -212,7 +217,7 @@ export default function SendLinkScreen() {
     }
 
     const converted = isUsdInput ? parsedAmount * arsRate : parsedAmount / arsRate;
-    setAmount(toInputDecimal(converted, 2));
+    setAmount(formatDecimalForInput(converted, isUsdInput ? 2 : USDC_DECIMALS));
     setIsUsdInput((prev) => !prev);
   };
 
@@ -223,16 +228,22 @@ export default function SendLinkScreen() {
     }
 
     if (isUsdInput) {
-      setAmount(toInputDecimal(balanceNumber, 2));
+      setAmount(
+        formatTokenUnits(balanceUnits, USDC_DECIMALS, {
+          minFractionDigits: 0,
+          maxFractionDigits: USDC_DECIMALS,
+          trimTrailingZeros: true,
+        })
+      );
       return;
     }
 
-    setAmount(toInputDecimal(availableInputAmount, 2));
+    setAmount(formatDecimalForInput(availableInputAmount, 2));
   };
 
   const handleQuickAmount = (valueUsd: number) => {
     const nextValue = isUsdInput ? valueUsd : valueUsd * arsRate;
-    setAmount(toInputDecimal(nextValue, 2));
+    setAmount(formatDecimalForInput(nextValue, isUsdInput ? USDC_DECIMALS : 2));
   };
 
   const handleCopyLink = async () => {
@@ -351,7 +362,7 @@ export default function SendLinkScreen() {
           </View>
 
           <Text style={[styles.equivalentText, { color: palette.secondaryText }]} selectable>
-            ≈ {isUsdInput ? "ARS$" : "$"} {equivalentDisplayAmount}
+            ≈ {equivalentDisplayAmount}
           </Text>
           <Text style={[styles.balanceHelperText, { color: palette.secondaryText }]} selectable>
             Preference: {preferredCurrency}
@@ -389,11 +400,17 @@ export default function SendLinkScreen() {
             <Text style={[styles.availableAmount, { color: palette.primaryText }]} selectable>
               {isLoadingBalance
                 ? "Loading balance..."
-                : `${isUsdInput ? "$" : "ARS$"}${availableDisplayAmount}`}
+                : availableDisplayAmount}
             </Text>
             {!isLoadingBalance ? (
               <Text style={[styles.availableSubtext, { color: palette.secondaryText }]} selectable>
-                USDC {formatNumericDisplay(balanceNumber, 6)} available
+                USDC{" "}
+                {formatTokenAmountDisplay(balanceNumber, {
+                  context: "detailed",
+                  tokenPriceUsd: 1,
+                  tokenDecimals: USDC_DECIMALS,
+                })}{" "}
+                available
               </Text>
             ) : null}
           </GlassView>
@@ -402,8 +419,11 @@ export default function SendLinkScreen() {
         <View style={styles.quickRow}>
           {QUICK_AMOUNTS_USD.map((valueUsd) => {
             const labelValue = isUsdInput
-              ? formatNumericDisplay(valueUsd, 0)
-              : formatNumericDisplay(valueUsd * arsRate, 0);
+              ? formatFiatValue(valueUsd, { context: "detailed", currencyPrefix: "$" })
+              : formatFiatValue(valueUsd * arsRate, {
+                  context: "detailed",
+                  currencyPrefix: "ARS$",
+                });
 
             return (
               <TouchableOpacity
@@ -427,7 +447,6 @@ export default function SendLinkScreen() {
                   interactive
                 >
                   <Text style={[styles.quickChipText, { color: palette.primaryText }]}>
-                    {isUsdInput ? "$" : "ARS$"}
                     {labelValue}
                   </Text>
                 </GlassView>
@@ -572,10 +591,12 @@ const styles = StyleSheet.create({
   amountInput: {
     fontWeight: "600",
     textAlign: "center",
+    fontVariant: ["tabular-nums"],
   },
   equivalentText: {
     textAlign: "center",
     fontSize: 13,
+    fontVariant: ["tabular-nums"],
   },
   balanceHelperText: {
     textAlign: "center",
@@ -642,6 +663,7 @@ const styles = StyleSheet.create({
   quickChipText: {
     fontSize: 12,
     fontWeight: "600",
+    fontVariant: ["tabular-nums"],
   },
   metaRow: {
     flexDirection: "row",

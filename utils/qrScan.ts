@@ -1,4 +1,5 @@
 import { PublicKey } from '@solana/web3.js';
+import { parseArgentineQr } from '@/utils/qrArs';
 
 export type QrScanResult =
   | { kind: 'cachinUser'; username: string; url: string }
@@ -12,6 +13,12 @@ export type QrScanResult =
       memo?: string;
     }
   | { kind: 'solanaAddress'; address: string }
+  | {
+      kind: 'arsMercadoPago';
+      paymentAddress: string;
+      amountFiat?: number;
+      amountUsdc?: number;
+    }
   | { kind: 'unknown'; raw: string; reason: 'empty' | 'not_supported' };
 
 const CACHIN_HOST = 'cachin.app';
@@ -61,8 +68,6 @@ function tryParseCachinUsername(raw: string) {
 
 function isValidSolanaAddress(address: string) {
   try {
-    // PublicKey ctor validates base58 and length.
-    // eslint-disable-next-line no-new
     new PublicKey(address);
     return true;
   } catch {
@@ -110,7 +115,7 @@ function tryParseSolanaPay(raw: string) {
   return { address, amount, splToken, label, message, memo };
 }
 
-export function parseQrScanData(raw: string): QrScanResult {
+export async function parseQrScanData(raw: string): Promise<QrScanResult> {
   const text = raw.trim();
   if (!text) return { kind: 'unknown', raw, reason: 'empty' };
 
@@ -128,6 +133,16 @@ export function parseQrScanData(raw: string): QrScanResult {
 
   const solanaAddress = tryParseSolanaAddress(text);
   if (solanaAddress) return { kind: 'solanaAddress', address: solanaAddress };
+
+  const arsQr = await parseArgentineQr(text);
+  if (arsQr) {
+    return {
+      kind: 'arsMercadoPago',
+      paymentAddress: arsQr.paymentAddress,
+      amountFiat: arsQr.amountFiat,
+      amountUsdc: arsQr.amountUsdc,
+    };
+  }
 
   return { kind: 'unknown', raw: text, reason: 'not_supported' };
 }

@@ -8,13 +8,24 @@ import {
   Keyboard,
   useColorScheme,
   ScrollView,
+  Alert,
 } from 'react-native';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { useState } from 'react';
+import { usePrivy } from '@privy-io/expo';
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 import Svg, { Path, Circle } from 'react-native-svg';
+import { validateArgentinePaymentId } from '@p2pdotme/sdk/country';
 import { Colors } from '@/constants/theme';
 import { GlassView } from '@/components/ui/GlassView';
+import { createP2PArsOrder } from '@/utils/p2pOrders';
+import { createMantecaQrPayment } from '@/utils/mantecaOrders';
+import { formatFiatValue } from '@/utils/numberFormat';
+
+function firstParam(value: string | string[] | undefined): string {
+  if (Array.isArray(value)) return value[0] ?? '';
+  return value ?? '';
+}
 
 // Icon components
 function ArgentinaFlagIcon({ size = 32 }: { size?: number }) {
@@ -31,29 +42,54 @@ function ArgentinaFlagIcon({ size = 32 }: { size?: number }) {
 export default function WithdrawBankScreen() {
   const router = useRouter();
   const params = useLocalSearchParams();
-  const { amount, currency } = params; // amount in the selected currency
-  const colorScheme = useColorScheme() ?? 'light';
+  const amountParam = firstParam(params.amount);
+  const currencyParam = firstParam(params.currency).toUpperCase();
+  const methodParam = firstParam(params.method).toLowerCase();
+  const railParam = firstParam(params.rail).toLowerCase();
+  const scannedPaymentAddress = firstParam(params.paymentAddress);
+  const rawQr = firstParam(params.rawQr);
+  const solanaTxSignatureParam = firstParam(params.solanaTxSignature);
+  const { user } = usePrivy();
+  const colorScheme = (useColorScheme() ?? 'light') as 'light' | 'dark';
   const palette = Colors[colorScheme];
-  
-  const [cbu, setCbu] = useState('');
+
+  const [cbu, setCbu] = useState(scannedPaymentAddress);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState('');
+  const isMercadoPagoFlow = methodParam === 'mercadopago';
+  const selectedRail = railParam === 'manteca' ? 'manteca' : 'p2p';
+  const normalizedPaymentId = cbu.trim();
+  const hasPaymentId = normalizedPaymentId.length > 0;
+  const isPaymentIdValid = hasPaymentId && validateArgentinePaymentId(normalizedPaymentId);
   
   const arsRate = 1500;
   
-  // Calculate display amounts
   const getDisplayAmounts = () => {
-    if (currency === 'ARS') {
-      const arsAmount = parseFloat(amount as string) || 0;
+    if (currencyParam === 'ARS') {
+      const arsAmount = parseFloat(amountParam) || 0;
       const usdAmount = arsAmount / arsRate;
       return {
-        ars: arsAmount.toFixed(1),
-        usd: usdAmount.toFixed(0)
+        ars: formatFiatValue(arsAmount, {
+          context: 'detailed',
+          currencyPrefix: 'ARS$',
+        }),
+        usd: formatFiatValue(usdAmount, {
+          context: 'detailed',
+          currencyPrefix: '$',
+        }),
       };
     } else {
-      const usdAmount = parseFloat(amount as string) || 0;
+      const usdAmount = parseFloat(amountParam) || 0;
       const arsAmount = usdAmount * arsRate;
       return {
-        ars: arsAmount.toFixed(1),
-        usd: usdAmount.toFixed(0)
+        ars: formatFiatValue(arsAmount, {
+          context: 'detailed',
+          currencyPrefix: 'ARS$',
+        }),
+        usd: formatFiatValue(usdAmount, {
+          context: 'detailed',
+          currencyPrefix: '$',
+        }),
       };
     }
   };
@@ -64,9 +100,73 @@ export default function WithdrawBankScreen() {
     router.back();
   };
 
-  const handleReview = () => {
-    console.log('Reviewing withdrawal:', { cbu, amount, currency });
-    // Navigate to review/confirmation screen or show alert
+  const handleReview = async () => {
+    if (!isPaymentIdValid) return;
+    if (!amountParam || Number.parseFloat(amountParam) <= 0) {
+      Alert.alert('Invalid amount', 'Enter a valid amount before creating the order.');
+      return;
+    }
+    if (!user?.id) {
+      Alert.alert('Session required', 'Sign in again before creating this order.');
+      return;
+    }
+
+    setSubmitError('');
+    setIsSubmitting(true);
+
+    const requestCurrency =
+      currencyParam === 'USD' || currencyParam === 'USDC' ? 'USD' : 'ARS';
+
+    try {
+      if (selectedRail === 'manteca') {
+        const response = await createMantecaQrPayment({
+          userId: user.id,
+          amount: amountParam,
+          currency: requestCurrency,
+          paymentAddress: normalizedPaymentId,
+          method: methodParam || 'mercadopago',
+          qrData: rawQr || undefined,
+        });
+
+        const externalIdLabel = response.externalId ? `#${response.externalId}` : 'pending id';
+        Alert.alert(
+          'Manteca QR payment submitted',
+          `Request ${externalIdLabel} (${response.status}). Confirm status in the Manteca dashboard or status endpoint.`,
+          [{ text: 'OK', onPress: () => router.push('/activity') }]
+        );
+        return;
+      }
+
+      const response = await createP2PArsOrder({
+        userId: user.id,
+        amount: amountParam,
+        currency: requestCurrency,
+        paymentAddress: normalizedPaymentId,
+        method: methodParam || 'bank',
+        solanaTxSignature: solanaTxSignatureParam || undefined,
+      });
+
+      const orderIdLabel = response.orderId ? `#${response.orderId}` : 'pending id';
+      const nextStepMessage =
+        response.nextAction === 'SET_PAYMENT_ADDRESS_WHEN_ACCEPTED'
+          ? 'Payment address will be submitted once a merchant accepts the order.'
+          : response.nextAction === 'POLL_ORDER_STATUS'
+            ? 'Order is created. Poll order status to continue settlement.'
+            : 'Order flow moved to next stage.';
+
+      Alert.alert(
+        'P2P order created',
+        `Order ${orderIdLabel} (${response.orderStatus}). ${nextStepMessage}`,
+        [{ text: 'OK', onPress: () => router.push('/activity') }]
+      );
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : 'Unknown error creating P2P order.';
+      setSubmitError(message);
+      Alert.alert('Order creation failed', message);
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   return (
@@ -126,15 +226,17 @@ export default function WithdrawBankScreen() {
             
             <Text style={[styles.summaryLabel, { color: palette.secondaryText }]}>You&apos;re withdrawing</Text>
             <Text style={[styles.summaryAmount, { color: palette.primaryText }]}>
-              ARS$ {amounts.ars.replace(/\B(?=(\d{3})+(?!\d))/g, ',')}
+              {amounts.ars}
             </Text>
             <Text style={[styles.summaryEquivalent, { color: palette.secondaryText }]}>
-              ≈ ${amounts.usd} USD
+              ≈ {amounts.usd} USD
             </Text>
           </GlassView>
 
           {/* Bank Details Section */}
-          <Text style={[styles.sectionTitle, { color: palette.primaryText }]}>Enter Bank Transfer details</Text>
+          <Text style={[styles.sectionTitle, { color: palette.primaryText }]}>
+            {isMercadoPagoFlow ? 'Enter Mercado Pago details' : 'Enter Bank Transfer details'}
+          </Text>
 
           <GlassView
             style={[
@@ -152,11 +254,29 @@ export default function WithdrawBankScreen() {
               style={[styles.input, { color: palette.primaryText }]}
               value={cbu}
               onChangeText={setCbu}
-              placeholder="CBU/CVU"
+              placeholder={isMercadoPagoFlow ? 'Alias / CBU / CVU' : 'Alias / CBU / CVU'}
               placeholderTextColor={palette.secondaryText}
-              keyboardType="number-pad"
+              keyboardType='default'
             />
           </GlassView>
+
+          {hasPaymentId && !isPaymentIdValid ? (
+            <Text style={[styles.validationError, { color: '#ef4444' }]}>
+              Ingresa un Alias valido (6-20) o un CBU/CVU valido (22 digitos).
+            </Text>
+          ) : null}
+
+          {submitError ? (
+            <Text style={[styles.validationError, { color: '#ef4444' }]}>
+              {submitError}
+            </Text>
+          ) : null}
+
+          {scannedPaymentAddress ? (
+            <Text style={[styles.prefillHint, { color: palette.secondaryText }]}>
+              Scanned from QR: {scannedPaymentAddress}
+            </Text>
+          ) : null}
 
           {/* Info Message */}
           <View style={styles.infoContainer}>
@@ -172,12 +292,23 @@ export default function WithdrawBankScreen() {
           <TouchableOpacity 
             style={[
               styles.primaryButton,
-              { backgroundColor: palette.actionPrimary, opacity: cbu ? 1 : 0.5 }
+              {
+                backgroundColor: palette.actionPrimary,
+                opacity: isPaymentIdValid && !isSubmitting ? 1 : 0.5,
+              }
             ]} 
             onPress={handleReview}
-            disabled={!cbu}
+            disabled={!isPaymentIdValid || isSubmitting}
           >
-            <Text style={[styles.primaryButtonText, { color: palette.actionPrimaryText }]}>Review</Text>
+            <Text style={[styles.primaryButtonText, { color: palette.actionPrimaryText }]}>
+              {isSubmitting
+                ? selectedRail === 'manteca'
+                  ? 'Submitting...'
+                  : 'Creating order...'
+                : selectedRail === 'manteca'
+                  ? 'Submit Manteca test'
+                  : 'Review'}
+            </Text>
           </TouchableOpacity>
         </View>
       </ScrollView>
@@ -258,10 +389,12 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     marginBottom: 4,
     textAlign: 'center',
+    fontVariant: ['tabular-nums'],
   },
   summaryEquivalent: {
     fontSize: 16,
     fontWeight: '500',
+    fontVariant: ['tabular-nums'],
   },
   sectionTitle: {
     fontSize: 16,
@@ -296,6 +429,16 @@ const styles = StyleSheet.create({
     flex: 1,
     fontSize: 13,
     lineHeight: 18,
+  },
+  prefillHint: {
+    marginTop: 8,
+    marginBottom: 12,
+    fontSize: 12,
+  },
+  validationError: {
+    marginTop: 8,
+    marginBottom: 12,
+    fontSize: 12,
   },
   footer: {
     marginBottom: 16,

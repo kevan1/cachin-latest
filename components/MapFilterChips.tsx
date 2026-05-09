@@ -8,19 +8,11 @@ import {
 } from "react-native";
 import { IconSymbol, type IconSymbolName } from "@/components/ui/icon-symbol";
 
-const CATEGORIES = [
-  "Coffee",
-  "Burger",
-  "Bar",
-  "Supermarket",
-  "Clothes",
-  "Kiosko",
-] as const;
-
-export type MerchantCategory = (typeof CATEGORIES)[number];
+export type MerchantCategory = string;
 
 type MapFilterChipsProps = {
   activeCategory: string | null;
+  categories: string[];
   onCategoryPress: (category: string | null) => void;
 };
 
@@ -65,6 +57,7 @@ const FilterChip: React.FC<FilterChipProps> = ({
 
 export const MapFilterChips: React.FC<MapFilterChipsProps> = ({
   activeCategory,
+  categories,
   onCategoryPress,
 }) => {
   return (
@@ -74,13 +67,21 @@ export const MapFilterChips: React.FC<MapFilterChipsProps> = ({
       contentContainerStyle={styles.container}
       style={styles.scrollView}
     >
-      <TouchableOpacity style={styles.filterButton}>
+      <TouchableOpacity
+        accessibilityRole="button"
+        style={styles.filterButton}
+        onPress={() => onCategoryPress(null)}
+      >
         <IconSymbol name="slider.horizontal.3" size={18} color="#000" />
       </TouchableOpacity>
 
-      <FilterChip label="Ordenar" hasDropdown />
+      <FilterChip
+        label="All"
+        active={activeCategory === null}
+        onPress={() => onCategoryPress(null)}
+      />
 
-      {CATEGORIES.map((category) => {
+      {categories.map((category) => {
         const isActive = activeCategory === category;
         return (
           <FilterChip

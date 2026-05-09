@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import {
   ActivityIndicator,
+  KeyboardAvoidingView,
   ScrollView,
   StyleSheet,
   Text,
@@ -13,9 +14,10 @@ import { useLocalSearchParams, useRouter } from "expo-router";
 import {
   useLoginWithEmail,
 } from "@privy-io/expo";
+import { StatusBar } from "expo-status-bar";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { EmailInput, validateEmail } from "@/components/auth/email-input";
-import { Colors } from "@/constants/theme";
-import { useColorScheme } from "@/hooks/use-color-scheme";
+import { HomeOnboardingBackground } from "@/components/onboarding/HomeOnboardingBackground";
 
 type Step = "email" | "code";
 
@@ -33,11 +35,12 @@ const getErrorMessage = (error: unknown): string => {
 
 export default function EmailOnboardingScreen() {
   const router = useRouter();
-  const { height: screenHeight } = useWindowDimensions();
+  const { width: screenWidth, height: screenHeight } = useWindowDimensions();
+  const insets = useSafeAreaInsets();
+  const availableHeight = Math.max(1, screenHeight - insets.top - insets.bottom);
+  const isCompactLayout = availableHeight < 820 || screenWidth < 380;
   const { mode } = useLocalSearchParams<{ mode?: string | string[] }>();
   const modeValue = Array.isArray(mode) ? mode[0] : mode;
-  const colorScheme = useColorScheme();
-  const palette = Colors[colorScheme ?? "light"];
   const [step, setStep] = useState<Step>("email");
   const [email, setEmail] = useState("");
   const [sentToEmail, setSentToEmail] = useState<string | null>(null);
@@ -57,7 +60,12 @@ export default function EmailOnboardingScreen() {
       setError(null);
     },
     onLoginSuccess: async () => {
-      router.replace({ pathname: "/username", params: { mode: "complete" } });
+      if (modeValue === "signup") {
+        router.replace({ pathname: "/username", params: { mode: "complete" } });
+        return;
+      }
+
+      router.replace("/(main)/home");
     },
     onError: (err) => {
       setError(getErrorMessage(err) || "Unable to continue with email.");
@@ -125,231 +133,333 @@ export default function EmailOnboardingScreen() {
   };
 
   return (
-    <ScrollView
-      contentInsetAdjustmentBehavior="automatic"
-      style={[styles.container, { backgroundColor: palette.background }]}
-      contentContainerStyle={styles.containerContent}
-      keyboardShouldPersistTaps="handled"
-      keyboardDismissMode="on-drag"
-    >
-      <View style={[styles.screen, { minHeight: screenHeight }]}>
-        <View style={styles.header}>
-          <TouchableOpacity
-            accessibilityRole="button"
-            onPress={handleBack}
-            style={styles.backButton}
+    <>
+      <StatusBar style="dark" />
+      <View style={styles.root}>
+        <HomeOnboardingBackground />
+        <KeyboardAvoidingView
+          style={styles.keyboardAvoiding}
+          behavior={process.env.EXPO_OS === "ios" ? "padding" : undefined}
+        >
+          <ScrollView
+            contentInsetAdjustmentBehavior="automatic"
+            style={styles.container}
+            contentContainerStyle={[
+              styles.containerContent,
+              {
+                minHeight: availableHeight,
+                paddingHorizontal: screenWidth < 380 ? 16 : 20,
+                paddingTop: Math.max(insets.top + 2, 10),
+                paddingBottom: Math.max(insets.bottom + 18, 28),
+              },
+            ]}
+            keyboardShouldPersistTaps="handled"
+            keyboardDismissMode="on-drag"
+            showsVerticalScrollIndicator={false}
           >
-            <Text style={[styles.backText, { color: palette.secondaryText }]}>
-              {step === "code" ? "‹" : "✕"}
-            </Text>
-          </TouchableOpacity>
-        </View>
+            <View style={styles.screen}>
+              <View style={styles.header}>
+                <TouchableOpacity
+                  accessibilityRole="button"
+                  onPress={handleBack}
+                  style={styles.backButton}
+                >
+                  <Text style={styles.backText}>
+                    {step === "code" ? "‹" : "✕"}
+                  </Text>
+                </TouchableOpacity>
+              </View>
 
-        <View style={styles.content}>
-          <Text style={[styles.title, { color: palette.primaryText }]}>
-            {title}
-          </Text>
-          <Text style={[styles.subtitle, { color: palette.secondaryText }]}>
-            We&apos;ll email you a one-time code to verify your account.
-          </Text>
-
-          {step === "email" ? (
-            <>
-              <EmailInput value={email} onChangeText={setEmail} error={!!error} />
-              <TouchableOpacity
-                accessibilityRole="button"
+              <View
                 style={[
-                  styles.primaryButton,
-                  { backgroundColor: palette.accent },
-                  isBusy && styles.buttonDisabled,
+                  styles.content,
+                  isCompactLayout ? styles.contentCompact : null,
                 ]}
-                onPress={handleSendCode}
-                disabled={isBusy}
               >
-                {isSending ? (
-                  <ActivityIndicator color="#FFFFFF" />
-                ) : (
-                  <Text style={styles.primaryButtonText}>Send code</Text>
-                )}
-              </TouchableOpacity>
-            </>
-          ) : (
-            <>
-              <View style={styles.codeBlock}>
-                <Text style={[styles.codeLabel, { color: palette.secondaryText }]}>
-                  Enter the code sent to {sentToEmail ?? email}
+                <Text style={[styles.kicker, isCompactLayout ? styles.kickerCompact : null]}>
+                  Email access
                 </Text>
-                <TextInput
-                  value={code}
-                  onChangeText={(text) => setCode(text.replace(/\s/g, ""))}
-                  placeholder="123456"
-                  placeholderTextColor={palette.secondaryText}
-                  keyboardType="number-pad"
-                  textContentType="oneTimeCode"
-                  autoCapitalize="none"
-                  autoCorrect={false}
-                  maxLength={8}
-                  style={[
-                    styles.codeInput,
-                    {
-                      borderColor: error ? "#ef4444" : palette.inputBorder,
-                      color: palette.primaryText,
-                    },
-                  ]}
-                />
-              </View>
-              <TouchableOpacity
-                accessibilityRole="button"
-                style={[
-                  styles.primaryButton,
-                  { backgroundColor: palette.accent },
-                  isBusy && styles.buttonDisabled,
-                ]}
-                onPress={handleVerifyCode}
-                disabled={isBusy}
-              >
-                {isSubmitting ? (
-                  <ActivityIndicator color="#FFFFFF" />
-                ) : (
-                  <Text style={styles.primaryButtonText}>Verify code</Text>
-                )}
-              </TouchableOpacity>
-              <View style={styles.secondaryRow}>
-                <TouchableOpacity
-                  accessibilityRole="button"
-                  style={[
-                    styles.secondaryButton,
-                    { backgroundColor: palette.actionSecondary },
-                    isBusy && styles.buttonDisabled,
-                  ]}
-                  onPress={handleResend}
-                  disabled={isBusy}
-                >
-                  <Text
-                    style={[
-                      styles.secondaryButtonText,
-                      { color: palette.actionSecondaryText },
-                    ]}
-                  >
-                    Resend code
-                  </Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  accessibilityRole="button"
-                  style={[
-                    styles.secondaryButton,
-                    { backgroundColor: palette.actionSecondary },
-                    isBusy && styles.buttonDisabled,
-                  ]}
-                  onPress={() => setStep("email")}
-                  disabled={isBusy}
-                >
-                  <Text
-                    style={[
-                      styles.secondaryButtonText,
-                      { color: palette.actionSecondaryText },
-                    ]}
-                  >
-                    Use a different email
-                  </Text>
-                </TouchableOpacity>
-              </View>
-            </>
-          )}
+                <Text style={[styles.title, isCompactLayout ? styles.titleCompact : null]}>
+                  {title}
+                </Text>
+                <Text style={[styles.subtitle, isCompactLayout ? styles.subtitleCompact : null]}>
+                  We&apos;ll email you a one-time code to verify your account.
+                </Text>
 
-          {error ? (
-            <Text style={[styles.errorText, { color: "#ef4444" }]}>{error}</Text>
-          ) : null}
-        </View>
+                {step === "email" ? (
+                  <>
+                    <View style={styles.inputShell}>
+                      <EmailInput value={email} onChangeText={setEmail} error={!!error} />
+                    </View>
+                    <View style={styles.spacer} />
+                    <TouchableOpacity
+                      accessibilityRole="button"
+                      style={[
+                        styles.primaryButton,
+                        isBusy && styles.buttonDisabled,
+                      ]}
+                      onPress={handleSendCode}
+                      disabled={isBusy}
+                    >
+                      {isSending ? (
+                        <ActivityIndicator color="#FFFFFF" />
+                      ) : (
+                        <Text style={styles.primaryButtonText}>Send code</Text>
+                      )}
+                    </TouchableOpacity>
+                  </>
+                ) : (
+                  <>
+                    <View style={styles.codeBlock}>
+                      <Text style={styles.codeLabel}>
+                        Enter the code sent to {sentToEmail ?? email}
+                      </Text>
+                      <TextInput
+                        value={code}
+                        onChangeText={(text) => setCode(text.replace(/\s/g, ""))}
+                        placeholder="123456"
+                        placeholderTextColor="rgba(0,0,0,0.30)"
+                        keyboardType="number-pad"
+                        textContentType="oneTimeCode"
+                        autoCapitalize="none"
+                        autoCorrect={false}
+                        maxLength={8}
+                        style={[
+                          styles.codeInput,
+                          error ? styles.codeInputError : null,
+                        ]}
+                      />
+                    </View>
+                    <View style={styles.spacer} />
+                    <TouchableOpacity
+                      accessibilityRole="button"
+                      style={[
+                        styles.primaryButton,
+                        isBusy && styles.buttonDisabled,
+                      ]}
+                      onPress={handleVerifyCode}
+                      disabled={isBusy}
+                    >
+                      {isSubmitting ? (
+                        <ActivityIndicator color="#FFFFFF" />
+                      ) : (
+                        <Text style={styles.primaryButtonText}>Verify code</Text>
+                      )}
+                    </TouchableOpacity>
+                    <View style={styles.secondaryRow}>
+                      <TouchableOpacity
+                        accessibilityRole="button"
+                        style={[
+                          styles.secondaryButton,
+                          isBusy && styles.buttonDisabled,
+                        ]}
+                        onPress={handleResend}
+                        disabled={isBusy}
+                      >
+                        <Text style={styles.secondaryButtonText}>
+                          Resend code
+                        </Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity
+                        accessibilityRole="button"
+                        style={[
+                          styles.secondaryButton,
+                          isBusy && styles.buttonDisabled,
+                        ]}
+                        onPress={() => setStep("email")}
+                        disabled={isBusy}
+                      >
+                        <Text style={styles.secondaryButtonText}>
+                          Use a different email
+                        </Text>
+                      </TouchableOpacity>
+                    </View>
+                  </>
+                )}
+
+                {error ? (
+                  <Text selectable style={styles.errorText}>
+                    {error}
+                  </Text>
+                ) : null}
+              </View>
+            </View>
+          </ScrollView>
+        </KeyboardAvoidingView>
       </View>
-    </ScrollView>
+    </>
   );
 }
 
 const styles = StyleSheet.create({
+  root: {
+    flex: 1,
+    backgroundColor: "#FFFFFF",
+    overflow: "hidden",
+  },
+  keyboardAvoiding: {
+    flex: 1,
+  },
   container: {
     flex: 1,
+    backgroundColor: "transparent",
   },
   containerContent: {
     flexGrow: 1,
   },
   screen: {
     flexGrow: 1,
-    paddingHorizontal: 24,
-    paddingTop: 12,
-    paddingBottom: 32,
+    backgroundColor: "transparent",
   },
   header: {
     alignItems: "flex-start",
-    marginBottom: 12,
+    paddingBottom: 10,
   },
   backButton: {
     width: 44,
     height: 44,
     alignItems: "center",
     justifyContent: "center",
+    borderRadius: 22,
+    backgroundColor: "rgba(255,255,255,0.18)",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.38)",
+    boxShadow: "0 8px 18px rgba(11, 26, 51, 0.18)",
   },
   backText: {
     fontSize: 24,
     fontWeight: "600",
+    color: "rgba(0,0,0,0.64)",
   },
   content: {
-    flexGrow: 1,
     gap: 16,
+    paddingHorizontal: 22,
+    paddingTop: 26,
+    paddingBottom: 22,
+    borderRadius: 26,
+    borderCurve: "continuous",
+    backgroundColor: "rgba(255,255,255,0.18)",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.38)",
+    boxShadow: "0 18px 38px rgba(13, 28, 54, 0.18)",
+  },
+  contentCompact: {
+    paddingHorizontal: 18,
+    paddingTop: 20,
+    paddingBottom: 18,
+    gap: 12,
+  },
+  kicker: {
+    color: "rgba(0,0,0,0.46)",
+    fontSize: 11,
+    lineHeight: 15,
+    fontWeight: "700",
+    letterSpacing: 0.8,
+    textTransform: "uppercase",
+  },
+  kickerCompact: {
+    marginBottom: -2,
   },
   title: {
-    fontSize: 28,
+    color: "rgba(0,0,0,0.72)",
+    fontSize: 34,
+    lineHeight: 38,
     fontWeight: "800",
+    letterSpacing: 0,
+  },
+  titleCompact: {
+    fontSize: 29,
+    lineHeight: 33,
   },
   subtitle: {
-    fontSize: 14,
-    lineHeight: 20,
+    color: "rgba(0,0,0,0.50)",
+    fontSize: 16,
+    lineHeight: 23,
+    fontWeight: "600",
+    letterSpacing: 0,
+    marginBottom: 8,
+  },
+  subtitleCompact: {
+    fontSize: 15,
+    lineHeight: 21,
+    marginBottom: 4,
+  },
+  inputShell: {
+    borderRadius: 22,
+    borderCurve: "continuous",
+    overflow: "hidden",
   },
   primaryButton: {
-    marginTop: 8,
-    borderRadius: 18,
-    paddingVertical: 14,
+    minHeight: 56,
+    borderRadius: 999,
+    paddingVertical: 16,
+    paddingHorizontal: 20,
     alignItems: "center",
     justifyContent: "center",
+    backgroundColor: "rgba(17,24,39,0.92)",
+    boxShadow: "0 14px 26px rgba(12, 24, 46, 0.22)",
   },
   primaryButtonText: {
     color: "#FFFFFF",
-    fontSize: 16,
-    fontWeight: "700",
+    fontSize: 17,
+    lineHeight: 22,
+    fontWeight: "900",
   },
   secondaryRow: {
     flexDirection: "column",
     gap: 10,
   },
   secondaryButton: {
-    borderRadius: 14,
-    paddingVertical: 12,
+    minHeight: 52,
+    borderRadius: 999,
+    paddingHorizontal: 20,
+    paddingVertical: 13,
     alignItems: "center",
     justifyContent: "center",
+    backgroundColor: "rgba(255,255,255,0.34)",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.48)",
   },
   secondaryButtonText: {
-    fontSize: 14,
-    fontWeight: "600",
+    color: "rgba(0,0,0,0.62)",
+    fontSize: 16,
+    lineHeight: 21,
+    fontWeight: "800",
   },
   codeBlock: {
     gap: 8,
   },
   codeLabel: {
     fontSize: 13,
+    lineHeight: 18,
+    color: "rgba(0,0,0,0.46)",
+    fontWeight: "800",
   },
   codeInput: {
     borderWidth: 1,
-    borderRadius: 12,
-    paddingHorizontal: 14,
+    borderColor: "rgba(255,255,255,0.44)",
+    borderRadius: 22,
+    borderCurve: "continuous",
+    backgroundColor: "rgba(255,255,255,0.42)",
+    paddingHorizontal: 16,
     paddingVertical: 12,
-    fontSize: 18,
+    fontSize: 20,
     letterSpacing: 2,
+    color: "rgba(0,0,0,0.72)",
+    fontWeight: "700",
+  },
+  codeInputError: {
+    borderColor: "#ef4444",
   },
   errorText: {
-    marginTop: 12,
-    fontSize: 13,
+    color: "#B91C1C",
+    fontSize: 14,
+    lineHeight: 20,
     textAlign: "center",
     fontWeight: "600",
+  },
+  spacer: {
+    height: 22,
   },
   buttonDisabled: {
     opacity: 0.6,

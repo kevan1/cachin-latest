@@ -16,20 +16,9 @@ import { Colors } from '@/constants/theme';
 import { GlassView } from '@/components/ui/GlassView';
 import { fetchArsPrice } from '@/utils/priceService';
 import { getSelectedCurrency, type Currency } from '@/utils/userStorage';
+import { formatFiatValue, formatTokenAmountDisplay } from '@/utils/numberFormat';
 
 const DEFAULT_ARS_RATE = 1500;
-
-function formatMoneyValue(value: number, currency: 'USD' | 'ARS'): string {
-  if (!Number.isFinite(value) || value <= 0) {
-    return currency === 'ARS' ? 'ARS$0.00' : '$0.00';
-  }
-
-  const formatted = value.toLocaleString('en-US', {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  });
-  return currency === 'ARS' ? `ARS$${formatted}` : `$${formatted}`;
-}
 
 export default function WithdrawCryptoScreen() {
   const router = useRouter();
@@ -58,8 +47,19 @@ export default function WithdrawCryptoScreen() {
     primaryFiatCurrency === 'ARS' ? amountUsdValue * arsRate : amountUsdValue;
   const secondaryFiatValue =
     secondaryFiatCurrency === 'ARS' ? amountUsdValue * arsRate : amountUsdValue;
-  const primaryAmountLabel = formatMoneyValue(primaryFiatValue, primaryFiatCurrency);
-  const secondaryAmountLabel = formatMoneyValue(secondaryFiatValue, secondaryFiatCurrency);
+  const primaryAmountLabel = formatFiatValue(primaryFiatValue, {
+    context: 'detailed',
+    currencyPrefix: primaryFiatCurrency === 'ARS' ? 'ARS$' : '$',
+  });
+  const secondaryAmountLabel = formatFiatValue(secondaryFiatValue, {
+    context: 'detailed',
+    currencyPrefix: secondaryFiatCurrency === 'ARS' ? 'ARS$' : '$',
+  });
+  const usdcAmountLabel = formatTokenAmountDisplay(amountUsdValue, {
+    context: 'detailed',
+    tokenPriceUsd: 1,
+    tokenDecimals: 6,
+  });
 
   useEffect(() => {
     let isMounted = true;
@@ -160,7 +160,7 @@ export default function WithdrawCryptoScreen() {
               {secondaryAmountLabel}
             </Text>
             <Text style={[styles.summaryAssetAmount, { color: palette.secondaryText }]}>
-              USDC {amountUsdValue.toFixed(2)}
+              USDC {usdcAmountLabel}
             </Text>
           </View>
         </GlassView>
@@ -288,15 +288,18 @@ const styles = StyleSheet.create({
   summaryAmount: {
     fontSize: 24,
     fontWeight: '700',
+    fontVariant: ['tabular-nums'],
   },
   summarySecondary: {
     fontSize: 15,
     fontWeight: '600',
     marginTop: 2,
+    fontVariant: ['tabular-nums'],
   },
   summaryAssetAmount: {
     fontSize: 12,
     marginTop: 2,
+    fontVariant: ['tabular-nums'],
   },
   inputGroup: {
     borderRadius: 16,
