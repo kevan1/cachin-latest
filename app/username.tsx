@@ -25,6 +25,7 @@ import {
   persistRegisteredUsername,
 } from '@/utils/usernameRegistration';
 import { getEmbeddedSolanaWalletAddress } from '@/utils/privySolanaWallet';
+import { getNativeSolanaWalletSession } from '@/utils/nativeSolanaWallet';
 
 function getPrivyUserId(authUser?: unknown): string | null {
   const id = (authUser as { id?: unknown })?.id;
@@ -95,9 +96,14 @@ function ProgressBar({ isActive, isComplete, delay = 0 }: { isActive: boolean; i
 
 export default function UsernameScreen() {
   const router = useRouter();
-  const { mode } = useLocalSearchParams<{ mode?: string | string[] }>();
+  const { mode, source } = useLocalSearchParams<{
+    mode?: string | string[];
+    source?: string | string[];
+  }>();
   const modeValue = Array.isArray(mode) ? mode[0] : mode;
+  const sourceValue = Array.isArray(source) ? source[0] : source;
   const isCompletionFlow = modeValue === 'complete';
+  const isSeekerWalletFlow = sourceValue === 'seeker-wallet';
   const { width: screenWidth, height: screenHeight } = useWindowDimensions();
   const insets = useSafeAreaInsets();
   const availableHeight = Math.max(1, screenHeight - insets.top - insets.bottom);
@@ -120,6 +126,7 @@ export default function UsernameScreen() {
     status: solanaWalletStatus,
   } = useEmbeddedSolanaWallet();
   const { user: authenticatedUser, isReady: isPrivyReady } = usePrivy();
+  const [nativeSolanaWalletAddress, setNativeSolanaWalletAddress] = useState<string | null>(null);
   
   // Passkey setup state
   const [loading, setLoading] = useState(false);
@@ -129,6 +136,32 @@ export default function UsernameScreen() {
   >('idle');
   const usernameAvailabilityRequestRef = useRef(0);
   const usernameAvailabilityDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    let isCancelled = false;
+    const userId = getPrivyUserId(authenticatedUser);
+
+    if (!isSeekerWalletFlow || !userId) {
+      setNativeSolanaWalletAddress(null);
+      return;
+    }
+
+    getNativeSolanaWalletSession(userId)
+      .then((session) => {
+        if (!isCancelled) {
+          setNativeSolanaWalletAddress(session?.address ?? null);
+        }
+      })
+      .catch(() => {
+        if (!isCancelled) {
+          setNativeSolanaWalletAddress(null);
+        }
+      });
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [authenticatedUser, isSeekerWalletFlow]);
 
   const getAuthenticatedSolanaAddresses = (authUser?: unknown): string[] => {
     const linkedAccounts = (authUser as {
@@ -154,6 +187,10 @@ export default function UsernameScreen() {
     })?.linked_accounts;
     const addresses = new Set<string>();
 
+    if (isSeekerWalletFlow && nativeSolanaWalletAddress) {
+      addresses.add(nativeSolanaWalletAddress);
+    }
+
     for (const account of linkedAccounts ?? []) {
       const isSolanaWallet =
         account?.type === 'wallet' &&
@@ -163,7 +200,9 @@ export default function UsernameScreen() {
       addresses.add(address);
     }
 
-    const embeddedAddress = getEmbeddedSolanaWalletAddress(solanaWallets);
+    const embeddedAddress = isSeekerWalletFlow
+      ? null
+      : getEmbeddedSolanaWalletAddress(solanaWallets);
     if (embeddedAddress) {
       addresses.add(embeddedAddress);
     }
@@ -417,12 +456,15 @@ export default function UsernameScreen() {
           knownAddresses: currentUserSolanaAddresses,
           createSolanaWallet,
           walletStatus: solanaWalletStatus,
+          walletCreationMode: isSeekerWalletFlow ? 'existing-only' : 'allow-embedded',
         });
 
         if (solanaAddresses.length === 0) {
           Alert.alert(
             'Wallet not available',
-            'We could not detect your Solana wallet yet. Please try again in a few seconds.'
+            isSeekerWalletFlow
+              ? 'We could not detect your Seeker Wallet yet. Please reconnect from the login screen.'
+              : 'We could not detect your Solana wallet yet. Please try again in a few seconds.'
           );
           return;
         }
@@ -433,6 +475,11 @@ export default function UsernameScreen() {
           userId: getPrivyUserId(authenticatedUser),
         });
         setUsernameAvailability('available');
+        if (isSeekerWalletFlow) {
+          router.replace('/(main)/home');
+          return;
+        }
+
         const completionUserId = getPrivyUserId(authenticatedUser);
         if (completionUserId) {
           await markOnboardingSetupPending(completionUserId);
@@ -564,7 +611,9 @@ export default function UsernameScreen() {
                   onPress={() =>
                     Alert.alert(
                       'Cachin setup',
-                      'Choose a username, secure your account, then set up QR scanning and optional app lock.'
+                      isSeekerWalletFlow
+                        ? 'Choose a username for the Seeker Wallet you connected.'
+                        : 'Choose a username, secure your account, then set up QR scanning and optional app lock.'
                     )
                   }
                 >
@@ -587,13 +636,23 @@ export default function UsernameScreen() {
                       ]}
                     >
                       <Text style={styles.kicker}>
-                        {isCompletionFlow ? 'Finish setup' : 'Create account'}
+                        {isSeekerWalletFlow
+                          ? 'Seeker Wallet'
+                          : isCompletionFlow
+                            ? 'Finish setup'
+                            : 'Create account'}
                       </Text>
                       <Text style={[styles.title, isCompactLayout ? styles.titleCompact : null]}>
-                        {isCompletionFlow ? 'Choose your username' : 'Choose your Cachin ID'}
+                        {isSeekerWalletFlow
+                          ? 'Choose your username'
+                          : isCompletionFlow
+                            ? 'Choose your username'
+                            : 'Choose your Cachin ID'}
                       </Text>
                       <Text style={[styles.subtitle, isCompactLayout ? styles.subtitleCompact : null]}>
-                        {isCompletionFlow
+                        {isSeekerWalletFlow
+                          ? 'Your native wallet is connected. Pick a unique username to finish.'
+                          : isCompletionFlow
                           ? 'Pick a unique username to finish setup and continue.'
                           : 'This is how people will find you when they send money.'}
                       </Text>

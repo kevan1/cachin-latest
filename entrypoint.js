@@ -1,12 +1,13 @@
 // entrypoint.js
 
-// Import required setup files first
-// IMPORTANT: Keep gesture handler first, then polyfills in order
-import "react-native-gesture-handler";
-import "react-native-get-random-values";
-import "@ethersproject/shims";
-import "./global.css";
-import { Buffer } from "buffer";
-global.Buffer = Buffer;
-// Then import the expo router
-import "expo-router/entry";
+// Import required setup files first.
+// Keep these as require() calls so crypto installs before any Solana code loads.
+require("react-native-gesture-handler");
+require("react-native-get-random-values");
+require("react-native-quick-crypto").install();
+require("@ethersproject/shims");
+require("./global.css");
+
+global.Buffer = require("buffer").Buffer;
+
+require("expo-router/entry");

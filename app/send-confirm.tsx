@@ -37,6 +37,8 @@ import { avalancheFuji } from "viem/chains";
 import { saveTransaction } from "@/utils/transactionStorage";
 import { Transaction as TransactionType } from "@/types/types";
 import { ChainType, getChainMetadata, getChainToken } from "@/constants/chains";
+import { useActiveSolanaWallet } from "@/hooks/useActiveSolanaWallet";
+import { useNativeSolanaWalletActions } from "@/hooks/useNativeSolanaWalletActions";
 import {
   useEmbeddedEthereumWallet,
   useEmbeddedSolanaWallet,
@@ -66,11 +68,9 @@ import {
   sendSponsoredSolanaTransaction,
 } from "@/utils/privySponsorship";
 import {
-  getSponsoredSolanaWallet,
   setSponsoredSolanaWallet,
 } from "@/utils/sponsoredWalletStorage";
 import {
-  getEmbeddedSolanaWalletAddress,
   getSolanaProviderAddress,
 } from "@/utils/privySolanaWallet";
 import {
@@ -128,6 +128,110 @@ function getErrorMessage(error: unknown, fallback: string): string {
   if (error instanceof Error && error.message) return error.message;
   if (typeof error === "string" && error.trim().length > 0) return error;
   return fallback;
+}
+
+async function buildSolanaUsdcTransferTransaction({
+  amountDisplay,
+  amountUnits,
+  connection,
+  recentBlockhash,
+  recipientAddress,
+  senderAddress,
+}: {
+  amountDisplay: string;
+  amountUnits: bigint;
+  connection: Connection;
+  recentBlockhash: string;
+  recipientAddress: string;
+  senderAddress: string;
+}): Promise<Transaction> {
+  const fromPubkey = new PublicKey(senderAddress);
+  const toPubkey = new PublicKey(recipientAddress);
+  const usdcMintPubkey = new PublicKey(USDC_MINT_ADDRESS);
+
+  const toTokenAccount = await Token.getAssociatedTokenAddress(
+    ASSOCIATED_TOKEN_PROGRAM_ID,
+    TOKEN_PROGRAM_ID,
+    usdcMintPubkey,
+    toPubkey
+  );
+
+  const tokenAccounts = await connection.getParsedTokenAccountsByOwner(fromPubkey, {
+    mint: usdcMintPubkey,
+  });
+
+  const senderTokenAccounts = tokenAccounts.value
+    .map((acc) => {
+      const parsedInfo = acc.account.data.parsed.info;
+      const tokenAmount = parsedInfo.tokenAmount;
+      const accountAmount = BigInt(tokenAmount.amount as string);
+      return {
+        pubkey: acc.pubkey,
+        amount: accountAmount,
+      };
+    })
+    .filter((acc) => acc.amount > 0n)
+    .sort((a, b) => (a.amount > b.amount ? -1 : a.amount < b.amount ? 1 : 0));
+
+  const senderTotalUnits = senderTokenAccounts.reduce((sum, acc) => sum + acc.amount, 0n);
+
+  if (senderTokenAccounts.length === 0 || senderTotalUnits === 0n) {
+    throw new Error("You need to receive USDC before you can send it.");
+  }
+
+  if (senderTotalUnits < amountUnits) {
+    throw new Error(
+      `You only have ${formatTokenUnits(senderTotalUnits, USDC_DECIMALS, {
+        minFractionDigits: 0,
+        maxFractionDigits: USDC_DECIMALS,
+        trimTrailingZeros: true,
+      })} USDC but are trying to send ${amountDisplay} USDC`
+    );
+  }
+
+  const recipientAccountInfo = await connection.getAccountInfo(toTokenAccount);
+  const needsTokenAccount = recipientAccountInfo === null;
+  const feePayer = fromPubkey;
+  const transaction = new Transaction({
+    recentBlockhash,
+    feePayer,
+  });
+
+  if (needsTokenAccount) {
+    const createAccountInstruction = Token.createAssociatedTokenAccountInstruction(
+      ASSOCIATED_TOKEN_PROGRAM_ID,
+      TOKEN_PROGRAM_ID,
+      usdcMintPubkey,
+      toTokenAccount,
+      toPubkey,
+      feePayer
+    );
+    transaction.add(createAccountInstruction);
+  }
+
+  let remaining = amountUnits;
+  for (const source of senderTokenAccounts) {
+    if (remaining <= 0n) break;
+    const sendUnits = source.amount >= remaining ? remaining : source.amount;
+    if (sendUnits <= 0n) continue;
+
+    const transferInstruction = Token.createTransferInstruction(
+      TOKEN_PROGRAM_ID,
+      source.pubkey,
+      toTokenAccount,
+      fromPubkey,
+      [],
+      new (u64 as any)(sendUnits.toString())
+    );
+    transaction.add(transferInstruction);
+    remaining -= sendUnits;
+  }
+
+  if (remaining !== 0n) {
+    throw new Error("Failed to build transfer instructions for full amount");
+  }
+
+  return transaction;
 }
 
 export default function SendConfirmScreen() {
@@ -189,22 +293,26 @@ export default function SendConfirmScreen() {
   const hasPlayedSuccessFeedback = useRef(false);
 
   const {
-    wallets,
     create: createSolanaWallet,
     status: solanaWalletStatus,
   } = useEmbeddedSolanaWallet();
+  const activeSolanaWallet = useActiveSolanaWallet();
+  const { signAndSendTransactions } = useNativeSolanaWalletActions();
   const { wallets: ethereumWallets } = useEmbeddedEthereumWallet();
-  const wallet = wallets?.[0];
   const avalancheWallet = ethereumWallets?.[0];
   const { user } = usePrivy();
   const { addSessionSigners } = useSessionSigners();
   const [sponsoredWalletAddress, setSponsoredWalletAddress] = useState<string | null>(null);
+  const effectiveSponsoredWalletAddress =
+    sponsoredWalletAddress ?? activeSolanaWallet.sponsoredWalletAddress;
   const isSatochipTransfer = isAvalancheTransfer && avalancheWalletSource === "satochip";
   const walletAddress = isAvalancheTransfer
     ? isSatochipTransfer
       ? satochipAvalancheAddress ?? ""
       : avalancheWallet?.address ?? ""
-    : sponsoredWalletAddress ?? wallet?.publicKey ?? "";
+    : activeSolanaWallet.source === "native-mwa"
+      ? activeSolanaWallet.address ?? ""
+      : effectiveSponsoredWalletAddress ?? activeSolanaWallet.embeddedWalletAddress ?? "";
   const walletDisplay = walletAddress ? formatAddress(walletAddress) : "Not connected";
   const primaryFiatCurrency = preferredCurrency === "ARS" ? "ARS" : "USD";
   const secondaryFiatCurrency = primaryFiatCurrency === "ARS" ? "USD" : "ARS";
@@ -274,14 +382,10 @@ export default function SendConfirmScreen() {
       return;
     }
 
-    getSponsoredSolanaWallet(user.id)
-      .then(({ address }) => {
-        setSponsoredWalletAddress(address);
-      })
-      .catch(() => {
-        setSponsoredWalletAddress(null);
-      });
-  }, [user?.id]);
+    if (activeSolanaWallet.sponsoredWalletAddress) {
+      setSponsoredWalletAddress(activeSolanaWallet.sponsoredWalletAddress);
+    }
+  }, [activeSolanaWallet.sponsoredWalletAddress, user?.id]);
 
   useFocusEffect(
     useCallback(() => {
@@ -480,9 +584,78 @@ export default function SendConfirmScreen() {
         return;
       }
 
+      if (!recipientAddress) {
+        Alert.alert("Error", "Recipient address not found");
+        setIsSending(false);
+        return;
+      }
+
+      if (!amountUnits || amountUnits <= 0n) {
+        Alert.alert("Invalid amount", `Amount "${amountString}" is not valid.`);
+        setIsSending(false);
+        return;
+      }
+
+      if (activeSolanaWallet.source === "native-mwa") {
+        const senderAddress = activeSolanaWallet.address;
+        if (!senderAddress) {
+          Alert.alert("Error", "No native Solana wallet found");
+          setIsSending(false);
+          return;
+        }
+
+        const connection = new Connection(getSolanaRpcUrl(), "confirmed");
+        const latestBlockhash = await connection.getLatestBlockhashAndContext("confirmed");
+        const transaction = await buildSolanaUsdcTransferTransaction({
+          amountDisplay,
+          amountUnits,
+          connection,
+          recentBlockhash: latestBlockhash.value.blockhash,
+          recipientAddress,
+          senderAddress,
+        });
+        const signature = await signAndSendTransactions(
+          transaction,
+          latestBlockhash.context.slot
+        );
+
+        await connection.confirmTransaction(
+          {
+            signature,
+            blockhash: latestBlockhash.value.blockhash,
+            lastValidBlockHeight: latestBlockhash.value.lastValidBlockHeight,
+          },
+          "confirmed"
+        );
+
+        const newTransaction: TransactionType = {
+          id: signature,
+          signature,
+          type: "send",
+          currency: "USDC",
+          chain: ChainType.SOLANA,
+          amount: parseFloat(amountDisplay),
+          recipient: recipientName,
+          sender: senderAddress,
+          address: recipientAddress,
+          timestamp: Date.now(),
+          status: "confirmed",
+          comment: comment as string | undefined,
+        };
+
+        await saveTransaction(newTransaction);
+
+        setLastTransactionId(signature);
+        setTransactionSent(true);
+        setIsSending(false);
+        return;
+      }
+
       let ensuredWalletId: string | undefined;
       let ensuredWalletAddress =
-        getEmbeddedSolanaWalletAddress(wallets) ?? sponsoredWalletAddress ?? undefined;
+        effectiveSponsoredWalletAddress ??
+        activeSolanaWallet.embeddedWalletAddress ??
+        undefined;
 
       if (!ensuredWalletAddress) {
         const walletIsBusy =
@@ -501,8 +674,8 @@ export default function SendConfirmScreen() {
         const provider = await createSolanaWallet({ recoveryMethod: "privy" });
         ensuredWalletAddress =
           getSolanaProviderAddress(provider) ??
-          getEmbeddedSolanaWalletAddress(wallets) ??
-          sponsoredWalletAddress ??
+          activeSolanaWallet.embeddedWalletAddress ??
+          effectiveSponsoredWalletAddress ??
           undefined;
 
         if (!ensuredWalletAddress) {
@@ -571,102 +744,14 @@ export default function SendConfirmScreen() {
       }
 
       const connection = new Connection(getSolanaRpcUrl(), "confirmed");
-
-      const fromPubkey = new PublicKey(senderAddress);
-      const toPubkey = new PublicKey(recipientAddress);
-      const usdcMintPubkey = new PublicKey(USDC_MINT_ADDRESS);
-
-      const toTokenAccount = await Token.getAssociatedTokenAddress(
-        ASSOCIATED_TOKEN_PROGRAM_ID,
-        TOKEN_PROGRAM_ID,
-        usdcMintPubkey,
-        toPubkey
-      );
-
-      const tokenAccounts = await connection.getParsedTokenAccountsByOwner(fromPubkey, {
-        mint: usdcMintPubkey,
-      });
-
-      const senderTokenAccounts = tokenAccounts.value
-        .map((acc) => {
-          const parsedInfo = acc.account.data.parsed.info;
-          const tokenAmount = parsedInfo.tokenAmount;
-          const accountAmount = BigInt(tokenAmount.amount as string);
-          return {
-            pubkey: acc.pubkey,
-            amount: accountAmount,
-          };
-        })
-        .filter((acc) => acc.amount > 0n)
-        .sort((a, b) => (a.amount > b.amount ? -1 : a.amount < b.amount ? 1 : 0));
-
-      const senderTotalUnits = senderTokenAccounts.reduce((sum, acc) => sum + acc.amount, 0n);
-
-      if (senderTokenAccounts.length === 0 || senderTotalUnits === 0n) {
-        Alert.alert(
-          "No USDC account",
-          "You need to receive USDC before you can send it."
-        );
-        setIsSending(false);
-        return;
-      }
-
-      if (senderTotalUnits < amountUnits) {
-        Alert.alert(
-          "Insufficient USDC",
-          `You only have ${formatTokenUnits(senderTotalUnits, USDC_DECIMALS, {
-            minFractionDigits: 0,
-            maxFractionDigits: USDC_DECIMALS,
-            trimTrailingZeros: true,
-          })} USDC but are trying to send ${amountDisplay} USDC`
-        );
-        setIsSending(false);
-        return;
-      }
-
-      const recipientAccountInfo = await connection.getAccountInfo(toTokenAccount);
-      const needsTokenAccount = recipientAccountInfo === null;
-
-      const feePayer = fromPubkey;
-
-      const transaction = new Transaction({
+      const transaction = await buildSolanaUsdcTransferTransaction({
+        amountDisplay,
+        amountUnits,
+        connection,
         recentBlockhash: DUMMY_BLOCKHASH,
-        feePayer: feePayer,
+        recipientAddress,
+        senderAddress,
       });
-
-      if (needsTokenAccount) {
-        const createAccountInstruction = Token.createAssociatedTokenAccountInstruction(
-          ASSOCIATED_TOKEN_PROGRAM_ID,
-          TOKEN_PROGRAM_ID,
-          usdcMintPubkey,
-          toTokenAccount,
-          toPubkey,
-          feePayer
-        );
-        transaction.add(createAccountInstruction);
-      }
-
-      let remaining = amountUnits;
-      for (const source of senderTokenAccounts) {
-        if (remaining <= 0n) break;
-        const sendUnits = source.amount >= remaining ? remaining : source.amount;
-        if (sendUnits <= 0n) continue;
-
-        const transferInstruction = Token.createTransferInstruction(
-          TOKEN_PROGRAM_ID,
-          source.pubkey,
-          toTokenAccount,
-          fromPubkey,
-          [],
-          new (u64 as any)(sendUnits.toString())
-        );
-        transaction.add(transferInstruction);
-        remaining -= sendUnits;
-      }
-
-      if (remaining !== 0n) {
-        throw new Error("Failed to build transfer instructions for full amount");
-      }
 
       const serializedTransaction = transaction.serialize({
         requireAllSignatures: false,
@@ -676,7 +761,7 @@ export default function SendConfirmScreen() {
       const { signature } = await sendSponsoredSolanaTransaction({
         userId: user.id,
         walletId: ensuredWalletId,
-        walletAddress: ensuredWalletAddress ?? wallet?.publicKey ?? wallet?.address,
+        walletAddress: ensuredWalletAddress ?? activeSolanaWallet.embeddedWalletAddress,
         transactionBase64: serializedTransaction.toString("base64"),
         caip2: getSolanaCaip2(),
       });
@@ -718,11 +803,15 @@ export default function SendConfirmScreen() {
     amountDisplay,
     amountString,
     amountUnits,
+    activeSolanaWallet.address,
+    activeSolanaWallet.embeddedWalletAddress,
+    activeSolanaWallet.source,
     avalancheUsdcToken,
     avalancheWallet,
     authorizeGaslessForAddress,
     comment,
     createSolanaWallet,
+    effectiveSponsoredWalletAddress,
     hideChin,
     isAvalancheTransfer,
     isSatochipTransfer,
@@ -730,13 +819,10 @@ export default function SendConfirmScreen() {
     recipientName,
     satochipAvalancheAddress,
     satochipPin,
+    signAndSendTransactions,
     solanaWalletStatus,
     user?.id,
-    sponsoredWalletAddress,
     walletAddress,
-    wallet?.address,
-    wallet?.publicKey,
-    wallets,
   ]);
 
   const chinLabel = useMemo(() => {

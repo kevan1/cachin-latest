@@ -43,6 +43,7 @@ import { Colors } from "@/constants/theme";
 import { useNetworkStatus } from "@/hooks/use-network-status";
 import { ToastProvider } from "react-native-pretty-toast";
 import { ChinPopoutProvider } from "@/components/ChinPopout";
+import { MobileWalletProviderBridge } from "@/components/solana-mobile/MobileWalletProviderBridge";
 import { IconSymbol } from "@/components/ui/icon-symbol";
 import { subscribeToReceivedTransactionNotificationResponses } from "@/services/pushNotifications";
 import { initializeSupportChat } from "@/services/supportChat";
@@ -1189,9 +1190,11 @@ export default function RootLayout() {
                   },
                 }}
               >
-                <ChinPopoutProvider>
-                  <AppNavigator />
-                </ChinPopoutProvider>
+                <MobileWalletProviderBridge>
+                  <ChinPopoutProvider>
+                    <AppNavigator />
+                  </ChinPopoutProvider>
+                </MobileWalletProviderBridge>
                 <PrivyElements />
                 <StatusBar style="auto" />
               </PrivyProvider>

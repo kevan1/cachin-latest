@@ -28,7 +28,7 @@ import {
   formatFiatValue,
   formatTokenAmountDisplay,
 } from "@/utils/numberFormat";
-import { useEmbeddedSolanaWallet } from "@privy-io/expo";
+import { useActiveSolanaWallet } from "@/hooks/useActiveSolanaWallet";
 
 const USDC_MINT_ADDRESS = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
 const USDC_DECIMALS = 6;
@@ -42,7 +42,7 @@ function formatAddress(address: string): string {
 
 export default function SendLinkScreen() {
   const router = useRouter();
-  const colorScheme = useColorScheme() ?? "light";
+  const colorScheme = (useColorScheme() ?? "light") as "light" | "dark";
   const palette = Colors[colorScheme];
   const isIOS = process.env.EXPO_OS === "ios";
 
@@ -56,9 +56,8 @@ export default function SendLinkScreen() {
   const [preferredCurrency, setPreferredCurrency] = useState("USD");
   const didInitInputModeRef = useRef(false);
 
-  const { wallets } = useEmbeddedSolanaWallet();
-  const wallet = wallets?.[0];
-  const walletAddress = wallet?.publicKey ?? "";
+  const { address } = useActiveSolanaWallet();
+  const walletAddress = address ?? "";
 
   useFocusEffect(
     useCallback(() => {

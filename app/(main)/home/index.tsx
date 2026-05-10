@@ -72,6 +72,7 @@ import { PlatformPressable } from "@react-navigation/elements";
 import { useToast } from "react-native-pretty-toast";
 import { MeshGradientView } from "@wilmxre/react-native-mesh-gradient/src";
 import { Colors } from "@/constants/theme";
+import { useActiveSolanaWallet } from "@/hooks/useActiveSolanaWallet";
 import { buildSolanaPayUri, createSolanaPayReferences, SOLANA_USDC_MINT } from "@/utils/solanaPay";
 import {
   isDuplicateSessionSignerError,
@@ -82,13 +83,9 @@ import {
   getPrivyGasSponsorPolicyIds,
 } from "@/utils/privyGaslessConfig";
 import {
-  getEmbeddedSolanaWalletAddress,
-} from "@/utils/privySolanaWallet";
-import {
   ensureRegistrationSolanaAddresses,
   persistRegisteredUsername,
 } from "@/utils/usernameRegistration";
-import { getSponsoredSolanaWallet } from "@/utils/sponsoredWalletStorage";
 import {
   loadThemePreference,
   subscribeThemePreference,
@@ -199,7 +196,7 @@ function CryptoDot({ size = 32, color = '#f97316' }: { size?: number; color?: st
 export default function HomeScreen() {
   const router = useRouter();
   const segments = useSegments();
-  const colorScheme = useColorScheme() ?? "light";
+  const colorScheme = (useColorScheme() ?? "light") as "light" | "dark";
   const sheetPalette = Colors[colorScheme];
   const sheetCardBorder =
     colorScheme === "dark" ? "rgba(255,255,255,0.16)" : "rgba(255,255,255,0.52)";
@@ -244,10 +241,10 @@ export default function HomeScreen() {
   const { user, isReady } = usePrivy();
   const { wallets: ethereumWallets } = useEmbeddedEthereumWallet();
   const {
-    wallets: solanaWallets,
     create: createSolanaWallet,
     status: solanaWalletStatus,
   } = useEmbeddedSolanaWallet();
+  const activeSolanaWallet = useActiveSolanaWallet();
   const { addSessionSigners, removeSessionSigners } = useSessionSigners();
   const { getIdentityToken } = useIdentityToken();
   const toast = useToast();
@@ -274,8 +271,8 @@ export default function HomeScreen() {
   const [receiveAsset, setReceiveAsset] = useState<ReceiveAsset>('usdc');
   const [currency, setCurrency] = useState<Currency>('USD');
   const [arsPrice, setArsPrice] = useState<number>(0);
-  const [, setSponsoredWalletId] = useState<string | null>(null);
-  const [sponsoredWalletAddress, setSponsoredWalletAddress] = useState<string | null>(null);
+  const nativeSolanaWalletAddress = activeSolanaWallet.nativeWalletAddress;
+  const sponsoredWalletAddress = activeSolanaWallet.sponsoredWalletAddress;
   const [avalancheWalletSource, setAvalancheWalletSource] =
     useState<AvalancheWalletSource>("privy");
   const [satochipAvalancheAddress, setSatochipAvalancheAddress] = useState<string | null>(null);
@@ -380,9 +377,7 @@ export default function HomeScreen() {
       });
   }, [getIdentityToken, isReady, toast, user?.id]);
 
-  const embeddedSolanaAddress = useMemo(() => {
-    return getEmbeddedSolanaWalletAddress(solanaWallets);
-  }, [solanaWallets]);
+  const embeddedSolanaAddress = activeSolanaWallet.embeddedWalletAddress;
   const linkedSolanaAddresses = useMemo(() => {
     const rawUser = user as {
       linked_accounts?: LinkedSolanaAccountLike[];
@@ -401,14 +396,19 @@ export default function HomeScreen() {
   }, [user]);
   const ownExternalSolanaAddresses = useMemo(() => {
     const managedAddresses = new Set(
-      [embeddedSolanaAddress, sponsoredWalletAddress].filter(
+      [nativeSolanaWalletAddress, embeddedSolanaAddress, sponsoredWalletAddress].filter(
         (address): address is string => !!address
       )
     );
     return new Set(
       linkedSolanaAddresses.filter((address) => !managedAddresses.has(address))
     );
-  }, [embeddedSolanaAddress, linkedSolanaAddresses, sponsoredWalletAddress]);
+  }, [
+    embeddedSolanaAddress,
+    linkedSolanaAddresses,
+    nativeSolanaWalletAddress,
+    sponsoredWalletAddress,
+  ]);
 
   const embeddedAvalancheAddress = useMemo(() => {
     return ethereumWallets[0]?.address ?? null;
@@ -553,39 +553,6 @@ export default function HomeScreen() {
     }, [])
   );
 
-  useEffect(() => {
-    let isCancelled = false;
-
-    const hydrateSponsoredWallet = async () => {
-      if (!isReady) return;
-
-      setSponsoredWalletId(null);
-      setSponsoredWalletAddress(null);
-
-      if (!user?.id) {
-        return;
-      }
-
-      try {
-        const { id, address } = await getSponsoredSolanaWallet(user.id);
-        if (isCancelled) return;
-        setSponsoredWalletId(id);
-        setSponsoredWalletAddress(address);
-      } catch (error) {
-        if (isCancelled) return;
-        console.error("[Home] Failed to load sponsored wallet from storage", error);
-        setSponsoredWalletId(null);
-        setSponsoredWalletAddress(null);
-      }
-    };
-
-    void hydrateSponsoredWallet();
-
-    return () => {
-      isCancelled = true;
-    };
-  }, [isReady, user?.id]);
-
   // Load currency and prices on focus
   useFocusEffect(
     useCallback(() => {
@@ -625,10 +592,7 @@ export default function HomeScreen() {
   
   // Get full Solana address for username lookup
   const getFullSolanaAddressForUsername = () => {
-    if (sponsoredWalletAddress) {
-      return sponsoredWalletAddress;
-    }
-    return embeddedSolanaAddress;
+    return activeSolanaWallet.address;
   };
   
   // Load username on mount
@@ -681,7 +645,7 @@ export default function HomeScreen() {
     };
     loadUsername();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [embeddedSolanaAddress, isReady, sponsoredWalletAddress, user?.id]);
+  }, [activeSolanaWallet.address, isReady, sponsoredWalletAddress, user?.id]);
 
   // Complete deferred username sync when wallet hydration was unavailable at signup.
   useEffect(() => {
@@ -695,12 +659,18 @@ export default function HomeScreen() {
 
       const solanaAddresses = await ensureRegistrationSolanaAddresses({
         knownAddresses: [
+          activeSolanaWallet.address,
+          nativeSolanaWalletAddress,
           sponsoredWalletAddress,
           embeddedSolanaAddress,
           ...Array.from(ownExternalSolanaAddresses),
         ],
         createSolanaWallet,
         walletStatus: solanaWalletStatus,
+        walletCreationMode:
+          activeSolanaWallet.source === "native-mwa"
+            ? "existing-only"
+            : "allow-embedded",
       });
 
       if (solanaAddresses.length === 0) return;
@@ -720,8 +690,11 @@ export default function HomeScreen() {
     });
   }, [
     createSolanaWallet,
+    activeSolanaWallet.address,
+    activeSolanaWallet.source,
     embeddedSolanaAddress,
     isReady,
+    nativeSolanaWalletAddress,
     ownExternalSolanaAddresses,
     solanaWalletStatus,
     sponsoredWalletAddress,
@@ -729,10 +702,7 @@ export default function HomeScreen() {
   ]);
 
   const getFullSolanaAddress = () => {
-    if (sponsoredWalletAddress) {
-      return sponsoredWalletAddress;
-    }
-    return embeddedSolanaAddress;
+    return activeSolanaWallet.address;
   };
 
   const getFullAvalancheAddress = () => {
@@ -987,7 +957,7 @@ export default function HomeScreen() {
       stopPolling();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isReady, solanaWallets, sponsoredWalletAddress, user?.id]);
+  }, [activeSolanaWallet.address, isReady, user?.id]);
 
   // Format transaction for display
   const getDisplayNameForAddress = (address?: string | null) => {
