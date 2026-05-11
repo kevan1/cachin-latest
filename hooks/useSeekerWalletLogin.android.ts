@@ -1,5 +1,6 @@
 import { useLoginWithSiws } from "@privy-io/expo";
 import { type SignInPayload } from "@solana-mobile/mobile-wallet-adapter-protocol";
+import { PublicKey } from "@solana/web3.js";
 import { useMobileWallet } from "@wallet-ui/react-native-web3js";
 import { Buffer } from "buffer";
 import bs58 from "bs58";
@@ -28,6 +29,12 @@ type Bs58Like = {
   };
 };
 
+type MwaAccountLike = {
+  address?: unknown;
+  addressBase64?: unknown;
+  publicKey?: unknown;
+};
+
 function hasRegisteredUsername(username?: string | null): boolean {
   const normalized = username?.trim();
   return Boolean(normalized && !normalized.toLowerCase().startsWith("user-"));
@@ -54,6 +61,57 @@ function decodeBase64Url(value: string): Uint8Array {
     "="
   );
   return Buffer.from(padded, "base64");
+}
+
+function maybeAddressToBase58(value: unknown): string | null {
+  if (!value) return null;
+
+  if (
+    typeof value === "object" &&
+    "toBase58" in value &&
+    typeof value.toBase58 === "function"
+  ) {
+    return value.toBase58();
+  }
+
+  if (typeof value === "string") {
+    try {
+      return new PublicKey(value).toBase58();
+    } catch {
+      const decoded = Buffer.from(value, "base64");
+      if (decoded.length === 32) {
+        return new PublicKey(decoded).toBase58();
+      }
+    }
+  }
+
+  if (value instanceof Uint8Array && value.length === 32) {
+    return new PublicKey(value).toBase58();
+  }
+
+  if (
+    Array.isArray(value) &&
+    value.length === 32 &&
+    value.every((item) => typeof item === "number")
+  ) {
+    return new PublicKey(value).toBase58();
+  }
+
+  return null;
+}
+
+function getAccountAddress(account: unknown): string {
+  const accountLike = account as MwaAccountLike;
+  const address =
+    maybeAddressToBase58(accountLike.address) ??
+    maybeAddressToBase58(accountLike.publicKey) ??
+    maybeAddressToBase58(accountLike.addressBase64);
+
+  if (!address) {
+    throw new Error("Seeker Wallet did not return a valid Solana address.");
+  }
+
+  return address;
 }
 
 function getBs58Encode(): (bytes: Uint8Array) => string {
@@ -129,7 +187,7 @@ export function useSeekerWalletLogin(): () => Promise<SeekerWalletLoginResult> {
   return useCallback(async () => {
     try {
       const account = await connect();
-      const address = account.address.toBase58();
+      const address = getAccountAddress(account);
       const { message } = await generateMessage({
         wallet: { address },
         from: {
