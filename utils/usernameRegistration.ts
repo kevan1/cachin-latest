@@ -19,6 +19,7 @@ type EnsureRegistrationSolanaAddressesInput = {
   knownAddresses: (string | null | undefined)[];
   createSolanaWallet?: CreateSolanaWalletForRegistration;
   walletStatus?: string;
+  walletCreationMode?: 'allow-embedded' | 'existing-only';
 };
 
 type PersistRegisteredUsernameInput = {
@@ -53,9 +54,14 @@ export async function ensureRegistrationSolanaAddresses({
   knownAddresses,
   createSolanaWallet,
   walletStatus,
+  walletCreationMode = 'allow-embedded',
 }: EnsureRegistrationSolanaAddressesInput): Promise<string[]> {
   const addresses = dedupeAddresses(knownAddresses);
   if (addresses.length > 0) return addresses;
+
+  if (walletCreationMode === 'existing-only') {
+    return addresses;
+  }
 
   if (isWalletPreparing(walletStatus)) {
     throw new Error('Solana wallet is still being prepared.');

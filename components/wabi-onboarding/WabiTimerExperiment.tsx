@@ -63,15 +63,23 @@ import SplitFlapWord from "./SplitFlapWord";
 type WabiTimerExperimentProps = {
   onRegister?: () => void;
   onLogin?: () => void;
+  onNativeWalletLogin?: () => void;
   loginLabel?: string;
+  nativeWalletLabel?: string;
+  showPasskeyActions?: boolean;
   disabled?: boolean;
+  nativeWalletDisabled?: boolean;
 };
 
 export default function WabiTimerExperiment({
   onRegister,
   onLogin,
+  onNativeWalletLogin,
   loginLabel,
+  nativeWalletLabel,
+  showPasskeyActions,
   disabled,
+  nativeWalletDisabled,
 }: WabiTimerExperimentProps) {
   // Screen dimensions and theme
   const { width: CANVAS_WIDTH, height: CANVAS_HEIGHT } = useWindowDimensions();
@@ -475,8 +483,12 @@ export default function WabiTimerExperiment({
         animatedStyle={socialAnimatedStyle}
         onRegister={onRegister}
         onLogin={onLogin}
+        onNativeWalletLogin={onNativeWalletLogin}
         loginLabel={loginLabel}
+        nativeWalletLabel={nativeWalletLabel}
+        showPasskeyActions={showPasskeyActions}
         disabled={disabled}
+        nativeWalletDisabled={nativeWalletDisabled}
       />
     </View>
   );

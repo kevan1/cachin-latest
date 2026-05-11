@@ -12,10 +12,11 @@ import { StatusBar } from 'expo-status-bar';
 import { Stack, useFocusEffect } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as Notifications from 'expo-notifications';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { PrivyUser } from '@privy-io/public-api';
-import { useEmbeddedSolanaWallet, usePrivy } from '@privy-io/expo';
+import { usePrivy } from '@privy-io/expo';
 
+import { useActiveSolanaWallet } from '@/hooks/useActiveSolanaWallet';
 import {
   getUserFromFirestore,
   type UserData,
@@ -25,7 +26,6 @@ import {
   unregisterRemoteReceiveTransactionNotifications,
 } from '@/services/pushNotifications';
 import { requestTransactionNotificationPermission } from '@/services/transactionNotifications';
-import { getSponsoredSolanaWallet } from '@/utils/sponsoredWalletStorage';
 import {
   getReceiveTransactionNotificationsPreference,
   saveReceiveTransactionNotificationsPreference,
@@ -94,16 +94,11 @@ function hasFirestoreNotificationsEnabled(userRecords: (UserData | null)[]) {
 
 export default function NotificationSettingsScreen() {
   const { user } = usePrivy();
-  const { wallets: solanaWallets } = useEmbeddedSolanaWallet();
-  const [sponsoredWalletAddress, setSponsoredWalletAddress] = useState<string | null>(null);
+  const activeSolanaWallet = useActiveSolanaWallet();
   const [pushNotificationsEnabled, setPushNotificationsEnabled] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const profileUser = user as NotificationSettingsPrivyUser | null;
-  const embeddedSolanaAddress = useMemo(
-    () => solanaWallets?.[0]?.publicKey?.trim() ?? null,
-    [solanaWallets]
-  );
   const linkedSolanaAddresses = useMemo(
     () => getLinkedSolanaAddresses(profileUser),
     [profileUser]
@@ -111,28 +106,18 @@ export default function NotificationSettingsScreen() {
   const solanaAddresses = useMemo(
     () =>
       dedupeAddresses([
-        sponsoredWalletAddress,
-        embeddedSolanaAddress,
+        activeSolanaWallet.nativeWalletAddress,
+        activeSolanaWallet.sponsoredWalletAddress,
+        activeSolanaWallet.embeddedWalletAddress,
         ...linkedSolanaAddresses,
       ]),
-    [embeddedSolanaAddress, linkedSolanaAddresses, sponsoredWalletAddress]
+    [
+      activeSolanaWallet.embeddedWalletAddress,
+      activeSolanaWallet.nativeWalletAddress,
+      activeSolanaWallet.sponsoredWalletAddress,
+      linkedSolanaAddresses,
+    ]
   );
-
-  useEffect(() => {
-    if (!user?.id) {
-      setSponsoredWalletAddress(null);
-      return;
-    }
-
-    getSponsoredSolanaWallet(user.id)
-      .then(({ address }) => {
-        setSponsoredWalletAddress(address?.trim() ?? null);
-      })
-      .catch((error) => {
-        console.warn('[NotificationSettings] Failed to load sponsored wallet', error);
-        setSponsoredWalletAddress(null);
-      });
-  }, [user?.id]);
 
   const refreshNotificationState = useCallback(async () => {
     if (Platform.OS !== 'ios') {

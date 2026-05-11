@@ -5,10 +5,10 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import * as Clipboard from "expo-clipboard";
 import * as Haptics from "expo-haptics";
 import QRCode from "react-native-qrcode-svg";
-import { useEmbeddedSolanaWallet } from "@privy-io/expo";
 import { GlassView } from "@/components/ui/GlassView";
 import { IconSymbol } from "@/components/ui/icon-symbol";
 import { Colors } from "@/constants/theme";
+import { useActiveSolanaWallet } from "@/hooks/useActiveSolanaWallet";
 import { getUsername } from "@/utils/userStorage";
 
 const QR_SIZE = 220;
@@ -18,9 +18,8 @@ export default function MyQrScreen() {
   const insets = useSafeAreaInsets();
   const colorScheme = (useColorScheme() ?? "light") as "light" | "dark";
   const palette = Colors[colorScheme];
-  const { wallets } = useEmbeddedSolanaWallet();
-  const wallet = wallets?.[0];
-  const solanaAddress = wallet?.publicKey ?? "";
+  const { address } = useActiveSolanaWallet();
+  const solanaAddress = address ?? "";
   const [username, setUsername] = useState("User");
 
   useEffect(() => {

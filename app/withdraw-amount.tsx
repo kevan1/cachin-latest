@@ -12,7 +12,7 @@ import {
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { useState, useEffect } from 'react';
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
-import { useEmbeddedSolanaWallet } from '@privy-io/expo';
+import { useActiveSolanaWallet } from '@/hooks/useActiveSolanaWallet';
 import { fetchSolanaUsdcBalance } from '@/utils/balanceService';
 import { Colors } from '@/constants/theme';
 import { GlassView } from '@/components/ui/GlassView';
@@ -34,7 +34,7 @@ export default function WithdrawAmountScreen() {
   const router = useRouter();
   const params = useLocalSearchParams();
   const { method } = params; // 'crypto', 'mercadopago', or 'bank'
-  const { wallets } = useEmbeddedSolanaWallet();
+  const { address: activeSolanaAddress } = useActiveSolanaWallet();
   const colorScheme = (useColorScheme() ?? 'light') as 'light' | 'dark';
   const palette = Colors[colorScheme];
   const prefilledAmount = firstParam(params.amount);
@@ -50,19 +50,10 @@ export default function WithdrawAmountScreen() {
   const [isUsdInput, setIsUsdInput] = useState(prefilledCurrency !== 'ARS'); // true = USD input, false = ARS input
   const arsRate = 1500; // 1 USD = 1500 ARS
 
-  // Get full Solana address
-  const getFullSolanaAddress = () => {
-    if (wallets && wallets.length > 0) {
-      const wallet = wallets[0];
-      return wallet.publicKey || null;
-    }
-    return null;
-  };
-
   // Fetch user balance
   useEffect(() => {
     const fetchBalance = async () => {
-      const address = getFullSolanaAddress();
+      const address = activeSolanaAddress;
       if (!address) {
         setIsLoadingBalance(false);
         return;
@@ -81,8 +72,7 @@ export default function WithdrawAmountScreen() {
     };
     
     fetchBalance();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [activeSolanaAddress]);
 
   const handleBack = () => {
     router.back();

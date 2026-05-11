@@ -1,12 +1,11 @@
-import { useEmbeddedSolanaWallet, usePrivy } from '@privy-io/expo';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useEffect, useMemo, useState } from 'react';
 import { ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { useActiveSolanaWallet } from '@/hooks/useActiveSolanaWallet';
 import { fetchSolanaUsdcBalance } from '@/utils/balanceService';
 import { formatTokenAmountDisplay } from '@/utils/numberFormat';
-import { getSponsoredSolanaWallet } from '@/utils/sponsoredWalletStorage';
 
 type AssetLogo = 'sol' | 'usdc' | 'usdt' | 'avalanche-usdc' | 'avax' | 'arsc';
 
@@ -131,30 +130,9 @@ function AssetRow({ item, index }: { item: AssetBalance; index: number }) {
 
 export default function BalanceScreen() {
   const insets = useSafeAreaInsets();
-  const { user, isReady } = usePrivy();
-  const { wallets: solanaWallets } = useEmbeddedSolanaWallet();
+  const { address: solanaAddress, isReady } = useActiveSolanaWallet();
   const [solanaUsdcBalance, setSolanaUsdcBalance] = useState(0);
   const [isLoadingBalance, setIsLoadingBalance] = useState(true);
-  const [sponsoredWalletAddress, setSponsoredWalletAddress] = useState<string | null>(null);
-
-  const solanaAddress = sponsoredWalletAddress ?? solanaWallets?.[0]?.publicKey ?? null;
-
-  useEffect(() => {
-    if (!isReady) return;
-
-    if (!user?.id) {
-      setSponsoredWalletAddress(null);
-      return;
-    }
-
-    getSponsoredSolanaWallet(user.id)
-      .then(({ address }) => {
-        setSponsoredWalletAddress(address);
-      })
-      .catch(() => {
-        setSponsoredWalletAddress(null);
-      });
-  }, [isReady, user?.id]);
 
   useEffect(() => {
     const loadBalances = async () => {

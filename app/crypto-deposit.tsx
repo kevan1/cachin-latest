@@ -3,12 +3,12 @@ import { useRouter } from 'expo-router';
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 import QRCode from 'react-native-qrcode-svg';
 import * as Clipboard from 'expo-clipboard';
-import { useEmbeddedSolanaWallet } from '@privy-io/expo';
 import { useMemo, useState } from 'react';
 import Svg, { Path } from 'react-native-svg';
 import { buildSolanaPayUri, createSolanaPayReferences, SOLANA_USDC_MINT } from '@/utils/solanaPay';
 import { GlassView } from '@/components/ui/GlassView';
 import { Colors } from '@/constants/theme';
+import { useActiveSolanaWallet } from '@/hooks/useActiveSolanaWallet';
 
 function CopyIcon({ size = 18, color = '#111' }: { size?: number; color?: string }) {
   return (
@@ -20,17 +20,16 @@ function CopyIcon({ size = 18, color = '#111' }: { size?: number; color?: string
 
 export default function CryptoDepositScreen() {
   const router = useRouter();
-  const colorScheme = useColorScheme() ?? 'light';
+  const colorScheme = (useColorScheme() ?? 'light') as 'light' | 'dark';
   const palette = Colors[colorScheme];
-  const { wallets } = useEmbeddedSolanaWallet();
-  const wallet = wallets?.[0];
+  const { address } = useActiveSolanaWallet();
   const [hideWallet, setHideWallet] = useState(false);
   const [receiveAsset, setReceiveAsset] = useState<'usdc' | 'sol'>('usdc');
 
   const solanaAddress = useMemo(() => {
-    if (wallet?.publicKey) return wallet.publicKey;
+    if (address) return address;
     return '';
-  }, [wallet]);
+  }, [address]);
 
   const solanaPayReferences = useMemo(
     () => (solanaAddress ? createSolanaPayReferences(1) : []),

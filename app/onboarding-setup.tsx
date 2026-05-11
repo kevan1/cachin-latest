@@ -32,6 +32,7 @@ import {
   persistRegisteredUsername,
 } from '@/utils/usernameRegistration';
 import { getEmbeddedSolanaWalletAddress } from '@/utils/privySolanaWallet';
+import { getNativeSolanaWalletSession } from '@/utils/nativeSolanaWallet';
 import { getSponsoredSolanaWallet } from '@/utils/sponsoredWalletStorage';
 
 type SetupStep = 'camera' | 'security';
@@ -362,18 +363,23 @@ export default function OnboardingSetupScreen() {
     try {
       const pendingUsername = await getPendingUsername();
       if (pendingUsername) {
+        const nativeWalletSession = await getNativeSolanaWalletSession(userId);
         const sponsoredWallet = await getSponsoredSolanaWallet(userId).catch(() => ({
           id: null,
           address: null,
         }));
         const solanaAddresses = await ensureRegistrationSolanaAddresses({
           knownAddresses: [
+            nativeWalletSession?.address,
             sponsoredWallet.address,
             getEmbeddedSolanaWalletAddress(solanaWallets),
             ...getLinkedSolanaAddresses(user),
           ],
           createSolanaWallet,
           walletStatus: solanaWalletStatus,
+          walletCreationMode: nativeWalletSession?.address
+            ? 'existing-only'
+            : 'allow-embedded',
         });
 
         await persistRegisteredUsername({
@@ -602,7 +608,7 @@ export default function OnboardingSetupScreen() {
                 </Text>
                 <Text style={styles.calloutText}>
                   {isSecurityAvailable
-                    ? 'Enable it now or skip. Your wallet still uses passkey authentication.'
+                    ? 'Enable it now or skip. Your wallet still uses its own authentication.'
                     : securityAvailability?.reason ?? 'You can enable app lock from Security later.'}
                 </Text>
               </View>

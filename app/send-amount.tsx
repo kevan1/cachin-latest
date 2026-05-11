@@ -21,8 +21,9 @@ import {
   getUserByUsername,
   type UserData,
 } from "@/services/firestoreService";
-import { useEmbeddedEthereumWallet, useEmbeddedSolanaWallet } from "@privy-io/expo";
+import { useEmbeddedEthereumWallet } from "@privy-io/expo";
 import { ChainType, getChainToken } from "@/constants/chains";
+import { useActiveSolanaWallet } from "@/hooks/useActiveSolanaWallet";
 import { getSolanaRpcUrl } from "@/utils/solanaRpc";
 import { fetchArsPrice } from "@/utils/priceService";
 import {
@@ -116,15 +117,14 @@ export default function SendAmountScreen() {
   const [satochipAvalancheAddress, setSatochipAvalancheAddress] = useState<string | null>(null);
   const didInitInputModeRef = useRef(false);
 
-  const { wallets: solanaWallets } = useEmbeddedSolanaWallet();
+  const { address: activeSolanaAddress } = useActiveSolanaWallet();
   const { wallets: ethereumWallets } = useEmbeddedEthereumWallet();
-  const solanaWallet = solanaWallets?.[0];
   const avalancheWallet = ethereumWallets?.[0];
   const walletAddress = isAvalancheTransfer
     ? avalancheWalletSource === "satochip"
       ? satochipAvalancheAddress
       : avalancheWallet?.address ?? null
-    : solanaWallet?.publicKey ?? null;
+    : activeSolanaAddress;
 
   useFocusEffect(
     useCallback(() => {

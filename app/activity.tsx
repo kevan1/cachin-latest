@@ -11,7 +11,6 @@ import {
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
-import { useEmbeddedSolanaWallet } from '@privy-io/expo';
 import BottomSheet, {
   BottomSheetView,
   BottomSheetBackdrop,
@@ -29,10 +28,11 @@ import { formatTokenAmountDisplay } from '@/utils/numberFormat';
 import { getExplorerUrl, getChainSymbol, ChainType } from '@/constants/chains';
 import { Colors } from '@/constants/theme';
 import { GlassView } from '@/components/ui/GlassView';
+import { useActiveSolanaWallet } from '@/hooks/useActiveSolanaWallet';
 
 export default function ActivityScreen() {
   const router = useRouter();
-  const colorScheme = useColorScheme() ?? 'light';
+  const colorScheme = (useColorScheme() ?? 'light') as 'light' | 'dark';
   const palette = Colors[colorScheme];
   const isDark = colorScheme === 'dark';
   const cardBorder = isDark ? 'rgba(255,255,255,0.16)' : 'rgba(255,255,255,0.52)';
@@ -46,15 +46,11 @@ export default function ActivityScreen() {
   const bottomSheetRef = useRef<BottomSheet>(null);
   const snapPoints = useMemo(() => ['75%'], []);
 
-  const { wallets } = useEmbeddedSolanaWallet();
-  const wallet = wallets?.[0];
+  const activeSolanaWallet = useActiveSolanaWallet();
 
   const getFullSolanaAddress = useCallback(() => {
-    if (wallet?.publicKey) {
-      return wallet.publicKey;
-    }
-    return null;
-  }, [wallet?.publicKey]);
+    return activeSolanaWallet.address;
+  }, [activeSolanaWallet.address]);
 
   const fetchTransactions = useCallback(async (address: string) => {
     try {

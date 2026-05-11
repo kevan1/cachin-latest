@@ -6,6 +6,7 @@ import { toast as appToast } from "react-native-pretty-toast";
 
 import { AlertSheet } from "@/components/AlertSheet";
 import WabiTimerExperiment from "@/components/wabi-onboarding/WabiTimerExperiment";
+import { useSeekerWalletLogin } from "@/hooks/useSeekerWalletLogin";
 import {
   checkPasskeySupport,
   formatPasskeyError,
@@ -15,12 +16,14 @@ import {
 } from "@/utils/passkeySupport";
 import { getPasskeyRelyingPartyOrigin } from "@/utils/runtimeConfig";
 import { logBootTrace } from "@/utils/bootTrace";
+import { isSeekerWalletLoginEnabled } from "@/utils/seekerDevice";
 
 export default function Index() {
   const router = useRouter();
   const passkeyRelyingParty =
     getPasskeyRelyingPartyOrigin() ?? "https://auth.kevan.ar";
   const [loading, setLoading] = useState(false);
+  const [seekerWalletLoading, setSeekerWalletLoading] = useState(false);
   const [useEmailFallback, setUseEmailFallback] = useState(
     () => !isPasskeySupportedByOs()
   );
@@ -31,6 +34,8 @@ export default function Index() {
     mode: "login" as "login" | "signup",
   });
   const { user, isReady } = usePrivy();
+  const loginWithSeekerWallet = useSeekerWalletLogin();
+  const showSeekerWalletLogin = isSeekerWalletLoginEnabled();
 
   const showToast = useCallback((message: string) => {
     appToast.show({ title: message });
@@ -153,13 +158,50 @@ export default function Index() {
     }
   };
 
+  const handleSeekerWalletLogin = async () => {
+    if (user) {
+      router.replace("/(main)/home");
+      return;
+    }
+
+    setSeekerWalletLoading(true);
+    try {
+      const result = await loginWithSeekerWallet();
+      showToast("Logged in");
+      if (result.hasUsername) {
+        router.replace("/(main)/home");
+      } else {
+        router.replace({
+          pathname: "/username",
+          params: { mode: "complete", source: "seeker-wallet" },
+        });
+      }
+    } catch (error) {
+      const message =
+        error instanceof Error
+          ? error.message
+          : "Unable to log in with Seeker Wallet.";
+      showToast(message);
+    } finally {
+      setSeekerWalletLoading(false);
+    }
+  };
+
   return (
     <>
       <WabiTimerExperiment
         onRegister={handleRegister}
         onLogin={handleLogin}
+        onNativeWalletLogin={
+          showSeekerWalletLogin ? handleSeekerWalletLogin : undefined
+        }
         loginLabel={loading ? "Signing in..." : "Login"}
-        disabled={loading}
+        nativeWalletLabel={
+          seekerWalletLoading ? "Opening wallet..." : "Continue with Seeker Wallet"
+        }
+        showPasskeyActions={!showSeekerWalletLogin}
+        disabled={loading || seekerWalletLoading}
+        nativeWalletDisabled={loading || seekerWalletLoading}
       />
 
       <AlertSheet

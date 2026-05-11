@@ -19,7 +19,7 @@ import {
   saveSelectedCurrency,
   type Currency,
 } from '@/utils/userStorage';
-import { useEmbeddedSolanaWallet, usePrivy } from '@privy-io/expo';
+import { usePrivy } from '@privy-io/expo';
 import {
   getAppIconName,
   setAlternateAppIcon,
@@ -27,9 +27,7 @@ import {
   type AlternateAppIcons,
 } from 'expo-alternate-app-icons';
 import { useToast } from 'react-native-pretty-toast';
-import {
-  getSponsoredSolanaWallet,
-} from '@/utils/sponsoredWalletStorage';
+import { useActiveSolanaWallet } from '@/hooks/useActiveSolanaWallet';
 import { GeneratedProfileAvatar } from '@/components/profile/GeneratedProfileAvatar';
 import { ProfileMenuRow } from '@/components/profile/ProfileMenuRow';
 import { openSupportChat } from '@/services/supportChat';
@@ -54,7 +52,6 @@ import {
   getProfileSnapshotSync,
   saveProfileSnapshot,
 } from '@/utils/uiSnapshotCache';
-import { getEmbeddedSolanaWalletAddress } from '@/utils/privySolanaWallet';
 
 const CURRENCY_OPTIONS: Currency[] = ['USD', 'ARS', 'EUR'];
 const ALTERNATE_APP_ICON: AlternateAppIcons = 'IconSol';
@@ -225,7 +222,7 @@ export default function ProfileScreen() {
   const isCompactHeight = height < 760;
 
   const { user, logout, isReady } = usePrivy();
-  const { wallets: solanaWallets } = useEmbeddedSolanaWallet();
+  const activeSolanaWallet = useActiveSolanaWallet();
   const profileUser = user as ProfilePrivyUser | null;
   const initialProfileSnapshotRef = useRef(
     getProfileSnapshotSync({ userId: profileUser?.id ?? null })
@@ -249,10 +246,9 @@ export default function ProfileScreen() {
   const [sponsoredWalletAddress, setSponsoredWalletAddress] = useState<string | null>(
     () => initialProfileSnapshotRef.current?.sponsoredWalletAddress ?? null
   );
-  const embeddedSolanaAddress = useMemo(
-    () => getEmbeddedSolanaWalletAddress(solanaWallets),
-    [solanaWallets]
-  );
+  const embeddedSolanaAddress = activeSolanaWallet.embeddedWalletAddress;
+  const effectiveSponsoredWalletAddress =
+    sponsoredWalletAddress ?? activeSolanaWallet.sponsoredWalletAddress;
   const linkedSolanaAddresses = useMemo(
     () => getLinkedSolanaAddresses(profileUser),
     [profileUser]
@@ -260,11 +256,17 @@ export default function ProfileScreen() {
   const solanaAddresses = useMemo(
     () =>
       dedupeAddresses([
-        sponsoredWalletAddress,
+        activeSolanaWallet.nativeWalletAddress,
+        effectiveSponsoredWalletAddress,
         embeddedSolanaAddress,
         ...linkedSolanaAddresses,
       ]),
-    [embeddedSolanaAddress, linkedSolanaAddresses, sponsoredWalletAddress]
+    [
+      activeSolanaWallet.nativeWalletAddress,
+      effectiveSponsoredWalletAddress,
+      embeddedSolanaAddress,
+      linkedSolanaAddresses,
+    ]
   );
   const solanaAddress = solanaAddresses[0] ?? null;
   const identityVerificationRecord = selectBestIdentityVerificationRecord([
@@ -330,22 +332,15 @@ export default function ProfileScreen() {
   }, []);
 
   useEffect(() => {
-    if (!isReady) return;
-
     if (!user?.id) {
       setSponsoredWalletAddress(null);
       return;
     }
 
-    getSponsoredSolanaWallet(user.id)
-      .then(({ address }) => {
-        setSponsoredWalletAddress(address?.trim() ?? null);
-      })
-      .catch((error) => {
-        console.warn('[Profile] Failed to load sponsored Solana wallet', error);
-        setSponsoredWalletAddress(null);
-      });
-  }, [isReady, user?.id]);
+    if (activeSolanaWallet.sponsoredWalletAddress) {
+      setSponsoredWalletAddress(activeSolanaWallet.sponsoredWalletAddress);
+    }
+  }, [activeSolanaWallet.sponsoredWalletAddress, user?.id]);
 
   const loadProfileData = useCallback(async () => {
     const cachedVerification = await getIdentityVerificationCache({
@@ -411,7 +406,7 @@ export default function ProfileScreen() {
         email: profileEmail,
         primarySolanaAddress: primaryAddress ?? null,
         solanaAddresses,
-        sponsoredWalletAddress,
+        sponsoredWalletAddress: effectiveSponsoredWalletAddress,
         firestoreUser: bestFirestoreUser
           ? {
               username: bestFirestoreUser.username,
@@ -424,7 +419,13 @@ export default function ProfileScreen() {
         updatedAt: Date.now(),
       }
     );
-  }, [profileEmail, profileUser?.id, solanaAddress, solanaAddresses, sponsoredWalletAddress]);
+  }, [
+    effectiveSponsoredWalletAddress,
+    profileEmail,
+    profileUser?.id,
+    solanaAddress,
+    solanaAddresses,
+  ]);
 
   useEffect(() => {
     void loadProfileData();
