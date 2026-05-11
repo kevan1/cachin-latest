@@ -40,20 +40,6 @@ function hasRegisteredUsername(username?: string | null): boolean {
   return Boolean(normalized && !normalized.toLowerCase().startsWith("user-"));
 }
 
-function decodeLoginMessage(message: Uint8Array): string {
-  const text = Buffer.from(message).toString("utf8");
-  if (text.includes(" wants you to sign in with your Solana account:")) {
-    return text;
-  }
-
-  try {
-    const decoded = decodeBase64Url(text);
-    return Buffer.from(decoded).toString("utf8");
-  } catch {
-    return text;
-  }
-}
-
 function decodeBase64Url(value: string): Uint8Array {
   const normalized = value.replace(/-/g, "+").replace(/_/g, "/");
   const padded = normalized.padEnd(
@@ -198,12 +184,11 @@ export function useSeekerWalletLogin(): () => Promise<SeekerWalletLoginResult> {
       const signInResult = await signIn(
         getPrivySiwsSignInPayload(message, address)
       );
-      const signedMessage = decodeLoginMessage(signInResult.signedMessage);
       const signature = getBs58Encode()(
         normalizeSignatureBytes(signInResult.signature)
       );
       const user = await login({
-        message: signedMessage || message,
+        message,
         signature,
         wallet: {
           walletClientType: SEEKER_WALLET_CLIENT_TYPE,
