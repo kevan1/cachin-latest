@@ -18,6 +18,28 @@ export type CreateMantecaQrPaymentResponse = {
   payload?: Record<string, unknown>;
 };
 
+export type ResolveMantecaQrQuoteInput = {
+  qrData: string;
+  paymentAddress?: string;
+  currency?: "ARS" | "USD" | "USDC";
+  method?: string;
+};
+
+export type ResolveMantecaQrQuoteResponse = {
+  ok: boolean;
+  provider: "manteca";
+  status: "quoted" | "requires_amount" | string;
+  nextAction: string;
+  amountFiat: number | null;
+  amountUsdc: number | null;
+  paymentAddress: string | null;
+  rateArsPerUsdc: number | null;
+  feeArs: number | null;
+  discountArs: number | null;
+  reason?: string;
+  payload?: Record<string, unknown>;
+};
+
 function getRequiredApiBaseUrl(): string {
   const baseUrl = getApiBaseUrl();
   if (!baseUrl) {
@@ -48,4 +70,28 @@ export async function createMantecaQrPayment(
   }
 
   return payload as CreateMantecaQrPaymentResponse;
+}
+
+export async function resolveMantecaQrQuote(
+  input: ResolveMantecaQrQuoteInput
+): Promise<ResolveMantecaQrQuoteResponse> {
+  const baseUrl = getRequiredApiBaseUrl();
+  const response = await fetch(`${baseUrl}/api/manteca/qr-quote`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    const message =
+      payload && typeof payload.error === "string"
+        ? payload.error
+        : `HTTP ${response.status}`;
+    const code =
+      payload && typeof payload.code === "string" ? payload.code : "API_ERROR";
+    throw new Error(`${message} [${code}]`);
+  }
+
+  return payload as ResolveMantecaQrQuoteResponse;
 }

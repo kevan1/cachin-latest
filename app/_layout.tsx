@@ -456,6 +456,9 @@ function AppNavigator() {
     (isEmailScreen && !isSignupEmailScreen);
   const isIOS = Platform.OS === "ios";
   const colorScheme = useColorScheme() === "dark" ? "dark" : "light";
+  const sheetContentStyle = {
+    backgroundColor: isIOS ? "transparent" : Colors[colorScheme].background,
+  };
   const headerBlurEffect =
     colorScheme === "dark" ? "systemMaterialDark" : "systemMaterialLight";
   const routeSegments = segmentList.join("/") || "/";
@@ -843,7 +846,7 @@ function AppNavigator() {
           sheetAllowedDetents: [0.7],
           sheetGrabberVisible: true,
           sheetCornerRadius: 40,
-          contentStyle: { backgroundColor: "transparent" },
+          contentStyle: sheetContentStyle,
         }}
       />
       <Stack.Screen
@@ -865,7 +868,7 @@ function AppNavigator() {
           sheetLargestUndimmedDetentIndex: "last",
           sheetGrabberVisible: false,
           sheetCornerRadius: 28,
-          contentStyle: { backgroundColor: "transparent" },
+          contentStyle: sheetContentStyle,
         }}
       />
       <Stack.Screen
@@ -877,7 +880,7 @@ function AppNavigator() {
           sheetLargestUndimmedDetentIndex: "last",
           sheetGrabberVisible: false,
           sheetCornerRadius: 28,
-          contentStyle: { backgroundColor: "transparent" },
+          contentStyle: sheetContentStyle,
         }}
       />
       <Stack.Screen
@@ -895,7 +898,7 @@ function AppNavigator() {
           sheetLargestUndimmedDetentIndex: isIOS ? undefined : "last",
           sheetGrabberVisible: isIOS ? undefined : false,
           sheetCornerRadius: isIOS ? undefined : 28,
-          contentStyle: { backgroundColor: isIOS ? "#FFFFFF" : "transparent" },
+          contentStyle: { backgroundColor: isIOS ? "#FFFFFF" : Colors[colorScheme].background },
         }}
       />
       <Stack.Screen
@@ -907,7 +910,7 @@ function AppNavigator() {
           sheetLargestUndimmedDetentIndex: "last",
           sheetGrabberVisible: false,
           sheetCornerRadius: 28,
-          contentStyle: { backgroundColor: "transparent" },
+          contentStyle: sheetContentStyle,
         }}
       />
       <Stack.Screen
@@ -915,6 +918,18 @@ function AppNavigator() {
         options={{
           headerShown: false,
           gestureEnabled: false,
+        }}
+      />
+      <Stack.Screen
+        name="qr-payment-confirm"
+        options={{
+          headerShown: false,
+          presentation: "formSheet",
+          sheetAllowedDetents: isIOS ? "fitToContents" : [0.92],
+          sheetLargestUndimmedDetentIndex: "last",
+          sheetGrabberVisible: !isIOS,
+          sheetCornerRadius: 28,
+          contentStyle: sheetContentStyle,
         }}
       />
       <Stack.Screen
@@ -926,7 +941,7 @@ function AppNavigator() {
           sheetLargestUndimmedDetentIndex: "last",
           sheetGrabberVisible: false,
           sheetCornerRadius: 28,
-          contentStyle: { backgroundColor: "transparent" },
+          contentStyle: sheetContentStyle,
         }}
       />
       <Stack.Screen
@@ -938,7 +953,7 @@ function AppNavigator() {
           sheetLargestUndimmedDetentIndex: "last",
           sheetGrabberVisible: false,
           sheetCornerRadius: 28,
-          contentStyle: { backgroundColor: "transparent" },
+          contentStyle: sheetContentStyle,
         }}
       />
       <Stack.Screen
@@ -950,7 +965,7 @@ function AppNavigator() {
           sheetLargestUndimmedDetentIndex: "last",
           sheetGrabberVisible: false,
           sheetCornerRadius: 28,
-          contentStyle: { backgroundColor: "transparent" },
+          contentStyle: sheetContentStyle,
         }}
       />
       <Stack.Screen
@@ -962,7 +977,7 @@ function AppNavigator() {
           sheetLargestUndimmedDetentIndex: "last",
           sheetGrabberVisible: false,
           sheetCornerRadius: 28,
-          contentStyle: { backgroundColor: "transparent" },
+          contentStyle: sheetContentStyle,
         }}
       />
       <Stack.Screen
@@ -974,7 +989,7 @@ function AppNavigator() {
           sheetLargestUndimmedDetentIndex: "last",
           sheetGrabberVisible: false,
           sheetCornerRadius: 28,
-          contentStyle: { backgroundColor: "#FFFFFF" },
+          contentStyle: isIOS ? { backgroundColor: "#FFFFFF" } : sheetContentStyle,
         }}
       />
       <Stack.Screen
@@ -986,7 +1001,7 @@ function AppNavigator() {
           sheetLargestUndimmedDetentIndex: "last",
           sheetGrabberVisible: false,
           sheetCornerRadius: 28,
-          contentStyle: { backgroundColor: "transparent" },
+          contentStyle: sheetContentStyle,
         }}
       />
       <Stack.Screen
@@ -998,7 +1013,7 @@ function AppNavigator() {
           sheetLargestUndimmedDetentIndex: "last",
           sheetGrabberVisible: false,
           sheetCornerRadius: 28,
-          contentStyle: { backgroundColor: "transparent" },
+          contentStyle: sheetContentStyle,
         }}
       />
       <Stack.Screen
@@ -1010,7 +1025,7 @@ function AppNavigator() {
           sheetLargestUndimmedDetentIndex: "last",
           sheetGrabberVisible: false,
           sheetCornerRadius: 28,
-          contentStyle: { backgroundColor: "transparent" },
+          contentStyle: sheetContentStyle,
         }}
       />
       <Stack.Screen
@@ -1042,7 +1057,7 @@ function AppNavigator() {
           sheetLargestUndimmedDetentIndex: "last",
           sheetGrabberVisible: true,
           sheetCornerRadius: 40,
-          contentStyle: { backgroundColor: "transparent" },
+          contentStyle: sheetContentStyle,
         }}
       />
       <Stack.Screen
@@ -1054,7 +1069,7 @@ function AppNavigator() {
           sheetLargestUndimmedDetentIndex: "last",
           sheetGrabberVisible: true,
           sheetCornerRadius: 34,
-          contentStyle: { backgroundColor: "transparent" },
+          contentStyle: sheetContentStyle,
         }}
       />
       <Stack.Screen
@@ -1066,7 +1081,7 @@ function AppNavigator() {
           sheetLargestUndimmedDetentIndex: "last",
           sheetGrabberVisible: true,
           sheetCornerRadius: 40,
-          contentStyle: { backgroundColor: "transparent" },
+          contentStyle: sheetContentStyle,
         }}
       />
       <Stack.Screen
@@ -1078,7 +1093,7 @@ function AppNavigator() {
           sheetLargestUndimmedDetentIndex: "last",
           sheetGrabberVisible: true,
           sheetCornerRadius: 40,
-          contentStyle: { backgroundColor: "transparent" },
+          contentStyle: sheetContentStyle,
         }}
       />
       <Stack.Screen
@@ -1098,7 +1113,7 @@ function AppNavigator() {
           sheetLargestUndimmedDetentIndex: "last",
           sheetGrabberVisible: false,
           sheetCornerRadius: 28,
-          contentStyle: { backgroundColor: "transparent" },
+          contentStyle: sheetContentStyle,
         }}
       />
     </Stack>

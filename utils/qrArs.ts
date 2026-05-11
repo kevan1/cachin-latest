@@ -1,10 +1,12 @@
 import { parseQR } from '@p2pdotme/sdk/qr-parsers';
+import { extractEmvAmount } from '@/utils/emvQr';
 import { fetchArsPrice } from '@/utils/priceService';
 
 export interface ParsedArsQr {
   paymentAddress: string;
   amountFiat?: number;
   amountUsdc?: number;
+  rateArsPerUsdc?: number;
 }
 
 const FALLBACK_SELL_PRICE = 1;
@@ -31,13 +33,19 @@ export async function parseArgentineQr(raw: string): Promise<ParsedArsQr | null>
     const paymentAddress = result.value.paymentAddress?.trim();
     if (!paymentAddress) return null;
 
+    const fixedQrAmount = extractEmvAmount(qrData);
+    const amountFiat = result.value.amount?.fiat ?? fixedQrAmount ?? undefined;
+    const amountUsdc =
+      result.value.amount?.usdc ??
+      (typeof fixedQrAmount === 'number' && sellPrice > 0 ? fixedQrAmount / sellPrice : undefined);
+
     return {
       paymentAddress,
-      amountFiat: result.value.amount?.fiat,
-      amountUsdc: result.value.amount?.usdc,
+      amountFiat,
+      amountUsdc,
+      rateArsPerUsdc: sellPrice,
     };
   } catch {
     return null;
   }
 }
-

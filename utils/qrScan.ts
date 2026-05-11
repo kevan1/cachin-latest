@@ -18,6 +18,7 @@ export type QrScanResult =
       paymentAddress: string;
       amountFiat?: number;
       amountUsdc?: number;
+      rateArsPerUsdc?: number;
     }
   | { kind: 'unknown'; raw: string; reason: 'empty' | 'not_supported' };
 
@@ -141,6 +142,7 @@ export async function parseQrScanData(raw: string): Promise<QrScanResult> {
       paymentAddress: arsQr.paymentAddress,
       amountFiat: arsQr.amountFiat,
       amountUsdc: arsQr.amountUsdc,
+      rateArsPerUsdc: arsQr.rateArsPerUsdc,
     };
   }
 

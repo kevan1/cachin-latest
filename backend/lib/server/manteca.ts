@@ -46,12 +46,27 @@ function requireEnv(name: string): string {
   return value;
 }
 
+function optionalEnv(name: string): string {
+  return (process.env[name] ?? "").trim();
+}
+
 function resolveQrPaymentUrl(): string {
-  const explicitUrl = (process.env.MANTECA_QR_PAYMENT_URL ?? "").trim();
+  const explicitUrl = optionalEnv("MANTECA_QR_PAYMENT_URL");
   if (explicitUrl) return explicitUrl;
 
   const baseUrl = requireEnv("MANTECA_API_BASE_URL").replace(/\/+$/, "");
-  const path = (process.env.MANTECA_QR_PAYMENT_PATH ?? "/v2/synthetics/qr-payment").trim();
+  const path = optionalEnv("MANTECA_QR_PAYMENT_PATH") || "/v2/synthetics/qr-payment";
+  return `${baseUrl}${path.startsWith("/") ? path : `/${path}`}`;
+}
+
+function resolveQrQuoteUrl(): string | null {
+  const explicitUrl = optionalEnv("MANTECA_QR_QUOTE_URL");
+  if (explicitUrl) return explicitUrl;
+
+  const path = optionalEnv("MANTECA_QR_QUOTE_PATH");
+  if (!path) return null;
+
+  const baseUrl = requireEnv("MANTECA_API_BASE_URL").replace(/\/+$/, "");
   return `${baseUrl}${path.startsWith("/") ? path : `/${path}`}`;
 }
 
@@ -60,6 +75,34 @@ async function readJson(response: Response): Promise<JsonRecord> {
   return payload && typeof payload === "object" && !Array.isArray(payload)
     ? (payload as JsonRecord)
     : {};
+}
+
+function readNested(record: JsonRecord, path: string): unknown {
+  return path.split(".").reduce<unknown>((current, key) => {
+    if (!current || typeof current !== "object" || Array.isArray(current)) return undefined;
+    return (current as JsonRecord)[key];
+  }, record);
+}
+
+function numberCandidate(record: JsonRecord, paths: string[]): number | null {
+  for (const path of paths) {
+    const value = readNested(record, path);
+    if (typeof value === "number" && Number.isFinite(value)) return value;
+    if (typeof value === "string") {
+      const parsed = Number(value.trim().replace(/,/g, ""));
+      if (Number.isFinite(parsed)) return parsed;
+    }
+  }
+  return null;
+}
+
+function stringCandidate(record: JsonRecord, paths: string[]): string | null {
+  for (const path of paths) {
+    const value = readNested(record, path);
+    if (typeof value === "string" && value.trim()) return value.trim();
+    if (typeof value === "number" && Number.isFinite(value)) return String(value);
+  }
+  return null;
 }
 
 function getExternalId(payload: JsonRecord): string | null {
@@ -75,6 +118,148 @@ function getExternalId(payload: JsonRecord): string | null {
     if (typeof candidate === "number" && Number.isFinite(candidate)) return String(candidate);
   }
   return null;
+}
+
+export function extractMantecaQrQuote(payload: JsonRecord) {
+  return {
+    amountFiat: numberCandidate(payload, [
+      "amountFiat",
+      "fiatAmount",
+      "amountArs",
+      "arsAmount",
+      "amount.fiat",
+      "amount.ars",
+      "qr.amount",
+      "quote.amountFiat",
+      "quote.fiatAmount",
+      "quote.amount.fiat",
+      "total.amountFiat",
+    ]),
+    amountUsdc: numberCandidate(payload, [
+      "amountUsdc",
+      "usdcAmount",
+      "amount.usdc",
+      "quote.amountUsdc",
+      "quote.usdcAmount",
+      "quote.amount.usdc",
+      "total.amountUsdc",
+    ]),
+    paymentAddress: stringCandidate(payload, [
+      "paymentAddress",
+      "merchantName",
+      "merchant",
+      "destination",
+      "qr.paymentAddress",
+      "qr.merchantName",
+      "quote.paymentAddress",
+      "quote.merchantName",
+    ]),
+    rateArsPerUsdc: numberCandidate(payload, [
+      "rateArsPerUsdc",
+      "arsRate",
+      "fxRate",
+      "exchangeRate",
+      "rate",
+      "quote.rateArsPerUsdc",
+      "quote.arsRate",
+      "quote.fxRate",
+      "quote.exchangeRate",
+    ]),
+    feeArs: numberCandidate(payload, [
+      "feeArs",
+      "fee",
+      "fees.ars",
+      "quote.feeArs",
+      "quote.fee",
+      "quote.fees.ars",
+    ]),
+    discountArs: numberCandidate(payload, [
+      "discountArs",
+      "discount",
+      "discounts.ars",
+      "quote.discountArs",
+      "quote.discount",
+      "quote.discounts.ars",
+    ]),
+  };
+}
+
+export async function handleResolveMantecaQrQuote(input: unknown) {
+  const body = asRecord(input);
+  const qrData = requiredString(body, "qrData");
+  const paymentAddress = optionalString(body, "paymentAddress");
+  const method = optionalString(body, "method") || "mercadopago";
+  const currency = optionalString(body, "currency").toUpperCase() || "ARS";
+
+  if (!["ARS", "USD", "USDC"].includes(currency)) {
+    throw new MantecaApiError(400, "INVALID_CURRENCY", "currency must be ARS, USD, or USDC.");
+  }
+
+  const endpoint = resolveQrQuoteUrl();
+  if (!endpoint) {
+    return {
+      ok: true,
+      provider: "manteca" as const,
+      status: "requires_amount",
+      nextAction: "ENTER_AMOUNT",
+      amountFiat: null,
+      amountUsdc: null,
+      paymentAddress: paymentAddress || null,
+      rateArsPerUsdc: null,
+      feeArs: null,
+      discountArs: null,
+      reason: "MANTECA_QR_QUOTE_NOT_CONFIGURED",
+    };
+  }
+
+  const apiKey = requireEnv("MANTECA_API_KEY");
+  const response = await fetch(endpoint, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${apiKey}`,
+      "x-api-key": apiKey,
+    },
+    body: JSON.stringify({
+      qrData,
+      paymentAddress: paymentAddress || undefined,
+      currency,
+      method,
+      metadata: {
+        source: "cachin-qr-3",
+        rail: "manteca",
+        purpose: "quote",
+      },
+    }),
+  });
+  const payload = await readJson(response);
+
+  if (!response.ok) {
+    const message =
+      typeof payload.message === "string"
+        ? payload.message
+        : typeof payload.error === "string"
+          ? payload.error
+          : `Manteca quote request failed with HTTP ${response.status}.`;
+    throw new MantecaApiError(response.status, "MANTECA_QUOTE_REQUEST_FAILED", message, payload);
+  }
+
+  const quote = extractMantecaQrQuote(payload);
+  const resolvedAmountFiat = quote.amountFiat;
+
+  return {
+    ok: true,
+    provider: "manteca" as const,
+    status: resolvedAmountFiat ? "quoted" : "requires_amount",
+    nextAction: resolvedAmountFiat ? "CONFIRM_PAYMENT" : "ENTER_AMOUNT",
+    amountFiat: quote.amountFiat,
+    amountUsdc: quote.amountUsdc,
+    paymentAddress: quote.paymentAddress ?? (paymentAddress || null),
+    rateArsPerUsdc: quote.rateArsPerUsdc,
+    feeArs: quote.feeArs,
+    discountArs: quote.discountArs,
+    payload,
+  };
 }
 
 export async function handleCreateMantecaQrPayment(input: unknown) {

@@ -66,6 +66,7 @@ function getErrorMessage(error: unknown) {
 export default function LinkEmailScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
+  const topInset = Math.max(insets.top, 0);
   const toast = useToast();
   const { user } = usePrivy();
   const linkedEmail = getLinkedEmail(user as LinkEmailUser | null);
@@ -167,7 +168,10 @@ export default function LinkEmailScreen() {
       style={styles.screen}
       contentContainerStyle={[
         styles.content,
-        { paddingBottom: Math.max(insets.bottom + 32, 48) },
+        {
+          paddingTop: Math.max(topInset + 12, 30),
+          paddingBottom: Math.max(insets.bottom + 32, 48),
+        },
       ]}
     >
       <View style={styles.header}>

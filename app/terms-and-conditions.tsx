@@ -72,6 +72,7 @@ const TERMS_SECTIONS = [
 export default function TermsAndConditionsScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
+  const topInset = Math.max(insets.top, 0);
 
   const closeSheet = useCallback(() => {
     if (process.env.EXPO_OS === 'ios') {
@@ -90,6 +91,7 @@ export default function TermsAndConditionsScreen() {
         contentContainerStyle={[
           styles.content,
           {
+            paddingTop: Math.max(topInset + 64, 84),
             paddingBottom: Math.max(insets.bottom, 0) + 132,
           },
         ]}
@@ -142,7 +144,7 @@ export default function TermsAndConditionsScreen() {
           'rgba(28,28,30,0)',
         ]}
         locations={[0, 0.46, 0.72, 1]}
-        style={styles.topFade}
+        style={[styles.topFade, { height: topInset + TOP_FADE_HEIGHT }]}
       />
 
       <LinearGradient
@@ -159,7 +161,13 @@ export default function TermsAndConditionsScreen() {
 
       <View
         pointerEvents="box-none"
-        style={styles.header}
+        style={[
+          styles.header,
+          {
+            minHeight: topInset + 86,
+            paddingTop: Math.max(topInset + 8, 32),
+          },
+        ]}
       >
         <Text numberOfLines={1} maxFontSizeMultiplier={1.05} style={styles.title}>
           Terms and Conditions
@@ -171,6 +179,7 @@ export default function TermsAndConditionsScreen() {
           onPress={closeSheet}
           style={({ pressed }) => [
             styles.closeButton,
+            { top: Math.max(topInset + 6, 20) },
             pressed ? styles.closeButtonPressed : null,
           ]}
         >

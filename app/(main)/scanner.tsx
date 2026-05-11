@@ -138,11 +138,24 @@ export default function ScannerScreen() {
             typeof result.amountFiat === 'number' && Number.isFinite(result.amountFiat)
               ? formatDecimalForInput(result.amountFiat, 2)
               : '';
+          const amountUsdcParam =
+            typeof result.amountUsdc === 'number' && Number.isFinite(result.amountUsdc)
+              ? formatDecimalForInput(result.amountUsdc, 6)
+              : '';
+          const arsRateParam =
+            typeof result.rateArsPerUsdc === 'number' && Number.isFinite(result.rateArsPerUsdc)
+              ? formatDecimalForInput(result.rateArsPerUsdc, 2)
+              : '';
 
           router.push({
-            pathname: '/qr-rail-select',
+            pathname: '/qr-payment-confirm',
             params: {
+              method: 'mercadopago',
+              currency: 'ARS',
+              rail: 'p2p',
               amount: amountParam,
+              amountUsdc: amountUsdcParam,
+              arsRate: arsRateParam,
               paymentAddress: result.paymentAddress,
               rawQr: trimmed,
             },

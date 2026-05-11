@@ -44,6 +44,7 @@ const manifest2Extra = asRecord(constantsWithLegacyManifests.manifest2?.extra);
 const manifest2ExpoClientExtra = asRecord(asRecord(manifest2Extra.expoClient).extra);
 
 let configuredWebsiteId = "";
+let nativeSupportChatUnavailable = false;
 
 function resolveWebsiteId(): string {
   return pickFirstNonEmpty(
@@ -55,12 +56,38 @@ function resolveWebsiteId(): string {
   );
 }
 
+function handleNativeSupportChatError(action: string, error: unknown) {
+  nativeSupportChatUnavailable = true;
+  configuredWebsiteId = "";
+  console.warn(`[SupportChat] Native Crisp ${action} unavailable`, error);
+}
+
+function callNativeSupportChat(action: string, callback: () => void): boolean {
+  if (nativeSupportChatUnavailable) return false;
+
+  try {
+    callback();
+    return true;
+  } catch (error) {
+    handleNativeSupportChatError(action, error);
+    return false;
+  }
+}
+
 function ensureConfigured(): string {
+  if (nativeSupportChatUnavailable) return "";
+
   const websiteId = resolveWebsiteId();
   if (!websiteId) return "";
 
   if (configuredWebsiteId !== websiteId) {
-    configure(websiteId);
+    if (process.env.EXPO_OS !== "android") {
+      const didConfigure = callNativeSupportChat("configure", () => {
+        configure(websiteId);
+      });
+      if (!didConfigure) return "";
+    }
+
     configuredWebsiteId = websiteId;
   }
 
@@ -84,38 +111,41 @@ export function openSupportChat(identity?: SupportChatIdentity): boolean {
 
   const email = normalizeConfigValue(identity?.email);
   if (email) {
-    setUserEmail(email);
+    if (!callNativeSupportChat("set user email", () => setUserEmail(email))) {
+      return false;
+    }
   }
 
   const nickname = normalizeConfigValue(identity?.nickname);
   if (nickname) {
-    setUserNickname(nickname);
+    if (!callNativeSupportChat("set user nickname", () => setUserNickname(nickname))) {
+      return false;
+    }
   }
 
   const phone = normalizeConfigValue(identity?.phone);
   if (phone) {
-    setUserPhone(phone);
+    if (!callNativeSupportChat("set user phone", () => setUserPhone(phone))) {
+      return false;
+    }
   }
 
   const tokenId = normalizeConfigValue(identity?.tokenId);
-  setTokenId(tokenId || null);
-
-  try {
-    show();
-    return true;
-  } catch (error) {
-    console.error("[SupportChat] Failed to open native Crisp chat", error);
+  if (!callNativeSupportChat("set token id", () => setTokenId(tokenId || null))) {
     return false;
   }
+
+  return callNativeSupportChat("show chat", show);
 }
 
 export function clearSupportChatSession(): boolean {
   const websiteId = ensureConfigured();
   if (!websiteId) return false;
 
-  setTokenId(null);
-  resetSession();
-  return true;
+  return (
+    callNativeSupportChat("clear token id", () => setTokenId(null)) &&
+    callNativeSupportChat("reset session", resetSession)
+  );
 }
 
 export function isSupportChatConfigured(): boolean {

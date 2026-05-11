@@ -6,6 +6,7 @@ import { useCallback, useMemo, useState } from 'react';
 import { useEmbeddedSolanaWallet, usePrivy } from '@privy-io/expo';
 import * as Haptics from 'expo-haptics';
 import Svg, { Path, Rect } from 'react-native-svg';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { authenticateAppLock, getAppLockAvailability } from '@/services/appLock';
 import {
@@ -104,6 +105,7 @@ function ChevronIcon() {
 
 export default function SecurityScreen() {
   const router = useRouter();
+  const insets = useSafeAreaInsets();
   const { user } = usePrivy();
   const [faceIdEnabled, setFaceIdEnabled] = useState(false);
   const [isFaceIdLoading, setIsFaceIdLoading] = useState(true);
@@ -121,6 +123,8 @@ export default function SecurityScreen() {
       }),
     [wallet?.publicKey]
   );
+  const contentTopPadding =
+    process.env.EXPO_OS === 'android' ? Math.max(insets.top + 64, 92) : 14;
 
   useFocusEffect(
     useCallback(() => {
@@ -271,7 +275,7 @@ export default function SecurityScreen() {
         <ScrollView
           contentInsetAdjustmentBehavior="automatic"
           style={styles.container}
-          contentContainerStyle={styles.content}
+          contentContainerStyle={[styles.content, { paddingTop: contentTopPadding }]}
           showsVerticalScrollIndicator={false}
         >
           <View style={styles.securityCard}>

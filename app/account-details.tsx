@@ -164,6 +164,7 @@ function ReadOnlyRow({
 export default function AccountDetailsScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
+  const topInset = Math.max(insets.top, 0);
   const toast = useToast();
   const { user } = usePrivy();
   const profileUser = user as AccountDetailsUser | null;
@@ -234,7 +235,10 @@ export default function AccountDetailsScreen() {
         style={styles.scrollView}
         contentContainerStyle={[
           styles.content,
-          { paddingBottom: Math.max(insets.bottom + 42, 72) },
+          {
+            paddingTop: Math.max(topInset + 20, 44),
+            paddingBottom: Math.max(insets.bottom + 42, 72),
+          },
         ]}
         showsVerticalScrollIndicator={false}
       >
@@ -308,7 +312,11 @@ export default function AccountDetailsScreen() {
         </Text>
       </ScrollView>
 
-      <View collapsable={false} pointerEvents="box-none" style={styles.headerOverlay}>
+      <View
+        collapsable={false}
+        pointerEvents="box-none"
+        style={[styles.headerOverlay, { height: topInset + 112 }]}
+      >
         <LinearGradient
           pointerEvents="none"
           colors={[
@@ -318,7 +326,7 @@ export default function AccountDetailsScreen() {
             'rgba(28,28,30,0)',
           ]}
           locations={[0, 0.46, 0.72, 1]}
-          style={styles.topFade}
+          style={[styles.topFade, { height: topInset + TOP_FADE_HEIGHT }]}
         />
 
         <Pressable
@@ -329,6 +337,7 @@ export default function AccountDetailsScreen() {
           onPress={handleBack}
           style={({ pressed }) => [
             styles.backButton,
+            { top: topInset + 12 },
             pressed ? styles.backButtonPressed : null,
           ]}
         >

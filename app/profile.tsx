@@ -27,6 +27,7 @@ import {
   type AlternateAppIcons,
 } from 'expo-alternate-app-icons';
 import { useToast } from 'react-native-pretty-toast';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useActiveSolanaWallet } from '@/hooks/useActiveSolanaWallet';
 import { GeneratedProfileAvatar } from '@/components/profile/GeneratedProfileAvatar';
 import { ProfileMenuRow } from '@/components/profile/ProfileMenuRow';
@@ -218,8 +219,11 @@ function getIdentityVerificationBadgeLabel(status: IdentityVerificationStatus) {
 export default function ProfileScreen() {
   const router = useRouter();
   const toast = useToast();
+  const insets = useSafeAreaInsets();
   const { height } = useWindowDimensions();
   const isCompactHeight = height < 760;
+  const contentTopPadding =
+    process.env.EXPO_OS === 'android' ? Math.max(insets.top + 48, 68) : 10;
 
   const { user, logout, isReady } = usePrivy();
   const activeSolanaWallet = useActiveSolanaWallet();
@@ -624,7 +628,10 @@ export default function ProfileScreen() {
         <ScrollView
           contentInsetAdjustmentBehavior="automatic"
           style={styles.container}
-          contentContainerStyle={styles.containerContent}
+          contentContainerStyle={[
+            styles.containerContent,
+            { paddingTop: contentTopPadding },
+          ]}
           showsVerticalScrollIndicator={false}
         >
           <View

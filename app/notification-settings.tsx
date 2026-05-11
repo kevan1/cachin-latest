@@ -15,6 +15,7 @@ import * as Notifications from 'expo-notifications';
 import { useCallback, useMemo, useState } from 'react';
 import { PrivyUser } from '@privy-io/public-api';
 import { usePrivy } from '@privy-io/expo';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { useActiveSolanaWallet } from '@/hooks/useActiveSolanaWallet';
 import {
@@ -93,6 +94,7 @@ function hasFirestoreNotificationsEnabled(userRecords: (UserData | null)[]) {
 }
 
 export default function NotificationSettingsScreen() {
+  const insets = useSafeAreaInsets();
   const { user } = usePrivy();
   const activeSolanaWallet = useActiveSolanaWallet();
   const [pushNotificationsEnabled, setPushNotificationsEnabled] = useState(false);
@@ -118,6 +120,8 @@ export default function NotificationSettingsScreen() {
       linkedSolanaAddresses,
     ]
   );
+  const contentTopPadding =
+    process.env.EXPO_OS === 'android' ? Math.max(insets.top + 64, 92) : 14;
 
   const refreshNotificationState = useCallback(async () => {
     if (Platform.OS !== 'ios') {
@@ -230,7 +234,7 @@ export default function NotificationSettingsScreen() {
         <ScrollView
           contentInsetAdjustmentBehavior="automatic"
           style={styles.container}
-          contentContainerStyle={styles.content}
+          contentContainerStyle={[styles.content, { paddingTop: contentTopPadding }]}
           showsVerticalScrollIndicator={false}
         >
           <View style={styles.settingCard}>
