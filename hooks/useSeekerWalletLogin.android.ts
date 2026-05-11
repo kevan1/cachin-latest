@@ -3,9 +3,14 @@ import { PublicKey } from "@solana/web3.js";
 import { useMobileWallet } from "@wallet-ui/react-native-web3js";
 import { Buffer } from "buffer";
 import { useCallback } from "react";
+import nacl from "tweetnacl";
 
 import { getUserFromFirestore } from "@/services/firestoreService";
 import { setNativeSolanaWalletSession } from "@/utils/nativeSolanaWallet";
+import {
+  getPasskeyRelyingPartyId,
+  getPasskeyRelyingPartyOrigin,
+} from "@/utils/runtimeConfig";
 
 export type SeekerWalletLoginResult = {
   address: string;
@@ -15,8 +20,8 @@ export type SeekerWalletLoginResult = {
 
 const SEEKER_WALLET_CLIENT_TYPE = "seeker-wallet";
 const SEEKER_WALLET_CONNECTOR_TYPE = "mobile-wallet-adapter";
-const SIWS_DOMAIN = "cachin.app";
-const SIWS_URI = "https://cachin.app";
+const DEFAULT_SIWS_DOMAIN = "cachin.app";
+const DEFAULT_SIWS_URI = "https://cachin.app";
 const SOLANA_SIGNATURE_LENGTH_BYTES = 64;
 const PRIVY_SIWS_RESOURCE = "https://privy.io";
 const VERBOSE_SEEKER_SIWS_LOGS =
@@ -42,6 +47,70 @@ type ParsedSignedMessagePayload = {
   source: "payload-plus-signature" | "signature-only";
   payloadLength: number;
 };
+
+type SiwsOrigin = {
+  domain: string;
+  uri: string;
+};
+
+function pickFirstNonEmpty(...values: unknown[]): string | null {
+  for (const value of values) {
+    if (typeof value !== "string") continue;
+    const normalized = value.trim().replace(/^['"]|['"]$/g, "");
+    if (normalized.length > 0) {
+      return normalized;
+    }
+  }
+
+  return null;
+}
+
+function normalizeAuthority(value: string): string | null {
+  try {
+    return new URL(value).host || null;
+  } catch {
+    try {
+      return new URL(`https://${value}`).host || null;
+    } catch {
+      return null;
+    }
+  }
+}
+
+function normalizeUri(value: string): string | null {
+  try {
+    return new URL(value).origin;
+  } catch {
+    try {
+      return new URL(`https://${value}`).origin;
+    } catch {
+      return null;
+    }
+  }
+}
+
+function getSeekerSiwsOrigin(): SiwsOrigin {
+  const explicitDomain = pickFirstNonEmpty(
+    process.env.EXPO_PUBLIC_SEEKER_SIWS_DOMAIN
+  );
+  const explicitUri = pickFirstNonEmpty(process.env.EXPO_PUBLIC_SEEKER_SIWS_URI);
+  const passkeyDomain = getPasskeyRelyingPartyId();
+  const passkeyOrigin = getPasskeyRelyingPartyOrigin();
+
+  const domain =
+    (explicitDomain ? normalizeAuthority(explicitDomain) : null) ??
+    (explicitUri ? normalizeAuthority(explicitUri) : null) ??
+    passkeyDomain ??
+    DEFAULT_SIWS_DOMAIN;
+  const uri =
+    (explicitUri ? normalizeUri(explicitUri) : null) ??
+    (explicitDomain ? normalizeUri(explicitDomain) : null) ??
+    passkeyOrigin ??
+    `https://${domain}` ??
+    DEFAULT_SIWS_URI;
+
+  return { domain, uri };
+}
 
 function hasRegisteredUsername(username?: string | null): boolean {
   const normalized = username?.trim();
@@ -225,6 +294,22 @@ function getMessageDiagnostics(message: string) {
   };
 }
 
+function verifySignedMessageLocally(
+  message: string,
+  signature: Uint8Array,
+  address: string
+): boolean {
+  try {
+    return nacl.sign.detached.verify(
+      Buffer.from(message, "utf8"),
+      signature,
+      new PublicKey(address).toBytes()
+    );
+  } catch {
+    return false;
+  }
+}
+
 function getMessageComparison(expected: string, actual: string) {
   if (expected === actual) {
     return { matches: true };
@@ -306,16 +391,18 @@ export function useSeekerWalletLogin(): () => Promise<SeekerWalletLoginResult> {
     try {
       const account = await connect();
       const address = getAccountAddress(account);
+      const siwsOrigin = getSeekerSiwsOrigin();
       logSeekerSiws("wallet-connected", {
         address,
         accountKeys:
           account && typeof account === "object" ? Object.keys(account) : [],
       });
+      logSeekerSiws("origin", siwsOrigin);
       const { message } = await generateMessage({
         wallet: { address },
         from: {
-          domain: SIWS_DOMAIN,
-          uri: SIWS_URI,
+          domain: siwsOrigin.domain,
+          uri: siwsOrigin.uri,
         },
       });
       logSeekerSiws("privy-message-generated", getMessageDiagnostics(message));
@@ -332,6 +419,11 @@ export function useSeekerWalletLogin(): () => Promise<SeekerWalletLoginResult> {
       const signedMessage = parsedSignedPayload.signedMessage ?? message;
       const signature = Buffer.from(normalizedSignature.bytes).toString(
         "base64"
+      );
+      const localSignatureVerified = verifySignedMessageLocally(
+        message,
+        normalizedSignature.bytes,
+        address
       );
       logSeekerSiws("wallet-signed", {
         signingMethod: "mwa-sign-messages",
@@ -350,12 +442,16 @@ export function useSeekerWalletLogin(): () => Promise<SeekerWalletLoginResult> {
         signatureBase64Length: signature.length,
         signatureLooksValidLength:
           normalizedSignature.bytes.length === SOLANA_SIGNATURE_LENGTH_BYTES,
+        localSignatureVerified,
       });
       logSeekerSiwsVerbose("wallet-signed-message", { signedMessage });
 
       logSeekerSiws("privy-login-submit", {
         messageHash: getSafeHash(message),
         signatureBase64Length: signature.length,
+        domain: siwsOrigin.domain,
+        uri: siwsOrigin.uri,
+        localSignatureVerified,
       });
       const user = await login({
         message,
