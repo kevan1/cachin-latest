@@ -3,7 +3,6 @@ import { type SignInPayload } from "@solana-mobile/mobile-wallet-adapter-protoco
 import { PublicKey } from "@solana/web3.js";
 import { useMobileWallet } from "@wallet-ui/react-native-web3js";
 import { Buffer } from "buffer";
-import bs58 from "bs58";
 import { useCallback } from "react";
 
 import { getUserFromFirestore } from "@/services/firestoreService";
@@ -21,13 +20,6 @@ const SIWS_DOMAIN = "cachin.app";
 const SIWS_URI = "https://cachin.app";
 const SOLANA_SIGNATURE_LENGTH_BYTES = 64;
 const PRIVY_SIWS_RESOURCE = "https://privy.io";
-
-type Bs58Like = {
-  encode?: (bytes: Uint8Array) => string;
-  default?: {
-    encode?: (bytes: Uint8Array) => string;
-  };
-};
 
 type MwaAccountLike = {
   address?: unknown;
@@ -98,15 +90,6 @@ function getAccountAddress(account: unknown): string {
   }
 
   return address;
-}
-
-function getBs58Encode(): (bytes: Uint8Array) => string {
-  const codec = bs58 as Bs58Like;
-  const encode = codec.encode ?? codec.default?.encode;
-  if (typeof encode !== "function") {
-    throw new Error("Base58 encoder is unavailable.");
-  }
-  return encode;
 }
 
 function normalizeSignatureBytes(signature: Uint8Array): Uint8Array {
@@ -184,9 +167,9 @@ export function useSeekerWalletLogin(): () => Promise<SeekerWalletLoginResult> {
       const signInResult = await signIn(
         getPrivySiwsSignInPayload(message, address)
       );
-      const signature = getBs58Encode()(
+      const signature = Buffer.from(
         normalizeSignatureBytes(signInResult.signature)
-      );
+      ).toString("base64");
       const user = await login({
         message,
         signature,
