@@ -20,11 +20,20 @@ const SIWS_DOMAIN = "cachin.app";
 const SIWS_URI = "https://cachin.app";
 const SOLANA_SIGNATURE_LENGTH_BYTES = 64;
 const PRIVY_SIWS_RESOURCE = "https://privy.io";
+const VERBOSE_SEEKER_SIWS_LOGS =
+  process.env.EXPO_PUBLIC_SEEKER_SIWS_DEBUG_VERBOSE === "true";
 
 type MwaAccountLike = {
   address?: unknown;
   addressBase64?: unknown;
   publicKey?: unknown;
+};
+
+type NormalizedSignature = {
+  bytes: Uint8Array;
+  inputLength: number;
+  source: "raw-bytes" | "base64-text" | "unknown";
+  textLength: number | null;
 };
 
 function hasRegisteredUsername(username?: string | null): boolean {
@@ -39,6 +48,27 @@ function decodeBase64Url(value: string): Uint8Array {
     "="
   );
   return Buffer.from(padded, "base64");
+}
+
+function getSafeHash(value: string): string {
+  let hash = 5381;
+  for (let index = 0; index < value.length; index += 1) {
+    hash = (hash * 33) ^ value.charCodeAt(index);
+  }
+  return (hash >>> 0).toString(16).padStart(8, "0");
+}
+
+function decodeSignedMessage(message: Uint8Array): string {
+  const text = Buffer.from(message).toString("utf8");
+  if (text.includes(" wants you to sign in with your Solana account:")) {
+    return text;
+  }
+
+  try {
+    return Buffer.from(decodeBase64Url(text)).toString("utf8");
+  } catch {
+    return text;
+  }
 }
 
 function maybeAddressToBase58(value: unknown): string | null {
@@ -92,18 +122,33 @@ function getAccountAddress(account: unknown): string {
   return address;
 }
 
-function normalizeSignatureBytes(signature: Uint8Array): Uint8Array {
+function normalizeSignature(signature: Uint8Array): NormalizedSignature {
   if (signature.length === SOLANA_SIGNATURE_LENGTH_BYTES) {
-    return signature;
+    return {
+      bytes: signature,
+      inputLength: signature.length,
+      source: "raw-bytes",
+      textLength: null,
+    };
   }
 
   const signatureText = Buffer.from(signature).toString("utf8");
   const decoded = decodeBase64Url(signatureText);
   if (decoded.length === SOLANA_SIGNATURE_LENGTH_BYTES) {
-    return decoded;
+    return {
+      bytes: decoded,
+      inputLength: signature.length,
+      source: "base64-text",
+      textLength: signatureText.length,
+    };
   }
 
-  return signature;
+  return {
+    bytes: signature,
+    inputLength: signature.length,
+    source: "unknown",
+    textLength: signatureText.length,
+  };
 }
 
 function getMessageField(message: string, label: string): string {
@@ -112,6 +157,11 @@ function getMessageField(message: string, label: string): string {
     throw new Error(`Seeker Wallet login message is missing ${label}.`);
   }
   return match[1];
+}
+
+function getOptionalMessageField(message: string, label: string): string | null {
+  const match = message.match(new RegExp(`^${label}: (.+)$`, "m"));
+  return match?.[1] ?? null;
 }
 
 function getPrivySiwsSignInPayload(
@@ -128,6 +178,75 @@ function getPrivySiwsSignInPayload(
     nonce: getMessageField(message, "Nonce"),
     issuedAt: getMessageField(message, "Issued At"),
     resources: [PRIVY_SIWS_RESOURCE],
+  };
+}
+
+function getMessageDiagnostics(message: string) {
+  const nonce = getOptionalMessageField(message, "Nonce");
+  return {
+    hash: getSafeHash(message),
+    length: message.length,
+    domain: message.split(" wants you to sign in")[0] || null,
+    version: getOptionalMessageField(message, "Version"),
+    chainId: getOptionalMessageField(message, "Chain ID"),
+    nonceLength: nonce?.length ?? null,
+    issuedAt: getOptionalMessageField(message, "Issued At"),
+    hasPrivyResource: message.includes(`- ${PRIVY_SIWS_RESOURCE}`),
+  };
+}
+
+function getMessageComparison(expected: string, actual: string) {
+  if (expected === actual) {
+    return { matches: true };
+  }
+
+  const maxLength = Math.max(expected.length, actual.length);
+  let firstDiffIndex = 0;
+  while (
+    firstDiffIndex < maxLength &&
+    expected[firstDiffIndex] === actual[firstDiffIndex]
+  ) {
+    firstDiffIndex += 1;
+  }
+
+  return {
+    matches: false,
+    firstDiffIndex,
+    expectedLength: expected.length,
+    actualLength: actual.length,
+    expectedCharCode:
+      firstDiffIndex < expected.length ? expected.charCodeAt(firstDiffIndex) : null,
+    actualCharCode:
+      firstDiffIndex < actual.length ? actual.charCodeAt(firstDiffIndex) : null,
+  };
+}
+
+function logSeekerSiws(step: string, data: Record<string, unknown>) {
+  console.log(`[SeekerWallet][SIWS] ${step}`, data);
+}
+
+function logSeekerSiwsVerbose(step: string, data: Record<string, unknown>) {
+  if (!VERBOSE_SEEKER_SIWS_LOGS) return;
+  console.log(`[SeekerWallet][SIWS][verbose] ${step}`, data);
+}
+
+function describeLoginError(error: unknown): Record<string, unknown> {
+  if (!(error instanceof Error)) {
+    return { value: String(error) };
+  }
+
+  return {
+    name: error.name,
+    message: error.message,
+    code: "code" in error ? error.code : undefined,
+    status: "status" in error ? error.status : undefined,
+    cause:
+      "cause" in error && error.cause instanceof Error
+        ? {
+            name: error.cause.name,
+            message: error.cause.message,
+          }
+        : undefined,
   };
 }
 
@@ -157,6 +276,11 @@ export function useSeekerWalletLogin(): () => Promise<SeekerWalletLoginResult> {
     try {
       const account = await connect();
       const address = getAccountAddress(account);
+      logSeekerSiws("wallet-connected", {
+        address,
+        accountKeys:
+          account && typeof account === "object" ? Object.keys(account) : [],
+      });
       const { message } = await generateMessage({
         wallet: { address },
         from: {
@@ -164,12 +288,39 @@ export function useSeekerWalletLogin(): () => Promise<SeekerWalletLoginResult> {
           uri: SIWS_URI,
         },
       });
-      const signInResult = await signIn(
-        getPrivySiwsSignInPayload(message, address)
+      const signInPayload = getPrivySiwsSignInPayload(message, address);
+      logSeekerSiws("privy-message-generated", getMessageDiagnostics(message));
+      logSeekerSiwsVerbose("privy-message", { message, signInPayload });
+
+      const signInResult = await signIn(signInPayload);
+      const signedMessage = decodeSignedMessage(signInResult.signedMessage);
+      const normalizedSignature = normalizeSignature(signInResult.signature);
+      const signedAccountAddress =
+        maybeAddressToBase58(signInResult.account.address) ??
+        maybeAddressToBase58(signInResult.account.addressBase64);
+      const signature = Buffer.from(normalizedSignature.bytes).toString(
+        "base64"
       );
-      const signature = Buffer.from(
-        normalizeSignatureBytes(signInResult.signature)
-      ).toString("base64");
+      logSeekerSiws("wallet-signed", {
+        resultAccountAddress: signedAccountAddress,
+        resultAccountMatchesPrivyAddress: signedAccountAddress === address,
+        signedMessageMatchesPrivyMessage: signedMessage === message,
+        signedMessageComparison: getMessageComparison(message, signedMessage),
+        signedMessageDiagnostics: getMessageDiagnostics(signedMessage),
+        signatureInputLength: normalizedSignature.inputLength,
+        signatureTextLength: normalizedSignature.textLength,
+        signatureSource: normalizedSignature.source,
+        signatureByteLength: normalizedSignature.bytes.length,
+        signatureBase64Length: signature.length,
+        signatureLooksValidLength:
+          normalizedSignature.bytes.length === SOLANA_SIGNATURE_LENGTH_BYTES,
+      });
+      logSeekerSiwsVerbose("wallet-signed-message", { signedMessage });
+
+      logSeekerSiws("privy-login-submit", {
+        messageHash: getSafeHash(message),
+        signatureBase64Length: signature.length,
+      });
       const user = await login({
         message,
         signature,
@@ -180,6 +331,10 @@ export function useSeekerWalletLogin(): () => Promise<SeekerWalletLoginResult> {
       });
 
       await setNativeSolanaWalletSession(user.id, address);
+      logSeekerSiws("privy-login-complete", {
+        userId: user.id,
+        address,
+      });
 
       const firestoreUser = await getUserFromFirestore(address);
       return {
@@ -188,6 +343,7 @@ export function useSeekerWalletLogin(): () => Promise<SeekerWalletLoginResult> {
         hasUsername: hasRegisteredUsername(firestoreUser?.username),
       };
     } catch (error) {
+      logSeekerSiws("login-error", describeLoginError(error));
       throw formatSeekerWalletLoginError(error);
     }
   }, [connect, generateMessage, login, signIn]);
