@@ -1,5 +1,4 @@
 import { useLoginWithSiws } from "@privy-io/expo";
-import { type SignInPayload } from "@solana-mobile/mobile-wallet-adapter-protocol";
 import { PublicKey } from "@solana/web3.js";
 import { useMobileWallet } from "@wallet-ui/react-native-web3js";
 import { Buffer } from "buffer";
@@ -36,6 +35,14 @@ type NormalizedSignature = {
   textLength: number | null;
 };
 
+type ParsedSignedMessagePayload = {
+  signature: Uint8Array;
+  signedMessage: string | null;
+  signedMessageByteLength: number | null;
+  source: "payload-plus-signature" | "signature-only";
+  payloadLength: number;
+};
+
 function hasRegisteredUsername(username?: string | null): boolean {
   const normalized = username?.trim();
   return Boolean(normalized && !normalized.toLowerCase().startsWith("user-"));
@@ -69,6 +76,14 @@ function decodeSignedMessage(message: Uint8Array): string {
   } catch {
     return text;
   }
+}
+
+function bytesEqual(left: Uint8Array, right: Uint8Array): boolean {
+  if (left.length !== right.length) return false;
+  for (let index = 0; index < left.length; index += 1) {
+    if (left[index] !== right[index]) return false;
+  }
+  return true;
 }
 
 function maybeAddressToBase58(value: unknown): string | null {
@@ -151,34 +166,49 @@ function normalizeSignature(signature: Uint8Array): NormalizedSignature {
   };
 }
 
-function getMessageField(message: string, label: string): string {
-  const match = message.match(new RegExp(`^${label}: (.+)$`, "m"));
-  if (!match?.[1]) {
-    throw new Error(`Seeker Wallet login message is missing ${label}.`);
+function parseSignedMessagePayload(
+  signedPayload: Uint8Array,
+  expectedMessage: string
+): ParsedSignedMessagePayload {
+  if (signedPayload.length === SOLANA_SIGNATURE_LENGTH_BYTES) {
+    return {
+      signature: signedPayload,
+      signedMessage: null,
+      signedMessageByteLength: null,
+      source: "signature-only",
+      payloadLength: signedPayload.length,
+    };
   }
-  return match[1];
+  if (signedPayload.length < SOLANA_SIGNATURE_LENGTH_BYTES) {
+    throw new Error(
+      `Seeker Wallet returned an invalid signed message payload (${signedPayload.length} bytes).`
+    );
+  }
+
+  const expectedMessageBytes = Buffer.from(expectedMessage, "utf8");
+  const signature = signedPayload.slice(
+    signedPayload.length - SOLANA_SIGNATURE_LENGTH_BYTES
+  );
+  const signedMessageBytes = signedPayload.slice(
+    0,
+    signedPayload.length - SOLANA_SIGNATURE_LENGTH_BYTES
+  );
+  const signedMessage = bytesEqual(signedMessageBytes, expectedMessageBytes)
+    ? expectedMessage
+    : decodeSignedMessage(signedMessageBytes);
+
+  return {
+    signature,
+    signedMessage,
+    signedMessageByteLength: signedMessageBytes.length,
+    source: "payload-plus-signature",
+    payloadLength: signedPayload.length,
+  };
 }
 
 function getOptionalMessageField(message: string, label: string): string | null {
   const match = message.match(new RegExp(`^${label}: (.+)$`, "m"));
   return match?.[1] ?? null;
-}
-
-function getPrivySiwsSignInPayload(
-  message: string,
-  address: string
-): SignInPayload {
-  return {
-    domain: SIWS_DOMAIN,
-    address,
-    statement: `You are proving you own ${address}.`,
-    uri: SIWS_URI,
-    version: getMessageField(message, "Version"),
-    chainId: getMessageField(message, "Chain ID"),
-    nonce: getMessageField(message, "Nonce"),
-    issuedAt: getMessageField(message, "Issued At"),
-    resources: [PRIVY_SIWS_RESOURCE],
-  };
 }
 
 function getMessageDiagnostics(message: string) {
@@ -269,7 +299,7 @@ function formatSeekerWalletLoginError(error: unknown): Error {
 }
 
 export function useSeekerWalletLogin(): () => Promise<SeekerWalletLoginResult> {
-  const { connect, signIn } = useMobileWallet();
+  const { connect, signMessages } = useMobileWallet();
   const { generateMessage, login } = useLoginWithSiws();
 
   return useCallback(async () => {
@@ -288,22 +318,28 @@ export function useSeekerWalletLogin(): () => Promise<SeekerWalletLoginResult> {
           uri: SIWS_URI,
         },
       });
-      const signInPayload = getPrivySiwsSignInPayload(message, address);
       logSeekerSiws("privy-message-generated", getMessageDiagnostics(message));
-      logSeekerSiwsVerbose("privy-message", { message, signInPayload });
+      logSeekerSiwsVerbose("privy-message", { message });
 
-      const signInResult = await signIn(signInPayload);
-      const signedMessage = decodeSignedMessage(signInResult.signedMessage);
-      const normalizedSignature = normalizeSignature(signInResult.signature);
-      const signedAccountAddress =
-        maybeAddressToBase58(signInResult.account.address) ??
-        maybeAddressToBase58(signInResult.account.addressBase64);
+      const signedPayload = await signMessages(Buffer.from(message, "utf8"));
+      const parsedSignedPayload = parseSignedMessagePayload(
+        signedPayload,
+        message
+      );
+      const normalizedSignature = normalizeSignature(
+        parsedSignedPayload.signature
+      );
+      const signedMessage = parsedSignedPayload.signedMessage ?? message;
       const signature = Buffer.from(normalizedSignature.bytes).toString(
         "base64"
       );
       logSeekerSiws("wallet-signed", {
-        resultAccountAddress: signedAccountAddress,
-        resultAccountMatchesPrivyAddress: signedAccountAddress === address,
+        signingMethod: "mwa-sign-messages",
+        resultAccountAddress: address,
+        resultAccountMatchesPrivyAddress: true,
+        signedPayloadLength: parsedSignedPayload.payloadLength,
+        signedPayloadSource: parsedSignedPayload.source,
+        signedMessageByteLength: parsedSignedPayload.signedMessageByteLength,
         signedMessageMatchesPrivyMessage: signedMessage === message,
         signedMessageComparison: getMessageComparison(message, signedMessage),
         signedMessageDiagnostics: getMessageDiagnostics(signedMessage),
@@ -346,5 +382,5 @@ export function useSeekerWalletLogin(): () => Promise<SeekerWalletLoginResult> {
       logSeekerSiws("login-error", describeLoginError(error));
       throw formatSeekerWalletLoginError(error);
     }
-  }, [connect, generateMessage, login, signIn]);
+  }, [connect, generateMessage, login, signMessages]);
 }
