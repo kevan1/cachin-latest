@@ -199,6 +199,7 @@ export default function Index() {
         nativeWalletLabel={
           seekerWalletLoading ? "Opening wallet..." : "Continue with Seeker Wallet"
         }
+        showPasskeyActions={!showSeekerWalletLogin}
         disabled={loading || seekerWalletLoading}
         nativeWalletDisabled={loading || seekerWalletLoading}
       />

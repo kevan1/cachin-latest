@@ -17,6 +17,7 @@ type SocialFooterProps = {
   onNativeWalletLogin?: () => void;
   loginLabel?: string;
   nativeWalletLabel?: string;
+  showPasskeyActions?: boolean;
   disabled?: boolean;
   nativeWalletDisabled?: boolean;
 };
@@ -28,6 +29,7 @@ export function SocialFooter({
   onNativeWalletLogin,
   loginLabel = "Login",
   nativeWalletLabel = "Continue with Seeker Wallet",
+  showPasskeyActions = true,
   disabled = false,
   nativeWalletDisabled = false,
 }: SocialFooterProps) {
@@ -65,40 +67,42 @@ export function SocialFooter({
           </Text>
         </Pressable>
       ) : null}
-      <Animated.View style={styles.passkeyRow}>
-        <Pressable
-          accessibilityRole="button"
-          disabled={disabled}
-          style={({ pressed }) => [
-            styles.button,
-            isCompactLayout ? styles.buttonCompact : null,
-            styles.primaryButton,
-            disabled && styles.disabledButton,
-            pressed && !disabled && styles.pressedButton,
-          ]}
-          onPress={onRegister}
-        >
-          <Text style={[styles.buttonText, styles.primaryButtonText]}>
-            Register
-          </Text>
-        </Pressable>
-        <Pressable
-          accessibilityRole="button"
-          disabled={disabled}
-          style={({ pressed }) => [
-            styles.button,
-            isCompactLayout ? styles.buttonCompact : null,
-            styles.secondaryButton,
-            disabled && styles.disabledButton,
-            pressed && !disabled && styles.pressedButton,
-          ]}
-          onPress={onLogin}
-        >
-          <Text style={[styles.buttonText, styles.secondaryButtonText]}>
-            {loginLabel}
-          </Text>
-        </Pressable>
-      </Animated.View>
+      {showPasskeyActions ? (
+        <Animated.View style={styles.passkeyRow}>
+          <Pressable
+            accessibilityRole="button"
+            disabled={disabled}
+            style={({ pressed }) => [
+              styles.button,
+              isCompactLayout ? styles.buttonCompact : null,
+              styles.primaryButton,
+              disabled && styles.disabledButton,
+              pressed && !disabled && styles.pressedButton,
+            ]}
+            onPress={onRegister}
+          >
+            <Text style={[styles.buttonText, styles.primaryButtonText]}>
+              Register
+            </Text>
+          </Pressable>
+          <Pressable
+            accessibilityRole="button"
+            disabled={disabled}
+            style={({ pressed }) => [
+              styles.button,
+              isCompactLayout ? styles.buttonCompact : null,
+              styles.secondaryButton,
+              disabled && styles.disabledButton,
+              pressed && !disabled && styles.pressedButton,
+            ]}
+            onPress={onLogin}
+          >
+            <Text style={[styles.buttonText, styles.secondaryButtonText]}>
+              {loginLabel}
+            </Text>
+          </Pressable>
+        </Animated.View>
+      ) : null}
     </Animated.View>
   );
 }

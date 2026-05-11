@@ -66,6 +66,7 @@ type WabiTimerExperimentProps = {
   onNativeWalletLogin?: () => void;
   loginLabel?: string;
   nativeWalletLabel?: string;
+  showPasskeyActions?: boolean;
   disabled?: boolean;
   nativeWalletDisabled?: boolean;
 };
@@ -76,6 +77,7 @@ export default function WabiTimerExperiment({
   onNativeWalletLogin,
   loginLabel,
   nativeWalletLabel,
+  showPasskeyActions,
   disabled,
   nativeWalletDisabled,
 }: WabiTimerExperimentProps) {
@@ -484,6 +486,7 @@ export default function WabiTimerExperiment({
         onNativeWalletLogin={onNativeWalletLogin}
         loginLabel={loginLabel}
         nativeWalletLabel={nativeWalletLabel}
+        showPasskeyActions={showPasskeyActions}
         disabled={disabled}
         nativeWalletDisabled={nativeWalletDisabled}
       />
