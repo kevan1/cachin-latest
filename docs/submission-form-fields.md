@@ -78,7 +78,7 @@ TestFlight build with the live LATAM QR payment flow: https://testflight.apple.c
 
 ```
 iOS (TestFlight): https://testflight.apple.com/join/atKvfkTp
-Android (APK): __APK_URL__   ← reemplazar con el link del EAS build cuando termine
+Android (APK): https://github.com/kevan1/cachin-latest/releases/download/v0.1.0-frontier/cachin-frontier-android.apk
 Walkthrough video (Loom, unlisted): __LOOM_URL__   ← reemplazar
 ```
 
