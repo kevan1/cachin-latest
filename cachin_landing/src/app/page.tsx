@@ -15,15 +15,15 @@ const trustItems = [
   "Argentina MVP",
   "QR-native LATAM behavior",
   "Rate shown before pay",
-  "Merchant upgrade layer",
+  "Direct QR plus coverage rails",
 ];
 
 const steps = [
   {
     number: "01",
     label: "Scan",
-    title: "Open camera. Point at a supported local QR.",
-    body: "Cachin fits the payment habit people already use across LATAM. You scan the QR, read the merchant, and review the total before anything moves.",
+    title: "Open camera. Point at the QR on the counter.",
+    body: "Cachin fits the payment habit people already use across LATAM. It can route through direct Cachin merchant QR where available, or supported provider rails for normal local QRs.",
     visual: "scan",
   },
   {
@@ -83,7 +83,7 @@ const cardFeatures = [
 const countries = [
   {
     name: "Argentina",
-    rail: "MODO-style / MP QR",
+    rail: "Cachin QR + MP/MODO path",
     badge: "MVP",
     tone: "live",
     flag: "ar",
@@ -153,7 +153,7 @@ const useCases = [
   {
     initials: "MS",
     title: "Merchants",
-    body: "Optional Cachin merchant flows can add faster confirmation, discounts, and lower-friction settlement.",
+    body: "Direct Cachin QR gives onboarded shops faster confirmation, discounts, and lower-friction settlement while provider rails expand user coverage.",
   },
 ];
 
@@ -181,7 +181,7 @@ const faqs = [
   {
     question: "Where can I use it today?",
     answer:
-      "The MVP focus is Argentina, with broader LATAM coverage handled as provider and partner rails are proven. Public claims should stay tied to verified proof in each country.",
+      "The MVP focus is Argentina. Cachin supports a direct QR path with onboarded merchants and expands normal local QR coverage as provider and partner rails are proven. Public claims should stay tied to verified proof in each country.",
   },
   {
     question: "What happens if something fails?",
@@ -302,6 +302,8 @@ export default function Home() {
             <p className="hero-copy">
               Fund Cachin with stablecoins, scan supported local QRs, confirm
               the FX before paying, and move through checkout like a local.
+              Direct Cachin QR works with onboarded merchants; provider rails
+              expand coverage for normal local QRs.
             </p>
             <div className="hero-actions">
               <a className="button button-primary" href={betaHref}>
@@ -314,7 +316,7 @@ export default function Home() {
             <div className="hero-mini" aria-label="Product promises">
               <span>Fund globally</span>
               <span>Pay locally</span>
-              <span>No hidden FX</span>
+              <span>FX shown before you pay</span>
             </div>
           </div>
         </section>
@@ -392,7 +394,7 @@ export default function Home() {
                 <div className="flow-arrow" aria-hidden="true">
                   <span>Rate preview</span>
                   <i />
-                  <span>No hidden margin</span>
+                  <span>Rate &amp; fees shown before you pay</span>
                 </div>
 
                 <article className="bridge-node">
@@ -406,7 +408,8 @@ export default function Home() {
                   </div>
                   <ul>
                     <li>Supported local QR flows</li>
-                    <li>Optional merchant upgrade rails</li>
+                    <li>Direct Cachin merchant QR where available</li>
+                    <li>Provider-routed coverage where supported</li>
                     <li>Receipt in two currencies</li>
                   </ul>
                 </article>
@@ -535,8 +538,9 @@ export default function Home() {
               <h2>Built from LATAM for the world.</h2>
               <p>
                 The product starts with an Argentina MVP and expands only where
-                rails, providers, and compliance are proven. Coverage copy stays
-                precise instead of pretending every country is already live.
+                direct merchant QR, provider rails, and compliance are proven.
+                Coverage copy stays precise instead of pretending every country
+                or merchant is already live.
               </p>
             </div>
             <div className="coverage-grid">

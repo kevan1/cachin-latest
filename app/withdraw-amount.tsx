@@ -14,6 +14,7 @@ import { useState, useEffect } from 'react';
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 import { useActiveSolanaWallet } from '@/hooks/useActiveSolanaWallet';
 import { fetchSolanaUsdcBalance } from '@/utils/balanceService';
+import { fetchArsPrice } from '@/utils/priceService';
 import { Colors } from '@/constants/theme';
 import { GlassView } from '@/components/ui/GlassView';
 import { normalizeDecimalInput } from '@/utils/tokenAmount';
@@ -48,7 +49,27 @@ export default function WithdrawAmountScreen() {
   const [balance, setBalance] = useState<string>('0.00');
   const [isLoadingBalance, setIsLoadingBalance] = useState(true);
   const [isUsdInput, setIsUsdInput] = useState(prefilledCurrency !== 'ARS'); // true = USD input, false = ARS input
-  const arsRate = 1500; // 1 USD = 1500 ARS
+  // Live USDC <-> ARS rate fetched from the same source used by the QR parser.
+  // While null, ARS conversion is unavailable and the UI should reflect that
+  // rather than display a stale or fake number.
+  const [arsRate, setArsRate] = useState<number | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetchArsPrice()
+      .then((price) => {
+        if (cancelled) return;
+        if (Number.isFinite(price) && price > 0) {
+          setArsRate(price);
+        }
+      })
+      .catch(() => {
+        // Leave arsRate as null. UI consumers should handle the null state.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   // Fetch user balance
   useEffect(() => {
@@ -102,6 +123,9 @@ export default function WithdrawAmountScreen() {
   };
 
   const handleSwap = () => {
+    // Refuse to swap if the live FX rate is not loaded; the user should
+    // never see a converted amount based on a fake or zero rate.
+    if (arsRate === null) return;
     if (amount && parseFloat(amount) > 0) {
       if (isUsdInput) {
         setAmount(formatDecimalForInput(parseFloat(amount) * arsRate, 2));
@@ -113,6 +137,7 @@ export default function WithdrawAmountScreen() {
   };
 
   const calculateEquivalent = () => {
+    if (arsRate === null) return 'Loading FX…';
     const numAmount = parseFloat(amount) || 0;
     if (isUsdInput) {
       return formatFiatValue(numAmount * arsRate, {
@@ -129,12 +154,14 @@ export default function WithdrawAmountScreen() {
 
   const hasAmount = amount && parseFloat(amount) > 0;
   const numAmount = parseFloat(amount) || 0;
-  // Simple check against balance (assuming balance is USD)
-  const isBalanceSufficient = isUsdInput 
+  // Simple check against balance (assuming balance is USD).
+  // When ARS input is active and the live FX rate has not loaded yet,
+  // disable Continue rather than letting the user proceed with a wrong rate.
+  const isBalanceSufficient = isUsdInput
     ? numAmount <= parseFloat(balance)
-    : (numAmount / arsRate) <= parseFloat(balance);
-  
-  const canContinue = hasAmount && isBalanceSufficient;
+    : arsRate !== null && (numAmount / arsRate) <= parseFloat(balance);
+
+  const canContinue = hasAmount && isBalanceSufficient && (isUsdInput || arsRate !== null);
 
   return (
     <TouchableWithoutFeedback onPress={Keyboard.dismiss}>

@@ -1,7 +1,7 @@
 # Cachin Origin Timeline Proof
 
-Status: founder-provided, proof pending
-Last updated: 2026-05-06
+Status: founder timeline documented; "built from LATAM for the world" positioning is the public claim. Competitor commentary stays internal until legal-grade proof exists.
+Last updated: 2026-05-12
 
 Use this file to support the founder-origin story without making public accusations.
 

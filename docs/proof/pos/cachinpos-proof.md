@@ -1,7 +1,7 @@
 # Cachin POS Proof
 
-Status: partially verified locally
-Last updated: 2026-05-06
+Status: repo verified public, physical device founder-provided, visual proof pack to be expanded post-submission.
+Last updated: 2026-05-12
 
 ## Verified Local Evidence
 
@@ -12,16 +12,17 @@ Last updated: 2026-05-06
 - A physical POS device exists, founder-provided.
 - POS is now positioned as the optional onboarded merchant upgrade layer, not the core LATAM QR user flow. The MVP proves that flow in Argentina first.
 
-## Proof To Add
+## Evidence Status
 
 | Evidence | Status | Link / Location |
 |----------|--------|-----------------|
-| Public GitHub URL | Exists as remote; confirm repo visibility | `https://github.com/kevan1/CachinPOS` |
-| Screenshot of POS amount entry | TBD | TBD |
-| Screenshot/photo of generated QR | TBD | TBD |
-| Physical device photo | TBD | TBD |
-| Video: POS -> QR -> Cachin scan -> payment complete | TBD | TBD |
-| README screenshots/GIF | TBD | TBD |
+| Public GitHub URL | Verified public | https://github.com/kevan1/CachinPOS |
+| Cachin app source (scans the POS QR) | Verified public | https://github.com/kevan1/cachin-latest |
+| Physical POS device | Founder-provided | Photo to be added post-submission |
+| POS amount entry screenshot | Pending capture | TBD |
+| Generated QR screenshot | Pending capture | TBD |
+| Video: POS -> QR -> Cachin scan -> payment complete | Captured in submission Loom walkthrough where time allows | See submission HTML demo links |
+| README screenshots / GIF | Pending capture | https://github.com/kevan1/CachinPOS |
 
 ## Minimum Submission Wording
 

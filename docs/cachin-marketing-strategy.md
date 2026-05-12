@@ -12,6 +12,11 @@ Then make the product behavior impossible to misunderstand:
 
 > Scan, pay, done.
 
+Keep this two-layer promise clear:
+
+- **Direct Cachin QR** is the reliability layer: onboarded merchants, controlled receipt, merchant-side confirmation, discounts, and faster settlement.
+- **Normal local QR via providers** is the coverage layer: Cachin can expand without needing every merchant to install or maintain a Cachin QR first.
+
 Supporting origin line:
 
 > Built from LATAM for the world.
@@ -24,11 +29,11 @@ Pay like a local in LATAM.
 
 ### Medium
 
-Cachin lets tourists, foreigners, digital nomads, freelancers, and Seeker users fund once and pay supported local QR codes across LATAM like locals. The first MVP/proof wedge is Argentina: scan Mercado Pago, MODO, or onboarded Cachin merchant QRs from one funded app.
+Cachin lets tourists, foreigners, digital nomads, freelancers, and Seeker users fund once and pay supported local QR codes across LATAM like locals. The first MVP/proof wedge is Argentina: direct Cachin merchant QRs where shops are onboarded, plus Mercado Pago/MODO-style QR coverage through supported provider rails.
 
 ### Full
 
-Cachin turns foreign funds and crypto income into local payment ability. Users fund the app through crypto, card, SWIFT, or IBAN, then scan supported local QRs across LATAM. In the Argentina MVP, the merchant can receive as if the user paid through a normal local financial app. If the merchant is onboarded into Cachin, they also get lower fees, instant settlement, discounts, POS tools, and direct confirmation.
+Cachin turns foreign funds and crypto income into local payment ability. Users fund the app through crypto, card, SWIFT, or IBAN, then scan supported local QRs across LATAM. In the Argentina MVP, direct Cachin QR gives onboarded merchants a controlled end-to-end flow with receipt, confirmation, and optional discounts. Normal local QR support expands coverage through provider/payment partners so the product does not depend on every merchant adopting Cachin first.
 
 Public copy can be bold. Hackathon and investor copy must be proof-aware: use `docs/proof/` to separate what is live, what is demoable, and what is an active conversation or roadmap.
 
@@ -109,12 +114,12 @@ Message:
 ## Messaging Pillars
 
 1. **Travel utility**: Pay like a local without a local bank account.
-2. **LATAM QR wedge, Argentina MVP**: Scan supported local QRs across LATAM, starting with Mercado Pago or MODO-style flows in Argentina, with KYC handled through Sumsub where required.
+2. **LATAM QR wedge, Argentina MVP**: Scan supported local QRs across LATAM, starting with direct Cachin merchant QR plus Mercado Pago/MODO-style provider coverage in Argentina, with KYC handled through Sumsub where required.
 3. **Better FX**: Argentina example, founder-provided: card dollar around 1365 vs crypto dollar around 1470. Use as a dated example and refresh before publishing.
-4. **LATAM reach**: Manteca is the preferred provider path and public material supports QR/API payments and regional availability; prove exact 15-country and $500/month claims before publishing.
+4. **LATAM reach**: provider rails are the coverage path and public material supports QR/API payments and regional availability; prove exact country and pricing claims before publishing.
 5. **Crypto abstraction**: Users should not need to know they are using crypto rails.
 6. **Trust and support**: show pre-payment confirmation, receipt, merchant confirmation where available, and Crisp 1:1 support.
-7. **Merchant upgrade layer**: onboarded merchants can offer discounts, lower fees, instant settlement, POS tools, and direct confirmation.
+7. **Merchant reliability layer**: onboarded merchants can offer discounts, lower fees, instant settlement, POS tools, and direct confirmation.
 8. **Privacy direction**: private rails can protect users from exposing wallets during daily purchases.
 9. **Separate card product line**: the self-custodial cold-wallet/Visa card is a separate high-margin white-label product; Cachin can be the first wallet implementation.
 
@@ -150,7 +155,7 @@ Headline:
 
 Subheadline:
 
-> Fund Cachin with card, SWIFT, IBAN, or crypto. Scan supported local QRs across LATAM, starting with Mercado Pago or MODO-style flows in Argentina, review the FX before paying, and skip cash, card, and exchange-rate friction.
+> Fund Cachin with card, SWIFT, IBAN, or crypto. Scan supported local QRs across LATAM, starting in Argentina with direct Cachin merchant QR and Mercado Pago/MODO-style provider coverage. Review the FX before paying and skip cash, card, and exchange-rate friction.
 
 CTA:
 
@@ -173,11 +178,12 @@ Cachin merchant onboarding helps local shops accept travelers and crypto-paid cu
 Use this order:
 
 1. "LATAM pays by QR. Foreigners cannot easily use those rails."
-2. "Cachin lets them fund globally and scan supported local QRs across LATAM, with the MVP proving it in Argentina through Mercado Pago/MODO-style flows."
-3. "The merchant does not need to change behavior for the basic flow."
-4. "If the merchant onboards, they unlock lower fees, instant settlement, discounts, POS tools, and direct confirmation."
-5. "Cachin is built from LATAM for the world and can expand across LATAM rails."
-6. "Here is the proof: app supported local QR demo, payment confirmation, support flow, merchant/onboarded POS demo if available."
+2. "Cachin lets them fund globally and scan supported local QRs across LATAM."
+3. "The Argentina MVP proves two routes: direct Cachin merchant QR where shops are onboarded, and provider-routed normal QR coverage where supported."
+4. "That means the product can show a fully controlled merchant experience without making expansion depend on every merchant adopting a Cachin QR."
+5. "If the merchant onboards, they unlock lower fees, instant settlement, discounts, POS tools, and direct confirmation."
+6. "Cachin is built from LATAM for the world and can expand across LATAM rails."
+7. "Here is the proof: app supported local QR demo, payment confirmation, support flow, merchant/onboarded POS demo if available."
 
 ## CacaoCash Response
 
@@ -197,6 +203,8 @@ Do not publicly accuse them of copying unless you have dated, legal-grade eviden
 Use these public phrases now:
 
 - "piloting with local merchants"
+- "direct Cachin QR with onboarded merchants"
+- "provider-routed coverage for supported normal local QRs"
 - "scan supported local QRs across LATAM, starting with Argentina MVP proof"
 - "KYC through Sumsub for supported local QR flow"
 - "direct transfer flow for onboarded merchants, subject to limits/compliance"

@@ -1,7 +1,7 @@
 # Cachin Card / Cold-Wallet Card Proof
 
-Status: founder-provided prototype context
-Last updated: 2026-05-06
+Status: separate product line; not required for the Frontier submission. Documented here for completeness.
+Last updated: 2026-05-12
 
 ## Current Context
 
@@ -12,16 +12,19 @@ Last updated: 2026-05-06
 - The strategic idea is a 2-in-1 self-custodial cold-wallet and daily-spend Visa card product. This is interesting, but it is not required for the core Cachin LATAM QR payment wedge.
 - Visa BIN is a possible side-track / expansion path, not a current claim unless confirmed.
 
-## Proof To Add
+## Evidence Status
+
+The card is **out of scope for the Frontier core demo**; Cachin's submission stands on the LATAM QR payment flow. Card evidence is collected here for completeness, as moat / defensibility proof, and for the separate card-product submission with the partner.
 
 | Evidence | Status | Link / Location |
 |----------|--------|-----------------|
-| Card repo link | TBD | TBD |
-| Card photo | TBD | TBD |
-| Short technical note: secure element, EAL6+, signing model | TBD | TBD |
-| Video: card used at Cachin POS | TBD | TBD |
-| App/activity confirmation after card payment | TBD | TBD |
-| Visa BIN plan memo | TBD | TBD |
+| Public APDU interface specification | Published in this repo | [`cachin_card/cachin-card-apdu-spec.md`](../../../cachin_card/cachin-card-apdu-spec.md) |
+| JavaCard applet source (Cachin cold-wallet applet) | Published in this repo | [`cachin_card/CachinWalletApplet.java`](../../../cachin_card/CachinWalletApplet.java) |
+| Physical card | Founder-held EAL6+ white card with no branding | Pending public photo capture |
+| Secure-element model | NXP SE; Ed25519 on-chip key generation, key never leaves the card | See APDU spec, Section 2 (Security Model) |
+| Video: card used end-to-end | Out of scope for Frontier window; planned for the separate card submission | TBD |
+| App/activity confirmation after card payment | Will be available via Cachin app activity once the card flow is wired into the mobile build | TBD |
+| Visa BIN plan memo | Internal; not a public claim for Frontier | Internal |
 
 ## Safe Submission Wording
 

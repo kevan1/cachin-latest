@@ -1,7 +1,7 @@
 # Fiserv / Clover Proof
 
-Status: active conversation, not partnership
-Last updated: 2026-05-06
+Status: active conversation, not partnership. Sanitized email / meeting evidence available to judges under NDA.
+Last updated: 2026-05-12
 
 ## Current Context
 

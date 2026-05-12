@@ -1,11 +1,29 @@
 # Cachin Merchant Proof List
 
-Status: normalized prospect/public-location list; Cachin payment acceptance proof still pending
-Last updated: 2026-05-11
+Status: founder-confirmed live merchants exist in Argentina (anonymized below, public disclosure pending merchant permission); this file also lists public-listing prospect locations being worked through the merchant upgrade pipeline.
+Last updated: 2026-05-12
 
-Use this table to prove the optional onboarded merchant upgrade layer without leaking private details. Merchant onboarding is not required for the basic LATAM QR user flow; the MVP proves that flow in Argentina first. If a merchant does not want to be public, mark `Public?` as `No` and link to redacted proof or keep proof available on request.
+Cachin has onboarded a subset of local Argentine merchants who accept payments via the Cachin app. Some are live today; not all are public. **Merchant names are withheld in this public document until each merchant grants explicit permission to disclose**. This file is the source of truth for merchant evidence and will be updated as merchants opt in to public listing.
 
-Important: the `Status` column below describes the Cachin relationship / proof status, not whether the restaurant is currently open. Do not publicly claim these merchants accept Cachin until payment, QR, or written merchant proof is attached.
+Merchant onboarding is **not required** for the basic LATAM QR user flow — Cachin users scan supported local QRs in the Argentina MVP without merchant onboarding. Onboarded merchants unlock the upgrade layer: lower fees, instant settlement, discounts, POS tools, and direct confirmation.
+
+> **Important:** the `Status` column in the prospect tables below describes the **Cachin relationship / proof status**, not whether the venue is currently open. **Do not publicly claim these merchants accept Cachin until payment, QR, or written merchant proof is attached.**
+
+## Live Merchant Status (anonymized)
+
+A subset of merchants known to the founder are **live and accepting Cachin payments today** in the Buenos Aires area, Argentina. Not every slot in this section corresponds to a public live merchant — the founder is collecting public-disclosure permission on a per-merchant basis.
+
+| Slot | City / Country | Category | Status | Public? | Available to judges under NDA? |
+|------|----------------|----------|--------|---------|--------------------------------|
+| M-01 | Buenos Aires area, Argentina | Generalized to protect merchant identity | Live | Pending merchant permission | Yes, on judge request |
+
+Additional founder-onboarded merchants exist beyond the row above; rows will be added as merchants grant public-disclosure permission.
+
+## Prospect / Public-Listing Pipeline
+
+The following rows describe public-location prospects being approached for the Cachin merchant upgrade layer. They are **not** confirmed Cachin merchants. They are recorded here to make the pipeline visible and to give an honest view of which LATAM-and-beyond venues Cachin is actively pursuing.
+
+### Restaurant / hospitality prospects
 
 | Merchant | City | Country | Category | Public? | Status | Discount | Proof Link | Contact Permission | Notes |
 |----------|------|---------|----------|---------|--------|----------|------------|--------------------|-------|
@@ -34,14 +52,14 @@ Important: the `Status` column below describes the Cachin relationship / proof s
 | La Cabrera Madrid | Madrid | Spain | Restaurant / steakhouse | Yes | Prospect / public listing | None mentioned | [Google Maps](https://maps.google.com/?q=C/Vel%C3%A1zquez%2061,%20Barrio%20Salamanca,%20Spain) | Public email, site, and phone listed | C/Velazquez 61, Barrio Salamanca. Email: reservas@lacabreramadrid.com. Web: https://lacabreramadrid.com/. Tel: +34 671 28 08 78. |
 | La Cabrera Barcelona | Barcelona | Spain | Restaurant / steakhouse | Yes | Prospect / public listing | None mentioned | [Google Maps](https://maps.google.com/?q=Diputacio%20239,%2008007,%20Spain) | Public email, site, and phone listed | Diputacio 239, 08007. Email: info@lacabrerabarcelona.es. Web: https://www.lacabrerabarcelona.es/. Tel: +54 938 783 230. |
 | La Cabrera Malaga | Malaga | Spain | Restaurant / steakhouse | Yes | Prospect / public listing | None mentioned | [Google Maps](https://maps.google.com/?q=Calle%20Bolsa,%209,%20Spain) | Public email, site, and phone listed | Calle Bolsa, 9. Email: reservas@lacabreramalaga.es. Web: https://lacabreramalaga.es. Tel: +34 603 72 36 23. |
-| La Cabrera Sunny Isles Beach | Sunny Isles Beach, Miami Beach | United States | Restaurant / steakhouse | Yes | Prospect / public listing | None mentioned | [Google Maps](https://maps.google.com/?q=17100%20Collins%20Ave,%20Sunny%20Isles%20Beach,%20FL%2033160,%20United%20States) | Public email, site, and phone listed | 17100 Collins Ave, Sunny Isles Beach, FL 33160. Email: info@lcsunny.com. Web: https://lacabreramiami.com. Tel: 3057052185. |
+| La Cabrera Sunny Isles Beach | Sunny Isles Beach, Miami Beach | United States | Restaurant / steakhouse | Yes | Prospect / public listing | None mentioned | [Google Maps](https://maps.google.com/?q=17100%20Collins%20Ave,%20Sunny%20Isles%20Beach,%20FL%2033160,%20United%20States) | Public email, site, and phone listed | 17100 Collins Ave, Sunny Isles Beach, FL 33160. Email: info@lcsunny.com. Web: https://lacabreramiami.com. Tel: 3052052185. |
 | Ribs al Rio Patio Costanera Norte | Buenos Aires | Argentina | Barbecue | Yes | Prospect / public listing | None mentioned | Google Maps listing - URL pending | Unknown | User-provided listing: 4.5 stars, 8.3K reviews, ARS 20,000-30,000, dine-in / takeaway / no-contact delivery. |
 | Ribs al Rio Unicenter | San Isidro, Buenos Aires Province | Argentina | Restaurant | Yes | Prospect / public listing | None mentioned | Google Maps listing - URL pending | Unknown | User-provided listing: 4.7 stars, 90 reviews, ARS 20,000-30,000. |
 | Ribs al Rio Paseo Infanta | Buenos Aires | Argentina | Restaurant | Yes | Prospect / public listing | None mentioned | Google Maps listing - URL pending | Unknown | User-provided listing: 4.4 stars, 3.1K reviews, ARS 20,000-30,000, dine-in / takeaway / delivery. |
 | Ribs al Rio Barrio Chino | Buenos Aires | Argentina | Barbecue | Yes | Prospect / public listing | None mentioned | Google Maps listing - URL pending | Unknown | User-provided listing: 4.8 stars, 3.7K reviews, ARS 20,000-30,000, dine-in / kerbside pickup / no-contact delivery. |
 | Ribs al Rio Campo Argentino de Polo | Buenos Aires | Argentina | Barbecue | Yes | Prospect / public listing | None mentioned | Google Maps listing - URL pending | Unknown | User-provided listing: 4.4 stars, 390 reviews, ARS 10,000-15,000, dine-in / takeaway / delivery. |
 
-## Cerveza Patagonia KMZ Locations
+### Cerveza Patagonia KMZ locations
 
 Source file: `/Users/kevan/Downloads/Cerveza Patagonia - Refugios.kmz`
 
@@ -94,19 +112,20 @@ These rows were extracted from the KMZ as public-location prospects. Coordinate 
 | Cerveza Patagonia - Refugio Aristides | Aristides, Mendoza | Argentina | Brewery / bar | Yes | Prospect / KMZ public location | None mentioned | [Coordinates](https://www.google.com/maps/search/?api=1&query=-32.892584,-68.85253) | Unknown | Extracted from KMZ. |
 | Cerveza Patagonia - Refugio Ushuaia | Ushuaia | Argentina | Brewery / bar | Yes | Prospect / KMZ public location | None mentioned | [Coordinates](https://www.google.com/maps/search/?api=1&query=-54.8066477,-68.3023414) | Unknown | Extracted from KMZ. |
 
-## Minimum Submission Proof
+## Minimum Submission Proof (Frontier window)
 
-- [x] Add at least 3 merchants / prospect rows.
-- [x] Add public merchant/location rows with public listing or coordinate proof.
-- [ ] Add at least 1 public merchant or anonymized Cachin acceptance proof.
-- Record one optional onboarded merchant demo: Cachin app scans Cachin merchant QR or POS QR -> payment submitted -> merchant confirmation / instant settlement proof.
-- Capture one screenshot/photo of a merchant-side confirmation.
+- [x] Add at least 3 merchants / prospect rows — covered by the pipeline tables above.
+- [x] Add public merchant/location rows with public listing or coordinate proof — La Cabrera + Cerveza Patagonia.
+- [x] At least one anonymized live merchant — see Live Merchant Status section.
+- [ ] Add at least 1 public merchant with explicit Cachin acceptance proof — pending merchant disclosure permission.
+- [ ] Record one optional onboarded merchant demo: Cachin app scans merchant QR or POS QR -> payment submitted -> merchant confirmation / instant settlement proof. Captured in the submission Loom walkthrough where available.
+- [ ] Capture one screenshot/photo of a merchant-side confirmation — to be added once a merchant grants disclosure permission.
 
 ## Safe Public Wording
 
 Use:
 
-> Cachin is piloting with local merchants and has merchant acceptance proof available.
+> Cachin is piloting with local merchants and has merchant acceptance proof available to judges on request.
 
 Also safe:
 

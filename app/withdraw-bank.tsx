@@ -11,7 +11,7 @@ import {
   Alert,
 } from 'react-native';
 import { useRouter, useLocalSearchParams } from 'expo-router';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { usePrivy } from '@privy-io/expo';
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 import Svg, { Path, Circle } from 'react-native-svg';
@@ -21,6 +21,7 @@ import { GlassView } from '@/components/ui/GlassView';
 import { createP2PArsOrder } from '@/utils/p2pOrders';
 import { createMantecaQrPayment } from '@/utils/mantecaOrders';
 import { formatFiatValue } from '@/utils/numberFormat';
+import { fetchArsPrice } from '@/utils/priceService';
 
 function firstParam(value: string | string[] | undefined): string {
   if (Array.isArray(value)) return value[0] ?? '';
@@ -62,9 +63,31 @@ export default function WithdrawBankScreen() {
   const hasPaymentId = normalizedPaymentId.length > 0;
   const isPaymentIdValid = hasPaymentId && validateArgentinePaymentId(normalizedPaymentId);
   
-  const arsRate = 1500;
-  
+  // Live USDC <-> ARS rate. Null while loading; the UI shows a loading
+  // placeholder instead of converting with a stale or fake rate.
+  const [arsRate, setArsRate] = useState<number | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetchArsPrice()
+      .then((price) => {
+        if (cancelled) return;
+        if (Number.isFinite(price) && price > 0) {
+          setArsRate(price);
+        }
+      })
+      .catch(() => {
+        // Leave arsRate as null; UI shows a loading placeholder.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   const getDisplayAmounts = () => {
+    if (arsRate === null) {
+      return { ars: 'Loading FX…', usd: 'Loading FX…' };
+    }
     if (currencyParam === 'ARS') {
       const arsAmount = parseFloat(amountParam) || 0;
       const usdAmount = arsAmount / arsRate;

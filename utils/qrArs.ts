@@ -9,7 +9,12 @@ export interface ParsedArsQr {
   rateArsPerUsdc?: number;
 }
 
-const FALLBACK_SELL_PRICE = 1;
+// IMPORTANT: do NOT add a hardcoded fallback ARS/USDC rate here.
+// If the live FX feed is unavailable, the QR parser MUST refuse to parse
+// rather than silently using a wrong rate. Showing a stale or fake rate
+// to a user about to pay is a trust-breaking failure mode.
+// See: docs/proof/providers/rails-proof.md and the "No hidden FX" claim
+// on the Cachin landing page.
 
 export async function parseArgentineQr(raw: string): Promise<ParsedArsQr | null> {
   const qrData = raw.trim();
@@ -17,10 +22,12 @@ export async function parseArgentineQr(raw: string): Promise<ParsedArsQr | null>
 
   try {
     const liveSellPrice = await fetchArsPrice();
-    const sellPrice =
-      Number.isFinite(liveSellPrice) && liveSellPrice > 0
-        ? liveSellPrice
-        : FALLBACK_SELL_PRICE;
+    if (!Number.isFinite(liveSellPrice) || liveSellPrice <= 0) {
+      // Live FX unavailable. Refuse to parse so the UI can prompt the user
+      // to retry instead of presenting an incorrect rate.
+      return null;
+    }
+    const sellPrice = liveSellPrice;
 
     const result = await parseQR({
       qrData,
