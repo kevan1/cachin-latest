@@ -5,7 +5,7 @@
  *
  * Why this exists:
  * - zsh quoting around the PEM/private key and JSON body is easy to break.
- * - this script reads .env, builds the privy-authorization-signature, then prints
+ * - this script reads local env files, builds the privy-authorization-signature, then prints
  *   a curl with the correct headers and JSON body.
  *
  * Usage:
@@ -16,10 +16,38 @@
  * - exporting may fail if the wallet is user-owned and your auth key does not satisfy the owner/quorum.
  */
 
-require("dotenv").config();
-
 const canonicalize = require("canonicalize");
 const crypto = require("crypto");
+const fs = require("fs");
+const path = require("path");
+
+function loadEnvFile(filePath, options = {}) {
+  if (!fs.existsSync(filePath)) return;
+
+  const override = options.override === true;
+  const contents = fs.readFileSync(filePath, "utf8");
+  for (const line of contents.split(/\r?\n/)) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith("#")) continue;
+
+    const normalized = trimmed.startsWith("export ")
+      ? trimmed.slice("export ".length).trim()
+      : trimmed;
+    const separatorIndex = normalized.indexOf("=");
+    if (separatorIndex <= 0) continue;
+
+    const key = normalized.slice(0, separatorIndex).trim();
+    const rawValue = normalized.slice(separatorIndex + 1).trim();
+    if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(key)) continue;
+    if (!override && process.env[key] !== undefined) continue;
+
+    process.env[key] = rawValue.replace(/^(['"])(.*)\1$/, "$2");
+  }
+}
+
+const rootDir = path.resolve(__dirname, "..", "..");
+loadEnvFile(path.join(rootDir, ".env"));
+loadEnvFile(path.join(rootDir, ".env.local"), { override: true });
 
 function readArg(name) {
   const idx = process.argv.indexOf(name);

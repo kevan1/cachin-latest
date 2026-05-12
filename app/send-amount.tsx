@@ -21,7 +21,6 @@ import {
   getUserByUsername,
   type UserData,
 } from "@/services/firestoreService";
-import { useEmbeddedEthereumWallet } from "@privy-io/expo";
 import { ChainType, getChainToken } from "@/constants/chains";
 import { useActiveSolanaWallet } from "@/hooks/useActiveSolanaWallet";
 import { getSolanaRpcUrl } from "@/utils/solanaRpc";
@@ -42,10 +41,7 @@ import { IconSymbol } from "@/components/ui/icon-symbol";
 import { GlassView } from "@/components/ui/GlassView";
 import { fetchErc20EvmBalance } from "@/utils/evmBalanceService";
 import {
-  coerceAvalancheWalletSource,
-  loadAvalancheWalletSource,
   loadSatochipAvalancheAddress,
-  type AvalancheWalletSource,
 } from "@/utils/satochipStorage";
 
 const USDC_MINT_ADDRESS = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
@@ -112,52 +108,35 @@ export default function SendAmountScreen() {
   const [isUsdInput, setIsUsdInput] = useState(true);
   const [arsRate, setArsRate] = useState(DEFAULT_ARS_RATE);
   const [currency, setCurrency] = useState<Currency>("USD");
-  const [avalancheWalletSource, setAvalancheWalletSource] =
-    useState<AvalancheWalletSource>("privy");
   const [satochipAvalancheAddress, setSatochipAvalancheAddress] = useState<string | null>(null);
   const didInitInputModeRef = useRef(false);
 
   const { address: activeSolanaAddress } = useActiveSolanaWallet();
-  const { wallets: ethereumWallets } = useEmbeddedEthereumWallet();
-  const avalancheWallet = ethereumWallets?.[0];
-  const walletAddress = isAvalancheTransfer
-    ? avalancheWalletSource === "satochip"
-      ? satochipAvalancheAddress
-      : avalancheWallet?.address ?? null
-    : activeSolanaAddress;
+  const walletAddress = isAvalancheTransfer ? satochipAvalancheAddress : activeSolanaAddress;
 
   useFocusEffect(
     useCallback(() => {
       let isActive = true;
 
-      const loadAvalancheSource = async () => {
+      const loadSatochipAddress = async () => {
         if (!isAvalancheTransfer) return;
 
         try {
-          const [storedSource, storedAddress] = await Promise.all([
-            loadAvalancheWalletSource(),
-            loadSatochipAvalancheAddress(),
-          ]);
+          const storedAddress = await loadSatochipAvalancheAddress();
           if (!isActive) return;
 
-          const requestedSource = firstParam(params.walletSource);
-          setAvalancheWalletSource(
-            requestedSource
-              ? coerceAvalancheWalletSource(requestedSource)
-              : storedSource
-          );
           setSatochipAvalancheAddress(storedAddress);
         } catch (error) {
-          console.error("[SendAmount] Failed to load Avalanche wallet source", error);
+          console.error("[SendAmount] Failed to load Satochip address", error);
         }
       };
 
-      void loadAvalancheSource();
+      void loadSatochipAddress();
 
       return () => {
         isActive = false;
       };
-    }, [isAvalancheTransfer, params.walletSource])
+    }, [isAvalancheTransfer])
   );
 
   useFocusEffect(
@@ -423,9 +402,6 @@ export default function SendAmountScreen() {
   }, [amount, arsRate, isUsdInput]);
   const canPrefillMax =
     !isLoadingBalance && balanceUnits > 0n && Number.isFinite(balanceNumber) && balanceNumber > 0;
-  const avalancheWalletSourceLabel =
-    avalancheWalletSource === "satochip" ? "Satochip card" : "Privy embedded wallet";
-
   const recipientDisplay = recipientUsername
     ? `@${recipientUsername}`
     : recipientAddress
@@ -522,7 +498,6 @@ export default function SendAmountScreen() {
       amount,
       balance,
       chain: activeChain,
-      walletSource: avalancheWalletSource,
     });
     if (!isAmountValid) {
       Alert.alert("Invalid amount", "Please enter an amount greater than 0.");
@@ -544,9 +519,7 @@ export default function SendAmountScreen() {
     if (isAvalancheTransfer && !walletAddress) {
       Alert.alert(
         "Wallet missing",
-        avalancheWalletSource === "satochip"
-          ? "Connect your Satochip card first."
-          : "Your embedded Avalanche wallet is still being prepared."
+        "Connect your Satochip card first."
       );
       return;
     }
@@ -573,7 +546,6 @@ export default function SendAmountScreen() {
       pathname: "/send-confirm",
       params: {
         chain: activeChain,
-        walletSource: isAvalancheTransfer ? avalancheWalletSource : undefined,
         currency: assetSymbol,
         recipient: recipientName,
         address: recipientAddress,
@@ -651,14 +623,12 @@ export default function SendAmountScreen() {
             Wallet source
           </Text>
           <Text style={[styles.walletSourceTitle, { color: palette.primaryText }]} selectable>
-            {avalancheWalletSourceLabel}
+            Satochip card
           </Text>
           <Text style={[styles.walletSourceBody, { color: palette.secondaryText }]} selectable>
-            {avalancheWalletSource === "satochip"
-              ? satochipAvalancheAddress
-                ? `Sending from ${formatAddress(satochipAvalancheAddress)}.`
-                : "Connect your Satochip card before sending from Avalanche."
-              : "Using the embedded Privy Avalanche wallet for this transfer."}
+            {satochipAvalancheAddress
+              ? `Sending from ${formatAddress(satochipAvalancheAddress)}.`
+              : "Connect your Satochip card before sending from Avalanche."}
           </Text>
           <TouchableOpacity
             accessibilityRole="button"
@@ -668,7 +638,7 @@ export default function SendAmountScreen() {
             <Text
               style={[styles.walletSourceButtonText, { color: palette.actionSecondaryText }]}
             >
-              {avalancheWalletSource === "satochip" ? "Refresh Satochip" : "Connect Satochip"}
+              {satochipAvalancheAddress ? "Refresh Satochip" : "Connect Satochip"}
             </Text>
           </TouchableOpacity>
         </View>

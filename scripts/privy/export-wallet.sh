@@ -9,7 +9,7 @@ Requirements:
 - .env contains PRIVY_APP_ID, PRIVY_APP_SECRET
 - For key-quorum owned wallets: PRIVY_AUTHORIZATION_KEY (wallet-auth:...)
 - For user-owned wallets: PRIVY_USER_JWT or --user-jwt (Privy access token) to fetch a user signing key via /v1/wallets/authenticate
-- canonicalize + dotenv are installed (already in this repo)
+- canonicalize is installed (already in this repo)
 
 Usage:
   bash scripts/privy/export-wallet.sh --wallet-id <wallet_id>

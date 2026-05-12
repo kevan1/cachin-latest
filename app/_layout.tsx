@@ -32,7 +32,6 @@ import LottieView from "lottie-react-native";
 import Constants from "expo-constants";
 import { PrivyProvider, usePrivy } from "@privy-io/expo";
 import { PrivyElements } from "@privy-io/expo/ui";
-import { avalancheFuji } from "viem/chains";
 import {
   Inter_400Regular,
   Inter_500Medium,
@@ -437,6 +436,8 @@ function PostSplashTransition({ onDone }: { onDone: () => void }) {
 
 function AppNavigator() {
   const { user, isReady } = usePrivy();
+  const userId = user?.id ?? null;
+  const hasAuthUser = Boolean(user);
   const { isConnected, refresh } = useNetworkStatus();
   const segments = useSegments();
   const { mode } = useGlobalSearchParams<{ mode?: string | string[] }>();
@@ -504,8 +505,8 @@ function AppNavigator() {
     logBootTrace("navigator:state", {
       routeSegments,
       isReady,
-      hasUser: Boolean(user?.id),
-      hasAuthUser: Boolean(user),
+      hasUser: Boolean(userId),
+      hasAuthUser,
       appLockSubjectId,
       appLockPreferenceLoaded,
       appLockPreferenceUserId,
@@ -524,7 +525,8 @@ function AppNavigator() {
     isReady,
     routeSegments,
     shouldUseAppLock,
-    user?.id,
+    hasAuthUser,
+    userId,
   ]);
 
   const lockAppForAppLock = useCallback((reason = "unknown", errorMessage: string | null = null) => {
@@ -620,7 +622,7 @@ function AppNavigator() {
       return;
     }
 
-    if (!user || !appLockSubjectId) {
+    if (!hasAuthUser || !userId || !appLockSubjectId) {
       setAppLockPreferenceLoaded(true);
       setAppLockPreferenceUserId(null);
       setAppLockEnabled(false);
@@ -632,7 +634,7 @@ function AppNavigator() {
     }
 
     logBootTrace("app-lock:preference-load:start", {
-      userId: user.id,
+      userId,
       subjectId: appLockSubjectId,
     });
     setAppLockPreferenceLoaded(false);
@@ -643,7 +645,7 @@ function AppNavigator() {
 
     const loadPreference = async () => {
       try {
-        const enabled = await getAppLockEnabledPreference(user.id);
+        const enabled = await getAppLockEnabledPreference(userId);
         if (isCancelled) return;
 
         const hasRecentUnlock =
@@ -656,7 +658,7 @@ function AppNavigator() {
         logAppLock("preference:loaded", {
           enabled,
           hasRecentUnlock,
-          userId: user.id,
+          userId,
           subjectId: appLockSubjectId,
         });
 
@@ -678,7 +680,7 @@ function AppNavigator() {
       } finally {
         if (!isCancelled) {
           logBootTrace("app-lock:preference-load:end", {
-            userId: user.id,
+            userId,
             subjectId: appLockSubjectId,
           });
           setAppLockPreferenceLoaded(true);
@@ -691,7 +693,7 @@ function AppNavigator() {
     return () => {
       isCancelled = true;
     };
-  }, [appLockSubjectId, isReady, lockAppForAppLock, user?.id]);
+  }, [appLockSubjectId, hasAuthUser, isReady, lockAppForAppLock, userId]);
 
   useEffect(() => {
     return subscribeAppLockPreference((enabled, changedUserId) => {
@@ -847,16 +849,6 @@ function AppNavigator() {
           sheetGrabberVisible: true,
           sheetCornerRadius: 40,
           contentStyle: sheetContentStyle,
-        }}
-      />
-      <Stack.Screen
-        name="card-setup-onboarding"
-        options={{
-          headerShown: false,
-          presentation: "fullScreenModal",
-          animation: "slide_from_right",
-          gestureEnabled: true,
-          contentStyle: { backgroundColor: "#00050D" },
         }}
       />
       <Stack.Screen
@@ -1193,12 +1185,8 @@ export default function RootLayout() {
               <PrivyProvider
                 appId={privyAppId}
                 clientId={privyClientId}
-                supportedChains={[avalancheFuji]}
                 config={{
                   embedded: {
-                    ethereum: {
-                      createOnLogin: "off",
-                    },
                     solana: {
                       createOnLogin: "off",
                     },

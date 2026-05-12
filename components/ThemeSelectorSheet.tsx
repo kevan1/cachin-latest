@@ -4,7 +4,7 @@ import { View, Text, StyleSheet, TouchableOpacity, useColorScheme, useWindowDime
 import { BlurView } from 'expo-blur';
 import { IconSymbol } from '@/components/ui/icon-symbol';
 import { THEMES, MESH_POINTS } from '@/constants/themes';
-import { MeshGradientView } from "@wilmxre/react-native-mesh-gradient/src";
+import { MeshGradientView } from "@/components/ui/MeshGradientView";
 import Animated, { useSharedValue, useAnimatedStyle, withSpring, withTiming } from 'react-native-reanimated';
 import * as Haptics from 'expo-haptics';
 import { LinearGradient } from 'expo-linear-gradient';

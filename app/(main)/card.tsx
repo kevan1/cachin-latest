@@ -27,19 +27,17 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { GlassView } from "@/components/ui/GlassView";
 import { IconSymbol } from "@/components/ui/icon-symbol";
 import {
-  loadCardSetupCompleted,
-  saveCardSetupCompleted,
-} from "@/utils/cardSetupStorage";
+  getSatochipErrorMessage,
+  readSatochipCardStatus,
+} from "@/utils/satochip";
 import { formatStableValue } from "@/utils/numberFormat";
+import {
+  loadSatochipAvalancheAddress,
+  saveSatochipAvalancheAddress,
+} from "@/utils/satochipStorage";
 
 const REFRESH_DELAY_MS = 950;
 const DEFAULT_CARD_BALANCE = 126.78;
-
-type Benefit = {
-  icon: ComponentProps<typeof MaterialIcons>["name"];
-  title: string;
-  description: string;
-};
 
 type ActionPill = {
   icon: ComponentProps<typeof MaterialIcons>["name"];
@@ -58,27 +56,6 @@ type CardTransaction = {
   avatarBackground: string;
   avatarColor: string;
 };
-
-const BENEFITS: Benefit[] = [
-  {
-    icon: "security",
-    title: "Your keys, your funds",
-    description:
-      "Spend with USDC while staying self-custodial. Cachin never takes custody of your balance.",
-  },
-  {
-    icon: "swap-horiz",
-    title: "Top up directly from your wallet",
-    description:
-      "Move funds from savings to spending in seconds with no bank dependency.",
-  },
-  {
-    icon: "tune",
-    title: "Full control in-app",
-    description:
-      "Set limits, pause your card, and track every payment in real time.",
-  },
-];
 
 const RECENT_TRANSACTIONS: CardTransaction[] = [
   {
@@ -127,6 +104,8 @@ export default function CardScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [isCardConfigured, setIsCardConfigured] = useState(false);
   const [setupStateLoaded, setSetupStateLoaded] = useState(false);
+  const [isScanningCard, setIsScanningCard] = useState(false);
+  const [cardAddress, setCardAddress] = useState<string | null>(null);
   const [showSettingsSheet, setShowSettingsSheet] = useState(false);
   const [isFrozen, setIsFrozen] = useState(false);
   const [balance, setBalance] = useState(DEFAULT_CARD_BALANCE);
@@ -140,12 +119,13 @@ export default function CardScreen() {
     };
   }, []);
 
-  const syncCardSetupState = useCallback(async () => {
-    const completed = await loadCardSetupCompleted();
-    setIsCardConfigured(completed);
+  const syncSatochipCardState = useCallback(async () => {
+    const address = await loadSatochipAvalancheAddress();
+    setCardAddress(address);
+    setIsCardConfigured(Boolean(address));
     setSetupStateLoaded(true);
 
-    if (!completed) {
+    if (!address) {
       setShowSettingsSheet(false);
       setIsFrozen(false);
       setBalance(DEFAULT_CARD_BALANCE);
@@ -154,9 +134,9 @@ export default function CardScreen() {
 
   useFocusEffect(
     useCallback(() => {
-      void syncCardSetupState();
+      void syncSatochipCardState();
       return undefined;
-    }, [syncCardSetupState]),
+    }, [syncSatochipCardState]),
   );
 
   const balanceParts = useMemo(() => {
@@ -179,16 +159,46 @@ export default function CardScreen() {
     }, REFRESH_DELAY_MS);
   }, []);
 
-  const handleWaitlistPress = useCallback(() => {
-    Alert.alert(
-      "Waitlist",
-      "We'll notify you as soon as access to Cachin Card opens up.",
-    );
-  }, []);
+  const handleScanCard = useCallback(async () => {
+    if (isScanningCard) return;
 
-  const handleExistingCardPress = useCallback(() => {
-    router.push("/card-setup-onboarding");
-  }, [router]);
+    try {
+      void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+      setIsScanningCard(true);
+      const status = await readSatochipCardStatus();
+
+      if (status.setupDone && status.isSeeded) {
+        Alert.alert(
+          "Card detected",
+          "NFC scan completed. Connect the card with its PIN to activate it in Cachin.",
+          [
+            { text: "Later", style: "cancel" },
+            {
+              text: "Connect card",
+              onPress: () => router.push("/satochip-connect"),
+            },
+          ],
+        );
+        return;
+      }
+
+      Alert.alert(
+        "Card needs setup",
+        "NFC scan completed. Open Satochip setup to initialize this card.",
+        [
+          { text: "Cancel", style: "cancel" },
+          {
+            text: "Open setup",
+            onPress: () => router.push("/satochip-connect"),
+          },
+        ],
+      );
+    } catch (error) {
+      Alert.alert("Could not scan card", getSatochipErrorMessage(error));
+    } finally {
+      setIsScanningCard(false);
+    }
+  }, [isScanningCard, router]);
 
   const handleTopUp = useCallback(() => {
     setBalance((previous) => previous + 50);
@@ -233,7 +243,7 @@ export default function CardScreen() {
   const handleRemoveCard = useCallback(() => {
     Alert.alert(
       "Remove card",
-      "This will unlink the card and restart setup from the beginning.",
+      "This will unlink the connected Satochip card from this device.",
       [
         { text: "Cancel", style: "cancel" },
         {
@@ -241,7 +251,8 @@ export default function CardScreen() {
           style: "destructive",
           onPress: () => {
             void (async () => {
-              await saveCardSetupCompleted(false);
+              await saveSatochipAvalancheAddress(null);
+              setCardAddress(null);
               setIsCardConfigured(false);
               setShowSettingsSheet(false);
               setIsFrozen(false);
@@ -255,12 +266,8 @@ export default function CardScreen() {
 
   const handleChangePin = useCallback(() => {
     setShowSettingsSheet(false);
-    router.push("/card-setup-onboarding");
+    router.push("/satochip-connect");
   }, [router]);
-
-  const handleDisableBiometrics = useCallback(() => {
-    Alert.alert("Biometrics disabled", "You can re-enable this during card setup.");
-  }, []);
 
   const actionPills = useMemo<ActionPill[]>(
     () => [
@@ -496,49 +503,57 @@ export default function CardScreen() {
             </View>
           </>
         ) : (
-          <View style={styles.waitlistContent}>
+          <View style={styles.scanContent}>
             <LinearGradient
               colors={["#111315", "#1B1E22", "#0A0B0C"]}
               start={{ x: 0, y: 0 }}
               end={{ x: 1, y: 1 }}
-              style={styles.waitlistCardPreview}
+              style={styles.scanCardPreview}
             >
               <Image
                 source={require("@/assets/images/logomark.png")}
                 resizeMode="contain"
-                style={styles.waitlistCardLogo}
+                style={styles.scanCardLogo}
               />
-              <Text style={styles.waitlistCardText}>CACHIN CARD</Text>
+              <Text style={styles.scanCardText}>CACHIN CARD</Text>
             </LinearGradient>
 
-            <Text style={styles.title}>You&apos;re on the waitlist</Text>
+            <Text style={styles.title}>Scan your card</Text>
             <Text style={styles.subtitle}>
-              Get early access to a self-custody card experience powered by your
-              USDC. You spend from your wallet and keep full control of your funds.
+              Hold your Satochip card near the phone. Cachin will open the native
+              NFC scan prompt and use the Satochip implementation to read the card.
             </Text>
 
-            <View style={styles.benefitsList}>
-              {BENEFITS.map((benefit) => (
-                <View key={benefit.title} style={styles.benefitItem}>
-                  <View style={styles.benefitIconWrap}>
-                    <MaterialIcons name={benefit.icon} size={22} color="#F4F4F5" />
-                  </View>
-                  <View style={styles.benefitTextWrap}>
-                    <Text style={styles.benefitTitle}>{benefit.title}</Text>
-                    <Text style={styles.benefitDescription}>
-                      {benefit.description}
-                    </Text>
-                  </View>
-                </View>
-              ))}
+            <View style={styles.scanInfoCard}>
+              <View style={styles.scanIconWrap}>
+                <MaterialIcons name="nfc" size={24} color="#F4F4F5" />
+              </View>
+              <View style={styles.scanInfoTextWrap}>
+                <Text style={styles.scanInfoTitle}>Satochip NFC scan</Text>
+                <Text style={styles.scanInfoDescription}>
+                  The scan starts immediately after tapping the button.
+                </Text>
+              </View>
             </View>
 
             <View style={styles.buttonStack}>
-              <Pressable style={styles.primaryButton} onPress={handleWaitlistPress}>
-                <Text style={styles.primaryButtonText}>Join to the waitlist!</Text>
+              <Pressable
+                style={[
+                  styles.primaryButton,
+                  isScanningCard ? styles.primaryButtonDisabled : null,
+                ]}
+                onPress={handleScanCard}
+                disabled={isScanningCard}
+              >
+                <Text style={styles.primaryButtonText}>
+                  {isScanningCard ? "Scanning..." : "Scan card"}
+                </Text>
               </Pressable>
-              <Pressable style={styles.secondaryButton} onPress={handleExistingCardPress}>
-                <Text style={styles.secondaryButtonText}>I already have a card</Text>
+              <Pressable
+                style={styles.secondaryButton}
+                onPress={() => router.push("/satochip-connect")}
+              >
+                <Text style={styles.secondaryButtonText}>Connect with PIN</Text>
               </Pressable>
             </View>
           </View>
@@ -563,7 +578,9 @@ export default function CardScreen() {
 
             <View style={styles.cardDetailSummary}>
               <Text style={styles.cardDetailLabel}>Daily use card</Text>
-              <Text style={styles.cardDetailValue}>VISA Platinum •• 1292</Text>
+              <Text style={styles.cardDetailValue}>
+                {cardAddress ? `${cardAddress.slice(0, 6)}...${cardAddress.slice(-4)}` : "Satochip connected"}
+              </Text>
             </View>
 
             <Pressable style={styles.settingsRow} onPress={handleToggleFreeze}>
@@ -588,24 +605,12 @@ export default function CardScreen() {
 
             <Pressable style={styles.settingsRow} onPress={handleChangePin}>
               <View style={styles.settingsIconWrap}>
-                <MaterialIcons name="dialpad" size={18} color="#F4F7FC" />
+                <MaterialIcons name="nfc" size={18} color="#F4F7FC" />
               </View>
               <View style={styles.settingsTextWrap}>
-                <Text style={styles.settingsRowTitle}>Change PIN</Text>
+                <Text style={styles.settingsRowTitle}>Refresh Satochip</Text>
                 <Text style={styles.settingsRowSubtitle}>
-                  Restart flow to set a new card PIN
-                </Text>
-              </View>
-            </Pressable>
-
-            <Pressable style={styles.settingsRow} onPress={handleDisableBiometrics}>
-              <View style={styles.settingsIconWrap}>
-                <MaterialIcons name="fingerprint" size={18} color="#F4F7FC" />
-              </View>
-              <View style={styles.settingsTextWrap}>
-                <Text style={styles.settingsRowTitle}>Disable biometrics</Text>
-                <Text style={styles.settingsRowSubtitle}>
-                  Require PIN for transaction approvals
+                  Scan or reconnect the card with its PIN
                 </Text>
               </View>
             </Pressable>
@@ -617,7 +622,7 @@ export default function CardScreen() {
               <View style={styles.settingsTextWrap}>
                 <Text style={styles.settingsRowTitle}>Remove card</Text>
                 <Text style={styles.settingsRowSubtitle}>
-                  Restart onboarding from the beginning
+                  Clear the connected Satochip card
                 </Text>
               </View>
             </Pressable>
@@ -890,10 +895,10 @@ const styles = StyleSheet.create({
     fontVariant: ["tabular-nums"],
     fontFamily: appFont,
   },
-  waitlistContent: {
+  scanContent: {
     paddingTop: 24,
   },
-  waitlistCardPreview: {
+  scanCardPreview: {
     width: "100%",
     aspectRatio: 1.58,
     borderRadius: 18,
@@ -904,12 +909,12 @@ const styles = StyleSheet.create({
     gap: 10,
     marginBottom: 26,
   },
-  waitlistCardLogo: {
+  scanCardLogo: {
     width: 86,
     height: 86,
     tintColor: "#FFFFFF",
   },
-  waitlistCardText: {
+  scanCardText: {
     color: "#F5F5F5",
     fontSize: 14,
     fontWeight: "800",
@@ -929,38 +934,39 @@ const styles = StyleSheet.create({
     color: "#D1D5DB",
     fontFamily: appFont,
   },
-  benefitsList: {
+  scanInfoCard: {
     marginTop: 18,
-    gap: 12,
-  },
-  benefitItem: {
     flexDirection: "row",
-    gap: 10,
-    alignItems: "flex-start",
+    gap: 12,
+    alignItems: "center",
+    borderRadius: 18,
+    padding: 14,
+    backgroundColor: "rgba(255,255,255,0.07)",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.12)",
   },
-  benefitIconWrap: {
-    width: 34,
-    height: 34,
-    borderRadius: 17,
+  scanIconWrap: {
+    width: 42,
+    height: 42,
+    borderRadius: 21,
     alignItems: "center",
     justifyContent: "center",
     backgroundColor: "rgba(255,255,255,0.12)",
     borderWidth: 1,
     borderColor: "rgba(255,255,255,0.18)",
-    marginTop: 2,
   },
-  benefitTextWrap: {
+  scanInfoTextWrap: {
     flex: 1,
     gap: 2,
   },
-  benefitTitle: {
+  scanInfoTitle: {
     color: "#F5F5F5",
     fontSize: 16,
     lineHeight: 20,
     fontWeight: "700",
     fontFamily: appFont,
   },
-  benefitDescription: {
+  scanInfoDescription: {
     color: "#BFC5CD",
     fontSize: 13,
     lineHeight: 18,
@@ -977,6 +983,9 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     backgroundColor: "#F5F5F5",
+  },
+  primaryButtonDisabled: {
+    opacity: 0.62,
   },
   primaryButtonText: {
     color: "#171717",

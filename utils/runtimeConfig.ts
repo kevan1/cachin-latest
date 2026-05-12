@@ -159,7 +159,7 @@ export function getPasskeyRelyingPartyId(): string | null {
 
 export function getPrivyExportPageUrl(params?: {
   address?: string | null;
-  chain?: "solana" | "ethereum" | null;
+  chain?: "solana" | null;
 }): string | null {
   const { expoExtra, manifestExtra, manifest2Extra, manifest2ExpoClientExtra } =
     getRuntimeExtras();

@@ -20,9 +20,7 @@ import {
   setupSatochipCard,
 } from "@/utils/satochip";
 import {
-  loadAvalancheWalletSource,
   loadSatochipAvalancheAddress,
-  saveAvalancheWalletSource,
   saveSatochipAvalancheAddress,
 } from "@/utils/satochipStorage";
 
@@ -40,12 +38,10 @@ export default function SatochipConnectScreen() {
   const [isSettingUp, setIsSettingUp] = useState(false);
   const [showSetup, setShowSetup] = useState(false);
   const [currentAddress, setCurrentAddress] = useState<string | null>(null);
-  const [currentSource, setCurrentSource] = useState<"privy" | "satochip">("privy");
 
   useEffect(() => {
-    Promise.all([loadAvalancheWalletSource(), loadSatochipAvalancheAddress()])
-      .then(([source, address]) => {
-        setCurrentSource(source);
+    loadSatochipAvalancheAddress()
+      .then((address) => {
         setCurrentAddress(address);
       })
       .catch((error) => {
@@ -66,10 +62,8 @@ export default function SatochipConnectScreen() {
       });
 
       await saveSatochipAvalancheAddress(result.address);
-      await saveAvalancheWalletSource("satochip");
 
       setCurrentAddress(result.address);
-      setCurrentSource("satochip");
       setPin("");
       setShowSetup(false);
 
@@ -98,10 +92,8 @@ export default function SatochipConnectScreen() {
       const result = await readSatochipAvalancheAddress(pin.trim());
 
       await saveSatochipAvalancheAddress(result.address);
-      await saveAvalancheWalletSource("satochip");
 
       setCurrentAddress(result.address);
-      setCurrentSource("satochip");
       setPin("");
 
       Alert.alert(
@@ -116,11 +108,6 @@ export default function SatochipConnectScreen() {
     } finally {
       setIsConnecting(false);
     }
-  };
-
-  const handleUsePrivy = async () => {
-    await saveAvalancheWalletSource("privy");
-    router.back();
   };
 
   return (
@@ -143,14 +130,14 @@ export default function SatochipConnectScreen() {
           ]}
         >
           <Text style={[styles.eyebrow, { color: palette.secondaryText }]}>
-            Avalanche wallet source
+            Satochip card
           </Text>
           <Text style={[styles.title, { color: palette.primaryText }]}>
             Connect a Satochip card
           </Text>
           <Text style={[styles.subtitle, { color: palette.secondaryText }]}>
-            Cachin keeps Privy passkeys for app sign-in. This screen only switches the
-            Avalanche wallet source to a Satochip card over NFC.
+            Cachin keeps Privy passkeys for app sign-in. This screen connects a
+            Satochip card over NFC for card-signed transfers.
           </Text>
         </View>
 
@@ -164,12 +151,6 @@ export default function SatochipConnectScreen() {
           ]}
         >
           <Text style={[styles.sectionLabel, { color: palette.secondaryText }]}>
-            Current Avalanche source
-          </Text>
-          <Text style={[styles.sourceValue, { color: palette.primaryText }]}>
-            {currentSource === "satochip" ? "Satochip card" : "Privy embedded wallet"}
-          </Text>
-          <Text style={[styles.sectionLabel, { color: palette.secondaryText, marginTop: 16 }]}>
             Last connected Satochip address
           </Text>
           <Text style={[styles.addressValue, { color: palette.primaryText }]}>
@@ -328,19 +309,6 @@ export default function SatochipConnectScreen() {
                 Set up a new card
               </Text>
             </TouchableOpacity>
-
-            <TouchableOpacity
-              accessibilityRole="button"
-              onPress={handleUsePrivy}
-              style={[
-                styles.secondaryButton,
-                { backgroundColor: palette.actionSecondary },
-              ]}
-            >
-              <Text style={[styles.secondaryButtonText, { color: palette.actionSecondaryText }]}>
-                Use Privy wallet instead
-              </Text>
-            </TouchableOpacity>
           </>
         )}
       </ScrollView>
@@ -389,11 +357,6 @@ const styles = StyleSheet.create({
   sectionLabel: {
     fontSize: 13,
     fontWeight: "600",
-  },
-  sourceValue: {
-    fontSize: 18,
-    fontWeight: "700",
-    marginTop: 6,
   },
   addressValue: {
     fontSize: 16,

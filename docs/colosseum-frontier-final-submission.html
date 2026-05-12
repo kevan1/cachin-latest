@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Cachin Colosseum Frontier Final Submission</title>
+  <style>
+    body { margin: 0; background: #f8fafc; color: #07111f; font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+    main { max-width: 980px; margin: auto; padding: 48px 24px 80px; }
+    h1 { font-size: 44px; letter-spacing: -0.03em; margin: 8px 0 10px; }
+    h2 { margin-top: 38px; border-top: 1px solid #dbe3ef; padding-top: 28px; }
+    h3 { margin-top: 22px; }
+    p, li { color: #475569; line-height: 1.65; }
+    .box { border: 1px solid #dbe3ef; background: #fff; border-radius: 14px; padding: 22px; margin: 18px 0; box-shadow: 0 10px 28px rgba(15, 23, 42, 0.05); }
+    .label { font-size: 12px; font-weight: 900; letter-spacing: 0.12em; color: #2563eb; text-transform: uppercase; }
+    .todo { color: #b45309; font-weight: 800; }
+    code { background: #eef4ff; padding: 2px 5px; border-radius: 5px; }
+    pre { background: #0f172a; color: #e2e8f0; padding: 16px; border-radius: 12px; overflow-x: auto; }
+  </style>
+</head>
+<body>
+<main>
+  <p class="label">Colosseum Frontier final draft</p>
+  <h1>Cachin</h1>
+
+  <section class="box">
+    <p><strong>Tagline:</strong> Spend more effortlessly across LATAM.</p>
+    <p><strong>One-liner:</strong> Cachin lets tourists and foreigners fund globally, scan supported local QRs across LATAM, confirm FX and fees, and pay like locals. The MVP starts in Argentina.</p>
+    <p><strong>Submission blockers:</strong> <span class="todo">demo video URL, APK URL when available, Seeker dApp link when uploaded, push local Cachin README, POS repo visibility or omission decision.</span> Main repo is public: <code>https://github.com/kevan1/cachin-latest</code>. TestFlight: <code>https://testflight.apple.com/join/atKvfkTp</code>.</p>
+  </section>
+
+  <h2>Short Description</h2>
+  <p>Cachin is a LATAM-first payment app for tourists, foreigners, digital nomads, and crypto-paid freelancers who need to pay like locals. Users fund globally, scan supported local QR payments, review the FX and fees, and pay. The MVP starts in Argentina, where QR payments are everywhere but foreign users often cannot use local rails.</p>
+
+  <h2>Full Project Description</h2>
+  <p>Latin America is QR-first, but foreign money is not. Tourists, foreigners, digital nomads, and crypto-paid freelancers often arrive with dollars, euros, cards, or stablecoins while local merchants expect QR payments. Cards are frequently expensive for merchants, cash is inconvenient for users, and local wallets are often inaccessible to visitors.</p>
+  <p>Cachin lets users fund a mobile wallet globally and pay locally across supported LATAM QR rails. The MVP starts in Argentina: a user can fund Cachin, scan a supported local QR such as a Mercado Pago/MODO-style QR, review the amount, destination, FX/rate, fees, discount if any, and final total, then pay like a local. For the basic user flow, the merchant does not need to change behavior. If a merchant onboards into Cachin, they unlock the enhanced layer: direct Cachin QR/POS flows, lower-friction settlement, discounts, and merchant-side confirmation.</p>
+  <p>Solana matters because Cachin is built around global stablecoin funding, low-cost settlement, and a user experience where crypto disappears behind a normal payment flow. Users should not need to understand wallets, gas, or tokens. They should just fund, scan, confirm, and pay. Behind the scenes, Cachin uses embedded wallet infrastructure, Solana/stablecoin rails, provider integrations, Sumsub KYC where required, and Crisp support for trust.</p>
+  <p>The product is built from LATAM for the world. Cachin is not a generic crypto wallet and not an Argentina-only app. Argentina is the MVP proof market because QR usage, foreigner payment friction, and FX differences are highly visible. The broader goal is to help global users pay across LATAM like locals, while giving onboarded merchants a better economic path than traditional card rails.</p>
+  <p>For Frontier, the most important proof is the working product: mobile app, QR scan, payment confirmation, receipt, KYC/support path, and optional CachinPOS merchant demo. The next month is about hardening provider rails, expanding merchant proof, improving refund/support flows, and turning the Argentina MVP into a repeatable LATAM rollout.</p>
+
+  <h2>What Was Built</h2>
+  <ul>
+    <li>Expo/React Native mobile app for iOS and Android.</li>
+    <li>Embedded wallet and passkey-style onboarding through Privy.</li>
+    <li>QR payment flow for supported local payments.</li>
+    <li>Argentina MVP path for Mercado Pago/MODO-style QR flows.</li>
+    <li>Pre-payment confirmation pattern: amount, merchant/destination, FX/rate, fee, discount, final total.</li>
+    <li>Sumsub KYC path for supported local QR payments.</li>
+    <li>Crisp 1:1 support entry point.</li>
+    <li>P2P/Manteca-style provider rail integration work.</li>
+    <li>Optional onboarded merchant flow for Cachin-owned QR payments.</li>
+    <li>Separate CachinPOS project for merchant QR generation and confirmation.</li>
+  </ul>
+
+  <h2>Why Solana</h2>
+  <p>Solana enables Cachin to offer fast, low-cost, stablecoin-funded payment flows that feel like normal local payments to the user. Cachin can use Solana payment primitives for app-owned merchant/POS flows, support crypto-paid freelancers directly, and build a Seeker-native travel payment experience. The blockchain is not the user-facing product; it is the settlement and funding infrastructure that makes the user-facing product possible.</p>
+
+  <h2>Technical Architecture</h2>
+  <ul>
+    <li>Mobile: Expo, React Native, Expo Router.</li>
+    <li>Wallet/auth: Privy embedded wallet and passkey-style auth.</li>
+    <li>Chain/payment layer: Solana, USDC/stablecoin rails, SPL token primitives.</li>
+    <li>Provider layer: P2P SDK and Manteca-style QR/payment rails.</li>
+    <li>Identity: Sumsub KYC.</li>
+    <li>Support: Crisp.</li>
+    <li>Backend: Vercel API routes for wallet, paymaster, identity, provider, push, and payment orchestration.</li>
+    <li>Optional merchant layer: CachinPOS, app-owned QR generation, merchant confirmation.</li>
+  </ul>
+
+  <h2>Demo Script</h2>
+  <h3>0:00-0:15 Hook</h3>
+  <p>"LATAM pays by QR. Foreign money does not. If you arrive in Argentina with a US card, crypto, or a foreign bank account, many local payment flows are still hard to use. Cachin lets you pay like a local."</p>
+  <h3>0:15-0:35 Solution</h3>
+  <p>"Cachin is a LATAM-first payment app. Users fund globally, scan supported local QRs, confirm FX and fees, and pay. The MVP starts in Argentina and expands across LATAM rails."</p>
+  <h3>0:35-1:45 Main Demo</h3>
+  <p>Show funded balance, QR scanner, supported Argentina MVP QR scan, confirmation screen, payment confirmation, receipt/activity state, and Crisp support entry point.</p>
+  <h3>1:45-2:15 Optional Merchant/POS Demo</h3>
+  <p>Show CachinPOS entering an amount, generating a QR, Cachin scanning and paying, and merchant confirmation.</p>
+  <h3>2:15-2:45 Technical / Solana</h3>
+  <p>"Under the hood, Cachin abstracts crypto through embedded wallets, stablecoin rails, provider integrations, and Solana payment primitives. Users do not manage gas or seed phrases. They just scan, confirm, and pay."</p>
+  <h3>2:45-3:00 Close</h3>
+  <p>"Cachin is built from LATAM for the world. Spend more effortlessly. Scan, pay, done."</p>
+
+  <h2>Setup Instructions</h2>
+  <p>Recommended path: watch the demo video first. The app depends on provider keys and KYC/payment rails that are not safe to publish.</p>
+  <pre><code>git clone https://github.com/kevan1/cachin-latest.git
+cd cachin-latest
+npm install
+cp .env.example .env
+npm start</code></pre>
+  <p>Run on a simulator/device:</p>
+  <pre><code>npm run ios
+npm run android</code></pre>
+
+  <h2>Founder / Team</h2>
+  <p>Kevan, solo founder from Argentina. Cachin is built from LATAM for the world, based on lived experience with QR payment behavior, foreigner payment friction, and merchant card-fee pain. Ecosystem context: SMB holder, solxAR member, and Superteam Germany member.</p>
+
+  <h2>Business Plan</h2>
+  <p>Cachin starts with tourists and foreigners paying supported local QRs across LATAM, beginning with Argentina. The first business path is payment spread / service fees where compliant and provider-supported. The second path is onboarded merchant economics: lower-friction direct Cachin payments, merchant discounts, POS tooling, and faster settlement. A separate card/cold-wallet product line can become a white-label revenue path, but it is not required for the core Cachin submission.</p>
+
+  <h2>Final Checklist</h2>
+  <ul>
+    <li class="todo">Paste final demo video URL.</li>
+    <li>Public repo visibility confirmed for <code>https://github.com/kevan1/cachin-latest</code>.</li>
+    <li class="todo">Push/confirm the local Cachin README is visible on GitHub; public <code>main</code> still showed the old "Privy + Expo Starter" README on 2026-05-11.</li>
+    <li>TestFlight link added: <code>https://testflight.apple.com/join/atKvfkTp</code>.</li>
+    <li class="todo">Add APK link after the APK is placed in the directory.</li>
+    <li class="todo">Add Seeker dApp listing/link after upload.</li>
+    <li class="todo">Confirm POS repo visibility or omit POS repo link; <code>https://github.com/kevan1/CachinPOS</code> returned 404 from GitHub's public API on 2026-05-11.</li>
+    <li class="todo">Test every link in an incognito/private browser.</li>
+  </ul>
+</main>
+</body>
+</html>

@@ -103,40 +103,6 @@ export const THEMES = [
     }
   },
   {
-    id: 'monad',
-    name: 'Monad',
-    currency: 'MON',
-    category: 'glow',
-    colors: {
-      light: {
-        primary: [
-          "#B949FF", "#8B4DFF", "#2A1140",
-          "#D06DFF", "#A855F7", "#35125C",
-          "#7C3AED", "#C084FC", "#000000",
-        ],
-        secondary: [
-          "#5B21B6", "#A855F7", "#140A24",
-          "#9333EA", "#C084FC", "#24123F",
-          "#6D28D9", "#B794F4", "#05030B",
-        ],
-        background: "#05030B",
-      },
-      dark: {
-        primary: [
-          "#A833F3", "#7C3AED", "#180A2A",
-          "#B653F6", "#9333EA", "#26113E",
-          "#6D28D9", "#A855F7", "#000000",
-        ],
-        secondary: [
-          "#4C1D95", "#7E22CE", "#10071C",
-          "#6D28D9", "#A855F7", "#1D0E32",
-          "#5B21B6", "#9333EA", "#030208",
-        ],
-        background: "#000000",
-      }
-    }
-  },
-  {
     id: 'mono',
     name: 'Minimal',
     currency: 'USD',
@@ -209,12 +175,6 @@ const THEME_TAB_COLORS: Record<string, ThemeTabColors> = {
     inactive: "rgba(16,74,63,0.72)",
     indicator: "rgba(16,185,129,0.2)",
     activePill: "rgba(16,185,129,0.2)",
-  },
-  monad: {
-    active: "#A855F7",
-    inactive: "rgba(71,31,109,0.74)",
-    indicator: "rgba(168,85,247,0.22)",
-    activePill: "rgba(168,85,247,0.22)",
   },
   mono: {
     active: "#374151",

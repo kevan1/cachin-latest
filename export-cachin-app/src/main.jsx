@@ -14,10 +14,7 @@ const loginMethods = Array.isArray(runtimeConfig.loginMethods)
   ? runtimeConfig.loginMethods
   : ["passkey"];
 const requestedAddress = (query.get("address") || "").trim();
-const requestedChain =
-  (query.get("chain") || "solana").toLowerCase() === "ethereum"
-    ? "ethereum"
-    : "solana";
+const requestedChain = "solana";
 
 function getErrorMessage(error) {
   if (!error) return "Unknown error.";
@@ -83,7 +80,7 @@ function hasRequestedWallet(user) {
 }
 
 function ExportFlow() {
-  const { ready, authenticated, user, login, exportWallet: exportEvmWallet } = usePrivy();
+  const { ready, authenticated, user, login } = usePrivy();
   const { exportWallet: exportSolanaWallet } = useSolanaExportWallet();
   const [isBusy, setIsBusy] = useState(false);
   const [status, setStatus] = useState("");
@@ -128,16 +125,10 @@ function ExportFlow() {
     pushEvent("Export button tapped");
     try {
       setIsBusy(true);
-      if (requestedChain === "solana") {
-        if (requestedAddress) {
-          await exportSolanaWallet({ address: requestedAddress });
-        } else {
-          await exportSolanaWallet();
-        }
-      } else if (requestedAddress) {
-        await exportEvmWallet({ address: requestedAddress });
+      if (requestedAddress) {
+        await exportSolanaWallet({ address: requestedAddress });
       } else {
-        await exportEvmWallet();
+        await exportSolanaWallet();
       }
 
       setStatus("Export completed. You can now close this screen.");

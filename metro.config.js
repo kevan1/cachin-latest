@@ -7,6 +7,13 @@ const path = require("path");
 const config = getDefaultConfig(__dirname);
 
 const resolveRequestWithPackageExports = (context, moduleName, platform) => {
+  if (moduleName === "@react-navigation/elements") {
+    return {
+      type: "sourceFile",
+      filePath: require.resolve("@react-navigation/elements"),
+    };
+  }
+
   // Package exports in `jose` are incorrect, so we need to force the browser version
   if (moduleName === "jose") {
     const ctx = {

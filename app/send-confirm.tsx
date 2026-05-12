@@ -24,23 +24,16 @@ import { Token, TOKEN_PROGRAM_ID, ASSOCIATED_TOKEN_PROGRAM_ID, u64 } from "@sola
 import MaterialIcons from "@expo/vector-icons/MaterialIcons";
 import * as Haptics from "expo-haptics";
 import {
-  createPublicClient,
-  encodeFunctionData,
-  formatEther,
   getAddress,
-  http,
   isAddress,
-  type Hex,
 } from "viem";
-import { avalancheFuji } from "viem/chains";
 
 import { saveTransaction } from "@/utils/transactionStorage";
 import { Transaction as TransactionType } from "@/types/types";
-import { ChainType, getChainMetadata, getChainToken } from "@/constants/chains";
+import { ChainType, getChainToken } from "@/constants/chains";
 import { useActiveSolanaWallet } from "@/hooks/useActiveSolanaWallet";
 import { useNativeSolanaWalletActions } from "@/hooks/useNativeSolanaWalletActions";
 import {
-  useEmbeddedEthereumWallet,
   useEmbeddedSolanaWallet,
   usePrivy,
   useSessionSigners,
@@ -78,29 +71,13 @@ import {
   sendSatochipAvalancheUsdcTransfer,
 } from "@/utils/satochip";
 import {
-  coerceAvalancheWalletSource,
-  loadAvalancheWalletSource,
   loadSatochipAvalancheAddress,
-  type AvalancheWalletSource,
 } from "@/utils/satochipStorage";
 
 const USDC_MINT_ADDRESS = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
 const USDC_DECIMALS = 6;
 const DEFAULT_ARS_RATE = 1500;
 const DUMMY_BLOCKHASH = "11111111111111111111111111111111";
-const ERC20_TRANSFER_ABI = [
-  {
-    type: "function",
-    name: "transfer",
-    stateMutability: "nonpayable",
-    inputs: [
-      { name: "to", type: "address" },
-      { name: "value", type: "uint256" },
-    ],
-    outputs: [{ name: "success", type: "bool" }],
-  },
-] as const;
-
 function firstParam(value: unknown): string {
   if (Array.isArray(value)) return typeof value[0] === "string" ? value[0] : "";
   return typeof value === "string" ? value : "";
@@ -280,8 +257,6 @@ export default function SendConfirmScreen() {
   const [lastTransactionId, setLastTransactionId] = useState<string | null>(null);
   const [preferredCurrency, setPreferredCurrency] = useState<Currency>("USD");
   const [arsRate, setArsRate] = useState(DEFAULT_ARS_RATE);
-  const [avalancheWalletSource, setAvalancheWalletSource] =
-    useState<AvalancheWalletSource>("privy");
   const [satochipAvalancheAddress, setSatochipAvalancheAddress] = useState<string | null>(null);
   const [satochipPin, setSatochipPin] = useState("");
   const { showChin, hideChin, progress, isOpen } = useChinPopout();
@@ -298,18 +273,14 @@ export default function SendConfirmScreen() {
   } = useEmbeddedSolanaWallet();
   const activeSolanaWallet = useActiveSolanaWallet();
   const { signAndSendTransactions } = useNativeSolanaWalletActions();
-  const { wallets: ethereumWallets } = useEmbeddedEthereumWallet();
-  const avalancheWallet = ethereumWallets?.[0];
   const { user } = usePrivy();
   const { addSessionSigners } = useSessionSigners();
   const [sponsoredWalletAddress, setSponsoredWalletAddress] = useState<string | null>(null);
   const effectiveSponsoredWalletAddress =
     sponsoredWalletAddress ?? activeSolanaWallet.sponsoredWalletAddress;
-  const isSatochipTransfer = isAvalancheTransfer && avalancheWalletSource === "satochip";
+  const isSatochipTransfer = isAvalancheTransfer;
   const walletAddress = isAvalancheTransfer
-    ? isSatochipTransfer
-      ? satochipAvalancheAddress ?? ""
-      : avalancheWallet?.address ?? ""
+    ? satochipAvalancheAddress ?? ""
     : activeSolanaWallet.source === "native-mwa"
       ? activeSolanaWallet.address ?? ""
       : effectiveSponsoredWalletAddress ?? activeSolanaWallet.embeddedWalletAddress ?? "";
@@ -391,34 +362,25 @@ export default function SendConfirmScreen() {
     useCallback(() => {
       let isActive = true;
 
-      const loadAvalancheSource = async () => {
+      const loadSatochipAddress = async () => {
         if (!isAvalancheTransfer) return;
 
         try {
-          const [storedSource, storedAddress] = await Promise.all([
-            loadAvalancheWalletSource(),
-            loadSatochipAvalancheAddress(),
-          ]);
+          const storedAddress = await loadSatochipAvalancheAddress();
           if (!isActive) return;
 
-          const requestedSource = firstParam(params.walletSource);
-          setAvalancheWalletSource(
-            requestedSource
-              ? coerceAvalancheWalletSource(requestedSource)
-              : storedSource
-          );
           setSatochipAvalancheAddress(storedAddress);
         } catch (error) {
-          console.error("[SendConfirm] Failed to load Avalanche wallet source", error);
+          console.error("[SendConfirm] Failed to load Satochip address", error);
         }
       };
 
-      void loadAvalancheSource();
+      void loadSatochipAddress();
 
       return () => {
         isActive = false;
       };
-    }, [isAvalancheTransfer, params.walletSource])
+    }, [isAvalancheTransfer])
   );
 
   useFocusEffect(
@@ -488,71 +450,23 @@ export default function SendConfirmScreen() {
         let feeValue: number | undefined;
         let receiptStatus: "confirmed" | "failed" = "confirmed";
 
-        if (isSatochipTransfer) {
-          if (!satochipAvalancheAddress) {
-            throw new Error("Connect your Satochip card first.");
-          }
-          if (!satochipPin.trim()) {
-            throw new Error("Enter your Satochip PIN before sending.");
-          }
-
-          const result = await sendSatochipAvalancheUsdcTransfer({
-            pin: satochipPin.trim(),
-            recipientAddress: toAddress,
-            amountUnits,
-            expectedAddress: satochipAvalancheAddress,
-          });
-
-          signature = result.signature;
-          fromAddress = result.address;
-          feeValue = result.fee;
-        } else {
-          if (!avalancheWallet?.address) {
-            throw new Error("Your Avalanche wallet is still being prepared. Please try again.");
-          }
-
-          fromAddress = getAddress(avalancheWallet.address);
-          const provider = await avalancheWallet.getProvider();
-          const avalancheChainId =
-            getChainMetadata(ChainType.AVALANCHE).chainId ?? avalancheFuji.id;
-          const transferData = encodeFunctionData({
-            abi: ERC20_TRANSFER_ABI,
-            functionName: "transfer",
-            args: [toAddress, amountUnits],
-          });
-          signature = (await provider.request({
-            method: "eth_sendTransaction",
-            params: [
-              {
-                from: fromAddress,
-                to: avalancheUsdcToken.address,
-                data: transferData,
-                value: "0x0",
-                chainId: `0x${avalancheChainId.toString(16)}`,
-              },
-            ],
-          })) as string;
-
-          const client = createPublicClient({
-            chain: avalancheFuji,
-            transport: http(
-              process.env.EXPO_PUBLIC_AVALANCHE_RPC ||
-                getChainMetadata(ChainType.AVALANCHE).rpcUrl
-            ),
-          });
-          const receipt = await client.waitForTransactionReceipt({
-            hash: signature as Hex,
-          });
-          feeValue =
-            typeof receipt.effectiveGasPrice === "bigint"
-              ? Number(formatEther(receipt.effectiveGasPrice * receipt.gasUsed))
-              : undefined;
-          receiptStatus = receipt.status === "success" ? "confirmed" : "failed";
-
-          if (receipt.status !== "success") {
-            throw new Error("The Avalanche transaction was reverted.");
-          }
+        if (!satochipAvalancheAddress) {
+          throw new Error("Connect your Satochip card first.");
         }
+        if (!satochipPin.trim()) {
+          throw new Error("Enter your Satochip PIN before sending.");
+        }
+
+        const result = await sendSatochipAvalancheUsdcTransfer({
+          pin: satochipPin.trim(),
+          recipientAddress: toAddress,
+          amountUnits,
+          expectedAddress: satochipAvalancheAddress,
+        });
+
+        signature = result.signature;
+        fromAddress = result.address;
+        feeValue = result.fee;
 
         const newTransaction: TransactionType = {
           id: signature,
@@ -807,14 +721,12 @@ export default function SendConfirmScreen() {
     activeSolanaWallet.embeddedWalletAddress,
     activeSolanaWallet.source,
     avalancheUsdcToken,
-    avalancheWallet,
     authorizeGaslessForAddress,
     comment,
     createSolanaWallet,
     effectiveSponsoredWalletAddress,
     hideChin,
     isAvalancheTransfer,
-    isSatochipTransfer,
     recipientAddress,
     recipientName,
     satochipAvalancheAddress,

@@ -14,7 +14,7 @@ The page expects query params from the mobile app:
 
 - `appId`
 - `clientId`
-- `chain` (`solana` or `ethereum`)
+- `chain` (`solana`)
 - `address` (optional)
 
 Example:

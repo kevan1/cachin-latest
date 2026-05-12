@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { Platform, StyleSheet, useColorScheme, View } from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
-import { MeshGradientView } from "@wilmxre/react-native-mesh-gradient/src";
+import { MeshGradientView } from "@/components/ui/MeshGradientView";
 
 import { MESH_POINTS, THEMES } from "@/constants/themes";
 import { loadThemePreference } from "@/utils/themePreferences";

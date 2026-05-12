@@ -151,7 +151,7 @@ Mention these only as roadmap or separate product line unless the demo is alread
 ### During The Hackathon
 
 - [x] Build exists.
-- [ ] Polish the payment confirmation flow: amount, merchant, FX, fee, discount, final total.
+- [x] Payment confirmation flow exists in `app/qr-payment-confirm.tsx`: amount, merchant/destination, FX rate, fee, discount, and final total.
 - [ ] Document everything in `docs/proof/`.
 - [ ] Test every link before submitting.
 

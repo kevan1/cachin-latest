@@ -1,4 +1,3 @@
-import { config as loadDotenv } from "dotenv";
 import { readdir, readFile, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import {
@@ -11,9 +10,6 @@ import {
 } from "@expo/config-plugins";
 import { mergeContents, removeContents } from "@expo/config-plugins/build/utils/generateCode";
 import type { ConfigContext, ExpoConfig } from "expo/config";
-
-loadDotenv({ path: resolve(__dirname, ".env"), override: false });
-loadDotenv({ path: resolve(__dirname, ".env.local"), override: true });
 
 const normalizeEnvValue = (value?: string) =>
   value?.trim().replace(/^['"]|['"]$/g, "");
@@ -45,7 +41,6 @@ const FIXED_SWIFT_LIBRARY_SEARCH_PATH = [
   '\t\t\t\t\t"$(inherited)",',
   "\t\t\t\t);",
 ].join("\n");
-const LOWERCASE_MAIN_ACTIVITY_ALIAS = ".mainactivity";
 
 type AndroidActivityAlias = {
   $: Record<string, string>;
@@ -221,36 +216,6 @@ const withLocationUsageDescriptions = (config: ExpoConfig) =>
       LOCATION_USAGE_DESCRIPTION;
     currentConfig.modResults.NSLocationAlwaysUsageDescription =
       LOCATION_USAGE_DESCRIPTION;
-
-    return currentConfig;
-  });
-
-const withLowercaseMainActivityAlias = (config: ExpoConfig) =>
-  withAndroidManifest(config, (currentConfig) => {
-    const mainApplication = AndroidConfig.Manifest.getMainApplicationOrThrow(
-      currentConfig.modResults
-    ) as Record<string, unknown> & {
-      "activity-alias"?: AndroidActivityAlias[];
-    };
-    const activityAlias: AndroidActivityAlias = {
-      $: {
-        "android:name": LOWERCASE_MAIN_ACTIVITY_ALIAS,
-        "android:enabled": "true",
-        "android:exported": "true",
-        "android:targetActivity": ".MainActivity",
-      },
-    };
-    const aliases = mainApplication["activity-alias"] ?? [];
-    const currentIndex = aliases.findIndex(
-      (alias) => alias.$["android:name"] === LOWERCASE_MAIN_ACTIVITY_ALIAS
-    );
-
-    if (currentIndex >= 0) {
-      aliases[currentIndex] = activityAlias;
-    } else {
-      aliases.unshift(activityAlias);
-    }
-    mainApplication["activity-alias"] = aliases;
 
     return currentConfig;
   });
@@ -510,11 +475,9 @@ export default ({ config }: ConfigContext): ExpoConfig => {
   return withNormalizedSwiftLibrarySearchPaths(
     withLocationUsageDescriptions(
       withMainActivityAliasSchemeIntentFilters(
-        withLowercaseMainActivityAlias(
-          withGoogleMapsNativeConfig(
-            nextConfig,
-            hasValidGoogleMapsApiKey ? googleMapsApiKey : undefined
-          )
+        withGoogleMapsNativeConfig(
+          nextConfig,
+          hasValidGoogleMapsApiKey ? googleMapsApiKey : undefined
         )
       )
     )

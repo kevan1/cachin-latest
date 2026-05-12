@@ -1,7 +1,6 @@
-import { ChainType, getChainMetadata, getChainToken } from '@/constants/chains';
+import { ChainType, getChainMetadata } from '@/constants/chains';
 import {
   createPublicClient,
-  formatEther,
   formatUnits,
   getAddress,
   http,
@@ -12,7 +11,6 @@ import { avalancheFuji } from 'viem/chains';
 
 const BALANCE_CACHE_DURATION = 30 * 1000;
 
-const cachedBalances: Record<string, { balance: number; timestamp: number }> = {};
 const cachedTokenBalances: Record<string, { balance: number; timestamp: number }> = {};
 
 const erc20BalanceAbi = [
@@ -41,49 +39,6 @@ function getClient(chainType: ChainType) {
   }
 
   throw new Error(`Unsupported EVM chain: ${chainType}`);
-}
-
-export async function fetchNativeEvmBalance(
-  chainType: ChainType,
-  address: string,
-  forceFresh: boolean = false
-): Promise<number> {
-  const normalizedInput = address.trim();
-  if (!isAddress(normalizedInput)) {
-    return 0;
-  }
-
-  const normalizedAddress = getAddress(normalizedInput);
-  const cacheKey = `${chainType}:${normalizedAddress}`;
-  const cached = cachedBalances[cacheKey];
-  const now = Date.now();
-
-  if (!forceFresh && cached && now - cached.timestamp < BALANCE_CACHE_DURATION) {
-    return cached.balance;
-  }
-
-  try {
-    const client = getClient(chainType);
-    const balance = await client.getBalance({
-      address: normalizedAddress as Address,
-    });
-    const formattedBalance = Number(formatEther(balance));
-
-    cachedBalances[cacheKey] = {
-      balance: formattedBalance,
-      timestamp: now,
-    };
-
-    return formattedBalance;
-  } catch (error) {
-    console.error(`[EvmBalance] Failed to fetch ${chainType} balance`, error);
-
-    if (cached) {
-      return cached.balance;
-    }
-
-    return 0;
-  }
 }
 
 export async function fetchErc20EvmBalance(
@@ -135,28 +90,4 @@ export async function fetchErc20EvmBalance(
 
     return 0;
   }
-}
-
-export async function fetchAvalancheBalances(
-  address: string,
-  forceFresh: boolean = false
-): Promise<{ native: number; usdc: number }> {
-  const usdc = getChainToken(ChainType.AVALANCHE, 'usdc');
-  const [nativeBalance, usdcBalance] = await Promise.all([
-    fetchNativeEvmBalance(ChainType.AVALANCHE, address, forceFresh),
-    usdc
-      ? fetchErc20EvmBalance(
-          ChainType.AVALANCHE,
-          address,
-          usdc.address,
-          usdc.decimals,
-          forceFresh
-        )
-      : Promise.resolve(0),
-  ]);
-
-  return {
-    native: nativeBalance,
-    usdc: usdcBalance,
-  };
 }

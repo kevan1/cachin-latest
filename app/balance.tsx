@@ -7,7 +7,7 @@ import { useActiveSolanaWallet } from '@/hooks/useActiveSolanaWallet';
 import { fetchSolanaUsdcBalance } from '@/utils/balanceService';
 import { formatTokenAmountDisplay } from '@/utils/numberFormat';
 
-type AssetLogo = 'sol' | 'usdc' | 'usdt' | 'avalanche-usdc' | 'avax' | 'arsc';
+type AssetLogo = 'sol' | 'usdc' | 'usdt' | 'arsc';
 
 type AssetBalance = {
   key: string;
@@ -64,22 +64,6 @@ function TokenIcon({ logo }: { logo: AssetLogo }) {
         <View style={[styles.logo, styles.usdtLogo]}>
           <Text maxFontSizeMultiplier={1.05} style={styles.usdtGlyph}>T</Text>
           <View style={styles.usdtCrossbar} />
-        </View>
-      );
-    case 'avalanche-usdc':
-      return (
-        <View style={[styles.logo, styles.avalancheLogo]}>
-          <View style={styles.avalanchePeak} />
-          <View style={styles.avalancheUsdcBadge}>
-            <Text maxFontSizeMultiplier={1.05} style={styles.avalancheUsdcGlyph}>$</Text>
-          </View>
-        </View>
-      );
-    case 'avax':
-      return (
-        <View style={[styles.logo, styles.avalancheLogo]}>
-          <View style={styles.avalanchePeak} />
-          <View style={styles.avalanchePeakSmall} />
         </View>
       );
     case 'arsc':
@@ -338,51 +322,6 @@ const styles = StyleSheet.create({
     height: 3,
     borderRadius: 2,
     backgroundColor: '#FFFFFF',
-  },
-  avalancheLogo: {
-    backgroundColor: '#E84142',
-  },
-  avalanchePeak: {
-    width: 0,
-    height: 0,
-    borderLeftWidth: 8,
-    borderRightWidth: 8,
-    borderBottomWidth: 18,
-    borderLeftColor: 'transparent',
-    borderRightColor: 'transparent',
-    borderBottomColor: '#FFFFFF',
-  },
-  avalanchePeakSmall: {
-    position: 'absolute',
-    right: 8,
-    bottom: 8,
-    width: 0,
-    height: 0,
-    borderLeftWidth: 4,
-    borderRightWidth: 4,
-    borderBottomWidth: 9,
-    borderLeftColor: 'transparent',
-    borderRightColor: 'transparent',
-    borderBottomColor: '#FFFFFF',
-  },
-  avalancheUsdcBadge: {
-    position: 'absolute',
-    right: 3,
-    bottom: 3,
-    width: 13,
-    height: 13,
-    borderRadius: 7,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: '#2775CA',
-    borderWidth: 1,
-    borderColor: '#FFFFFF',
-  },
-  avalancheUsdcGlyph: {
-    color: '#FFFFFF',
-    fontSize: 9,
-    lineHeight: 10,
-    fontWeight: '900',
   },
   argentinaLogo: {
     backgroundColor: '#FFFFFF',

@@ -430,7 +430,7 @@ export function startTransactionPolling(
  */
 export async function getMergedTransactions(address: string): Promise<Transaction[]> {
   try {
-    // Keep local history chain-scoped so Avalanche sends do not appear in Solana activity.
+    // Keep local history scoped to Solana activity.
     const localTransactions = (await getTransactions()).filter(
       (tx) => tx.chain === ChainType.SOLANA
     );
