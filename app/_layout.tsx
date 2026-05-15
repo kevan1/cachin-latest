@@ -925,6 +925,13 @@ function AppNavigator() {
         }}
       />
       <Stack.Screen
+        name="order-tracking"
+        options={{
+          headerShown: false,
+          gestureEnabled: false,
+        }}
+      />
+      <Stack.Screen
         name="withdraw"
         options={{
           headerShown: false,
