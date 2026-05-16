@@ -247,7 +247,7 @@ export default function OrderTrackingScreen() {
       {/* Header */}
       <View style={[styles.header, { borderColor: palette.borderSubtle }]}>
         <TouchableOpacity
-          onPress={() => router.replace("/")}
+          onPress={() => router.replace("/(main)/home" as never)}
           style={[styles.headerButton, { borderColor: palette.borderSubtle }]}
         >
           <MaterialIcons name="arrow-back" size={20} color={palette.primaryText} />
@@ -492,7 +492,7 @@ export default function OrderTrackingScreen() {
         {/* Done CTA when terminal */}
         {isTerminal ? (
           <TouchableOpacity
-            onPress={() => router.replace("/")}
+            onPress={() => router.replace("/(main)/home" as never)}
             style={[styles.doneButton, { backgroundColor: palette.actionPrimary }]}
           >
             <Text style={[styles.doneButtonText, { color: palette.actionPrimaryText }]}>
