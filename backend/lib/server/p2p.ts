@@ -512,13 +512,18 @@ export async function handleCreateP2PArsOrder(body: unknown) {
   const userId = ensureString(payload, "userId");
   const requestedAmountRaw = ensureString(payload, "amount");
   const requestedCurrency = normalizeRequestedCurrency(ensureString(payload, "currency"));
-  const paymentAddress = ensureString(payload, "paymentAddress");
+  // paymentAddress is OPTIONAL — supports the split flow where the user scans
+  // the vendor's QR AFTER the merchant accepts (matches p2p.me official UX,
+  // avoids dynamic QR expiry races). If not provided here, the order is placed
+  // and the mobile must call /api/p2p/order-set-payment-address once the user
+  // scans the fresh QR.
+  const paymentAddress = ensureString(payload, "paymentAddress", { required: false });
   const method = ensureString(payload, "method", { required: false }) || "bank";
   const solanaTxSignature = ensureString(payload, "solanaTxSignature", { required: false });
   const sourceAmountUsdcRaw = ensureString(payload, "sourceAmountUsdc", { required: false });
   const fiatAmountLimitRaw = ensureString(payload, "fiatAmountLimit", { required: false });
 
-  if (!validateArgentinePaymentId(paymentAddress)) {
+  if (paymentAddress && !validateArgentinePaymentId(paymentAddress)) {
     throw new P2PApiError(
       400,
       "INVALID_PAYMENT_ADDRESS",
@@ -598,7 +603,14 @@ export async function handleCreateP2PArsOrder(body: unknown) {
     await orders.placeOrder.execute({
       walletClient,
       waitForReceipt: true,
-      orderType: 1,
+      // orderType 2 = PAY (user pays a third-party vendor in fiat, merchant
+      // fronts the payment to the vendor's mercadopago address and claims USDC
+      // from escrow afterward). orderType 1 = SELL is wrong for this use case:
+      // SELL semantics assume the merchant pays fiat TO the user, but here the
+      // user is paying a vendor (third party). Merchants accept SELL orders
+      // from us but never progress because they see the payment address doesn't
+      // match the user — confirmed by p2p.me official order #389017 using PAY.
+      orderType: 2,
       currency: "ARS",
       user: account.address,
       recipientAddr: account.address,
@@ -615,25 +627,66 @@ export async function handleCreateP2PArsOrder(body: unknown) {
   let nextAction = "POLL_ORDER_STATUS";
 
   if (orderId !== null) {
-    const order = ensureSdkOk<Order>("orders.getOrder", await orders.getOrder({ orderId }));
-    orderStatus = order.status;
+    // The order is already placed on-chain (placeOrder.execute returned a tx
+    // hash and orderId). The subgraph may still be catching up — tolerate
+    // that and let the mobile poll order-status afterward.
+    const orderResult = await orders.getOrder({ orderId });
 
-    if (order.status === "accepted" && isMerchantPublicKeyReady(order.pubkey)) {
-      const setResult = ensureSdkOk<{ hash: Hex }>(
-        "orders.setSellOrderUpi.execute",
-        await orders.setSellOrderUpi.execute({
-          walletClient,
-          waitForReceipt: true,
-          orderId,
-          paymentAddress,
-          merchantPublicKey: order.pubkey,
-          updatedAmount: 0n,
-        })
-      );
-      setPaymentAddressTxHash = setResult.hash;
-      nextAction = "NONE";
+    if (orderResult && typeof orderResult.isOk === "function" && orderResult.isOk()) {
+      const order = orderResult.value as Order;
+      orderStatus = order.status;
+
+      if (
+        paymentAddress &&
+        order.status === "accepted" &&
+        isMerchantPublicKeyReady(order.pubkey)
+      ) {
+        // Legacy single-shot path: caller provided paymentAddress upfront AND
+        // merchant has already accepted by the time we get here.
+        const setResult = ensureSdkOk<{ hash: Hex }>(
+          "orders.setSellOrderUpi.execute",
+          await orders.setSellOrderUpi.execute({
+            walletClient,
+            waitForReceipt: true,
+            orderId,
+            paymentAddress,
+            merchantPublicKey: order.pubkey,
+            updatedAmount: 0n,
+          })
+        );
+        setPaymentAddressTxHash = setResult.hash;
+        nextAction = "NONE";
+      } else if (!paymentAddress) {
+        // Split flow — user will scan the vendor QR AFTER merchant accepts and
+        // then call /api/p2p/order-set-payment-address. Mobile must poll
+        // order-status, surface a scanner when status === "accepted", and
+        // submit the freshly-scanned address to the dedicated endpoint.
+        nextAction = "SCAN_QR_AND_SET_PAYMENT";
+      } else {
+        // Legacy single-shot path, but merchant hasn't accepted yet — mobile
+        // polls until acceptance, then we call setSellOrderUpi via the
+        // dedicated endpoint with the (already-provided) paymentAddress.
+        nextAction = "SET_PAYMENT_ADDRESS_WHEN_ACCEPTED";
+      }
     } else {
-      nextAction = "SET_PAYMENT_ADDRESS_WHEN_ACCEPTED";
+      // getOrder failed — likely subgraph indexing lag (the placeOrder tx is
+      // already confirmed but the subgraph hasn't indexed it yet). Don't fail
+      // the whole order: the order is on-chain, status defaults to "placed",
+      // and the mobile will poll order-status to pick up the merchant once the
+      // subgraph catches up.
+      const sdkError =
+        orderResult && typeof orderResult.isErr === "function" && orderResult.isErr()
+          ? orderResult.error
+          : null;
+      console.warn(
+        "[p2p/order-create] getOrder failed after placeOrder; returning placed order anyway",
+        {
+          orderId: orderId.toString(),
+          code: sdkError?.code,
+          message: sdkError?.message,
+        }
+      );
+      nextAction = "POLL_ORDER_STATUS";
     }
   }
 

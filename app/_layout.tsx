@@ -932,6 +932,12 @@ function AppNavigator() {
         }}
       />
       <Stack.Screen
+        name="pay-ars"
+        options={{
+          headerShown: false,
+        }}
+      />
+      <Stack.Screen
         name="withdraw"
         options={{
           headerShown: false,

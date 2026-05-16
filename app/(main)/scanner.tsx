@@ -134,31 +134,20 @@ export default function ScannerScreen() {
 
       if (result.kind === 'arsMercadoPago') {
         try {
+          // Route to /pay-ars (split flow): we forward only the AMOUNT from
+          // the scanned QR, never the paymentAddress. Dynamic mercadopago QRs
+          // expire fast — by the time a merchant accepts and is ready to pay,
+          // this QR is likely dead. The user will re-scan a FRESH QR after
+          // merchant acceptance from inside /order-tracking.
+          // (Legacy /qr-payment-confirm still exists for backward-compat.)
           const amountParam =
             typeof result.amountFiat === 'number' && Number.isFinite(result.amountFiat)
               ? formatDecimalForInput(result.amountFiat, 2)
               : '';
-          const amountUsdcParam =
-            typeof result.amountUsdc === 'number' && Number.isFinite(result.amountUsdc)
-              ? formatDecimalForInput(result.amountUsdc, 6)
-              : '';
-          const arsRateParam =
-            typeof result.rateArsPerUsdc === 'number' && Number.isFinite(result.rateArsPerUsdc)
-              ? formatDecimalForInput(result.rateArsPerUsdc, 2)
-              : '';
 
           router.push({
-            pathname: '/qr-payment-confirm',
-            params: {
-              method: 'mercadopago',
-              currency: 'ARS',
-              rail: 'p2p',
-              amount: amountParam,
-              amountUsdc: amountUsdcParam,
-              arsRate: arsRateParam,
-              paymentAddress: result.paymentAddress,
-              rawQr: trimmed,
-            },
+            pathname: '/pay-ars' as never,
+            params: { amount: amountParam },
           });
         } catch {
           resetScanner();

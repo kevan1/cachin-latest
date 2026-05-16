@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
   ScrollView,
@@ -9,10 +9,16 @@ import {
   View,
 } from "react-native";
 import { useLocalSearchParams, useRouter } from "expo-router";
+import { CameraView, useCameraPermissions } from "expo-camera";
 import MaterialIcons from "@expo/vector-icons/MaterialIcons";
 import { Colors } from "@/constants/theme";
 import { GlassView } from "@/components/ui/GlassView";
-import { getP2POrderStatus, type P2POrderStatusResponse } from "@/utils/p2pOrders";
+import {
+  getP2POrderStatus,
+  setP2POrderPaymentAddress,
+  type P2POrderStatusResponse,
+} from "@/utils/p2pOrders";
+import { parseQrScanData } from "@/utils/qrScan";
 
 // Polling cadence for order status. The backend reads the subgraph which lags
 // the chain by a few seconds, so 3s keeps the UI live without hammering.
@@ -88,10 +94,25 @@ export default function OrderTrackingScreen() {
   const initialStatus = firstParam(params.initialStatus) || "placed";
   const displayUsdc = firstParam(params.displayUsdc);
   const displayFiat = firstParam(params.displayFiat);
+  // Split-flow flag: when "true", we MUST scan the vendor's fresh QR after the
+  // merchant accepts and post the payment address via /order-set-payment-address.
+  // Set by pay-ars.tsx; absent in the legacy single-shot flow from qr-payment-confirm.
+  const awaitingQrScan = firstParam(params.awaitingQrScan) === "true";
 
   const [status, setStatus] = useState<string>(initialStatus);
   const [pollError, setPollError] = useState<string>("");
   const [isInitialLoad, setIsInitialLoad] = useState(true);
+  // Tracks whether we've already submitted the freshly-scanned QR to the
+  // backend — prevents double submission while the merchant is processing.
+  const [paymentAddressSubmitted, setPaymentAddressSubmitted] = useState(false);
+  const [qrScanError, setQrScanError] = useState<string>("");
+  const [isSubmittingQr, setIsSubmittingQr] = useState(false);
+  // Guards against the camera barcode callback firing repeatedly while a
+  // submission is in flight.
+  const qrSubmissionInProgressRef = useRef(false);
+
+  const [cameraPermission, requestCameraPermission] = useCameraPermissions();
+
   // Keep the last successful response around so the UI doesn't blank out
   // on a transient poll failure.
   const lastResponseRef = useRef<P2POrderStatusResponse | null>(null);
@@ -149,6 +170,60 @@ export default function OrderTrackingScreen() {
   const isDisputed = status.toLowerCase() === "disputed";
   const copy = copyForStep(currentStepKey, currency);
 
+  // We're in the "scan the vendor's QR" sub-state when:
+  //   - the order started with no paymentAddress (awaitingQrScan param);
+  //   - a merchant has accepted on-chain (status === "accepted");
+  //   - we haven't successfully submitted the scanned address yet.
+  // While this is true the screen shows a camera viewfinder instead of the
+  // normal hero. After successful submit we stop showing it and resume the
+  // normal polling/timeline UI.
+  const isScanQrSubState =
+    awaitingQrScan && status === "accepted" && !paymentAddressSubmitted;
+
+  // Auto-request camera permission as soon as we enter the scan sub-state.
+  useEffect(() => {
+    if (!isScanQrSubState || !cameraPermission) return;
+    if (!cameraPermission.granted && cameraPermission.canAskAgain) {
+      void requestCameraPermission();
+    }
+  }, [isScanQrSubState, cameraPermission, requestCameraPermission]);
+
+  const handleQrScanned = useCallback(
+    async (qrRaw: string) => {
+      if (qrSubmissionInProgressRef.current || !orderId) return;
+      qrSubmissionInProgressRef.current = true;
+
+      setIsSubmittingQr(true);
+      setQrScanError("");
+
+      try {
+        const parsed = parseQrScanData(qrRaw);
+        if (parsed.kind !== "arsMercadoPago") {
+          throw new Error(
+            parsed.kind === "unknown"
+              ? "QR is not a supported ARS payment QR. Try again."
+              : `Unexpected QR type: ${parsed.kind}`,
+          );
+        }
+        if (!parsed.paymentAddress) {
+          throw new Error("Could not extract payment address from QR.");
+        }
+
+        await setP2POrderPaymentAddress(orderId, parsed.paymentAddress);
+        setPaymentAddressSubmitted(true);
+      } catch (error) {
+        const message =
+          error instanceof Error ? error.message : "Unknown error submitting QR.";
+        setQrScanError(message);
+        // Allow another attempt — clear the in-progress guard.
+        qrSubmissionInProgressRef.current = false;
+      } finally {
+        setIsSubmittingQr(false);
+      }
+    },
+    [orderId],
+  );
+
   const headerLabel = orderId ? `Order #${orderId}` : "Order";
   const statusLabel = status.charAt(0).toUpperCase() + status.slice(1);
 
@@ -187,50 +262,128 @@ export default function OrderTrackingScreen() {
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
       >
-        {/* Hero state */}
-        <View style={styles.hero}>
-          {!isTerminal && !isCancelled && !isDisputed ? (
-            <ActivityIndicator
-              size="large"
-              color={palette.primary}
-              style={styles.heroIndicator}
-            />
-          ) : (
-            <View
-              style={[
-                styles.heroIconCircle,
-                {
-                  backgroundColor: isCancelled || isDisputed
-                    ? "#FEE2E2"
-                    : "#DCFCE7",
-                },
-              ]}
-            >
-              <MaterialIcons
-                name={
-                  isCancelled || isDisputed ? "error-outline" : "check-circle"
-                }
-                size={48}
-                color={isCancelled || isDisputed ? "#B91C1C" : "#15803D"}
-              />
-            </View>
-          )}
+        {isScanQrSubState ? (
+          /* Scan QR sub-state: merchant has accepted and we still need the
+             vendor's payment address. Camera viewfinder takes over the hero
+             until the user scans a valid ARS QR and the address submission
+             succeeds. */
+          <View style={styles.scanSection}>
+            <Text style={[styles.heroTitle, { color: palette.primaryText }]}>
+              Scan the vendor&apos;s QR now
+            </Text>
+            <Text style={[styles.heroSubtitle, { color: palette.secondaryText }]}>
+              Ask the vendor to generate a fresh QR — dynamic QRs expire fast.
+            </Text>
 
-          <Text style={[styles.heroTitle, { color: palette.primaryText }]}>
-            {isCancelled
-              ? "Order cancelled"
-              : isDisputed
-                ? "Order in dispute"
-                : copy.title}
-          </Text>
-          <Text style={[styles.heroSubtitle, { color: palette.secondaryText }]}>
-            {isCancelled
-              ? "This order was cancelled. The relayer's USDC was released."
-              : isDisputed
-                ? "Contact support. Funds are held until resolved."
-                : copy.subtitle}
-          </Text>
-        </View>
+            <View style={[styles.cameraFrame, { borderColor: palette.borderSubtle }]}>
+              {cameraPermission?.granted ? (
+                <CameraView
+                  style={styles.camera}
+                  facing="back"
+                  barcodeScannerSettings={{ barcodeTypes: ["qr"] }}
+                  onBarcodeScanned={
+                    isSubmittingQr || paymentAddressSubmitted
+                      ? undefined
+                      : (result) => {
+                          if (result?.data) {
+                            void handleQrScanned(String(result.data));
+                          }
+                        }
+                  }
+                />
+              ) : (
+                <View
+                  style={[
+                    styles.cameraPlaceholder,
+                    { backgroundColor: palette.surfaceMuted },
+                  ]}
+                >
+                  <MaterialIcons
+                    name="no-photography"
+                    size={48}
+                    color={palette.secondaryText}
+                  />
+                  <Text style={[styles.cameraPlaceholderText, { color: palette.secondaryText }]}>
+                    {cameraPermission?.canAskAgain === false
+                      ? "Camera permission denied. Enable it in Settings."
+                      : "Camera permission required"}
+                  </Text>
+                  {cameraPermission?.canAskAgain !== false ? (
+                    <TouchableOpacity
+                      onPress={() => void requestCameraPermission()}
+                      style={[styles.permissionButton, { backgroundColor: palette.actionPrimary }]}
+                    >
+                      <Text style={[styles.permissionButtonText, { color: palette.actionPrimaryText }]}>
+                        Grant camera access
+                      </Text>
+                    </TouchableOpacity>
+                  ) : null}
+                </View>
+              )}
+            </View>
+
+            {isSubmittingQr ? (
+              <View style={styles.scanStatusRow}>
+                <ActivityIndicator size="small" color={palette.primary} />
+                <Text style={[styles.scanStatusText, { color: palette.secondaryText }]}>
+                  Submitting payment address...
+                </Text>
+              </View>
+            ) : qrScanError ? (
+              <View style={[styles.errorBanner, { borderColor: "#FCA5A5" }]}>
+                <MaterialIcons name="error-outline" size={16} color="#991B1B" />
+                <Text style={styles.errorBannerText} numberOfLines={3}>
+                  {qrScanError}
+                </Text>
+              </View>
+            ) : null}
+          </View>
+        ) : (
+          /* Normal hero: spinner while in-flight, check/error on terminal */
+          <View style={styles.hero}>
+            {!isTerminal && !isCancelled && !isDisputed ? (
+              <ActivityIndicator
+                size="large"
+                color={palette.primary}
+                style={styles.heroIndicator}
+              />
+            ) : (
+              <View
+                style={[
+                  styles.heroIconCircle,
+                  {
+                    backgroundColor: isCancelled || isDisputed
+                      ? "#FEE2E2"
+                      : "#DCFCE7",
+                  },
+                ]}
+              >
+                <MaterialIcons
+                  name={
+                    isCancelled || isDisputed ? "error-outline" : "check-circle"
+                  }
+                  size={48}
+                  color={isCancelled || isDisputed ? "#B91C1C" : "#15803D"}
+                />
+              </View>
+            )}
+
+            <Text style={[styles.heroTitle, { color: palette.primaryText }]}>
+              {isCancelled
+                ? "Order cancelled"
+                : isDisputed
+                  ? "Order in dispute"
+                  : copy.title}
+            </Text>
+            <Text style={[styles.heroSubtitle, { color: palette.secondaryText }]}>
+              {isCancelled
+                ? "This order was cancelled. The relayer's USDC was released."
+                : isDisputed
+                  ? "Contact support. Funds are held until resolved."
+                  : copy.subtitle}
+            </Text>
+          </View>
+        )}
 
         {/* Timeline */}
         <View style={styles.timeline}>
@@ -377,6 +530,47 @@ const styles = StyleSheet.create({
     alignItems: "center",
     paddingVertical: 32,
   },
+  scanSection: {
+    alignItems: "center",
+    paddingTop: 20,
+    paddingBottom: 12,
+    gap: 12,
+  },
+  cameraFrame: {
+    width: "100%",
+    aspectRatio: 1,
+    borderRadius: 20,
+    borderWidth: 1,
+    overflow: "hidden",
+    marginTop: 4,
+  },
+  camera: { flex: 1 },
+  cameraPlaceholder: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 12,
+    padding: 24,
+  },
+  cameraPlaceholderText: {
+    fontSize: 13,
+    textAlign: "center",
+    lineHeight: 18,
+  },
+  permissionButton: {
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderRadius: 12,
+    marginTop: 8,
+  },
+  permissionButtonText: { fontSize: 14, fontWeight: "600" },
+  scanStatusRow: {
+    flexDirection: "row",
+    gap: 8,
+    alignItems: "center",
+    marginTop: 8,
+  },
+  scanStatusText: { fontSize: 13 },
   heroIndicator: { marginBottom: 24 },
   heroIconCircle: {
     width: 96,
