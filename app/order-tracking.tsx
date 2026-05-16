@@ -197,7 +197,7 @@ export default function OrderTrackingScreen() {
       setQrScanError("");
 
       try {
-        const parsed = parseQrScanData(qrRaw);
+        const parsed = await parseQrScanData(qrRaw);
         if (parsed.kind !== "arsMercadoPago") {
           throw new Error(
             parsed.kind === "unknown"
