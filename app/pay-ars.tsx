@@ -26,7 +26,13 @@ import { DEFAULT_ARS_RATE } from "@/utils/paymentConfirmation";
 // Minimum ARS amount under which we know merchants won't bother fulfilling.
 // Derived from observed mainnet behavior: PAY-ARS settlements live at $5+ USDC
 // equivalent. Below this, orders are accepted but never progress to "paid".
-const MIN_USDC_THRESHOLD = 5;
+// Minimum order size. p2p.me applies a flat 0.05 USDC fee on orders < 10 USDC,
+// which becomes a meaningful percentage as the order shrinks (10% at 0.5 USDC,
+// 5% at 1 USDC, 1% at 5 USDC). 0.5 is the lower bound where the fee is still
+// tolerable for retail use (cafés, snacks, micro-payments). Previously set to
+// 5 as a defensive guard against the old recipientAddr/EMV-QR settlement bugs
+// (now fixed — see PR #2). Anything > 0 is technically fulfillable on chain.
+const MIN_USDC_THRESHOLD = 0.5;
 
 function parsePositiveAmount(value: string): number {
   const parsed = Number(value.trim().replace(/,/g, ""));
@@ -179,8 +185,9 @@ export default function PayArsScreen() {
             <View style={[styles.warning, { borderColor: "#FCD34D" }]}>
               <MaterialIcons name="warning-amber" size={18} color="#92400E" />
               <Text style={styles.warningText}>
-                Orders under {MIN_USDC_THRESHOLD} USDC are rarely fulfilled by
-                merchants (uneconomic for them). Increase the amount.
+                Minimum order size is {MIN_USDC_THRESHOLD} USDC (a flat 0.05 USDC
+                fee applies under 10 USDC and gets disproportionate at very small
+                amounts). Increase the amount.
               </Text>
             </View>
           ) : null}
