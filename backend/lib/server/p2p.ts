@@ -9,6 +9,8 @@ import {
   formatUnits,
   http,
   isAddress,
+  parseAbiItem,
+  parseEventLogs,
   parseUnits,
   type Address,
   type Hex,
@@ -436,11 +438,13 @@ async function getP2PClients() {
   });
 
   // Helper: take an SDK .prepare() result and submit it via the smart
-  // account (sponsored gas). Returns the on-chain tx hash after receipt.
+  // account (sponsored gas). Returns the tx hash + the on-chain receipt
+  // so callers can parse event logs (e.g. extract `orderId` from
+  // OrderPlaced) without a subgraph round-trip.
   async function submitFromSmartAccount(prepared: {
     to: `0x${string}`;
     data: `0x${string}` | string;
-  }): Promise<Hex> {
+  }): Promise<{ hash: Hex; receipt: any }> {
     const tx = twPrepareTransaction({
       client: tw,
       chain: twChain,
@@ -449,12 +453,12 @@ async function getP2PClients() {
       value: 0n,
     });
     const sent = await twSendTransaction({ account: smartAccount, transaction: tx });
-    await twWaitForReceipt({
+    const receipt = await twWaitForReceipt({
       client: tw,
       chain: twChain,
       transactionHash: sent.transactionHash,
     });
-    return sent.transactionHash as Hex;
+    return { hash: sent.transactionHash as Hex, receipt };
   }
 
   return {
@@ -675,63 +679,55 @@ export async function handleCreateP2PArsOrder(body: unknown) {
       "orders.approveUsdc.prepare",
       await orders.approveUsdc.prepare({ amount: MAX })
     );
-    approvalTxHash = await submitFromSmartAccount(approvalPrep);
+    const { hash } = await submitFromSmartAccount(approvalPrep);
+    approvalTxHash = hash;
   }
 
   const placePrep = ensureSdkOk<{ to: Address; data: Hex | string }>(
     "orders.placeOrder.prepare",
     await orders.placeOrder.prepare({
-      // orderType 2 = PAY (user pays a third-party vendor in fiat, merchant
-      // fronts the payment to the vendor's mercadopago address and claims USDC
-      // from escrow afterward). orderType 1 = SELL is wrong for this use case:
-      // SELL semantics assume the merchant pays fiat TO the user, but here the
-      // user is paying a vendor (third party). Merchants accept SELL orders
-      // from us but never progress because they see the payment address doesn't
-      // match the user — confirmed by p2p.me official order #389017 using PAY.
+      // orderType 2 = PAY. recipientAddr 0x0 for PAY (verified by 539487
+      // vs 535977/539449). user = smart account (merchants filter EOA
+      // placers; 20/20 recent completed PAY-ARS had smart-account buyers).
       orderType: 2,
       currency: "ARS",
-      // user MUST be the SMART ACCOUNT address. Merchants verify the buyer's
-      // smart account on-chain (filtering raw EOAs) — 100% of recent
-      // completed PAY-ARS orders had a smart-account buyer.
       user: smartAccount.address as `0x${string}`,
-      // recipientAddr MUST be the zero address for PAY. user-app-client's
-      // working order 539380 passes 0x000…0; passing account.address (which
-      // we used to do) causes the merchant to pay ARS but then cancel the
-      // order at settlement because the on-chain liquidation routes USDC to
-      // the wrong target. Verified by `scripts/compare-orders.ts` —
-      // 539380.recipient == 0x0 (completed), 535977.recipient == account
-      // (cancelled, actualUsdcAmount == 0).
       recipientAddr: "0x0000000000000000000000000000000000000000",
       amount: usdcAmount,
       fiatAmount,
       fiatAmountLimit,
     })
   );
-  const placeOrderTxHash = await submitFromSmartAccount(placePrep);
+  const { hash: placeOrderTxHash, receipt: placeReceipt } =
+    await submitFromSmartAccount(placePrep);
 
-  // Look up the new orderId via the subgraph (the SDK's `.prepare()` path
-  // doesn't return orderId metadata — that came from `.execute()`).
+  // Extract orderId from the OrderPlaced event in the tx receipt.
+  // SDK 1.1.6's `.prepare()` path doesn't return orderId metadata (only
+  // `.execute()` did via its internal `enrichWithOrderId` helper). Parse
+  // the event ourselves — instant, no subgraph polling needed.
   let orderId: bigint | null = null;
-  for (let i = 0; i < 12; i++) {
-    await new Promise((r) => setTimeout(r, 5000));
-    const recent = await orders.getOrders({
-      user: smartAccount.address as `0x${string}`,
-      limit: 5,
+  try {
+    const parsed = parseEventLogs({
+      abi: [
+        parseAbiItem(
+          "event OrderPlaced(uint256 indexed orderId, address indexed user, address indexed merchant, uint256 amount, uint8 orderType, uint256 placedTimestamp)"
+        ),
+      ],
+      logs: (placeReceipt?.logs ?? []) as any,
+      eventName: "OrderPlaced",
     });
-    if (recent && typeof recent.isOk === "function" && recent.isOk()) {
-      const list = recent.value as Order[];
-      const newestFirst = [...list].sort((a, b) => Number(b.orderId - a.orderId));
-      const latest = newestFirst[0];
-      if (
-        latest &&
-        Number(latest.placedAt) >= Math.floor(Date.now() / 1000) - 180
-      ) {
-        orderId = latest.orderId;
-        break;
-      }
+    const smartLower = String(smartAccount.address).toLowerCase();
+    const mine = parsed.find(
+      (e: any) => String(e.args?.user ?? "").toLowerCase() === smartLower
+    );
+    const chosen = mine ?? parsed[0];
+    if (chosen && chosen.args?.orderId !== undefined) {
+      orderId = chosen.args.orderId as bigint;
     }
+  } catch (e) {
+    // Best-effort; fall through, mobile can also poll order-status by
+    // user address if it has to.
   }
-  // Place a `Hex`-typed alias so downstream code keeps compiling.
   const placeOrderResult = {
     hash: placeOrderTxHash as Hex,
     meta: { orderId: orderId ?? undefined },
@@ -768,7 +764,8 @@ export async function handleCreateP2PArsOrder(body: unknown) {
             updatedAmount: 0n,
           })
         );
-        setPaymentAddressTxHash = await submitFromSmartAccount(setPrep);
+        const { hash: setHash } = await submitFromSmartAccount(setPrep);
+        setPaymentAddressTxHash = setHash;
         nextAction = "NONE";
       } else if (!paymentAddress) {
         // Split flow — user will scan the vendor QR AFTER merchant accepts and
@@ -887,7 +884,7 @@ export async function handleSetP2POrderPaymentAddress(body: unknown) {
       updatedAmount: 0n,
     })
   );
-  const txHash = await submitFromSmartAccount(setPrep);
+  const { hash: txHash } = await submitFromSmartAccount(setPrep);
 
   return {
     ok: true,
