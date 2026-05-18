@@ -232,8 +232,18 @@ export default function ScannerScreen() {
               </TouchableOpacity>
             </View>
 
-            {/* Bottom Button */}
+            {/* Bottom Buttons */}
             <View style={styles.bottomRow}>
+              <TouchableOpacity
+                onPress={() => router.push("/pay-ars")}
+                activeOpacity={0.8}
+                style={{ marginBottom: 12 }}
+              >
+                <GlassView style={styles.myCodeButton} intensity={40} tint="dark">
+                  <IconSymbol name="banknote" size={20} color="#FFF" />
+                  <Text style={styles.myCodeText}>Pay with ARS</Text>
+                </GlassView>
+              </TouchableOpacity>
               <TouchableOpacity
                 onPress={handleOpenQrSheet}
                 activeOpacity={0.8}
