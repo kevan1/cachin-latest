@@ -6,7 +6,6 @@ import { createPrices } from "@p2pdotme/sdk/prices";
 import { createProfile } from "@p2pdotme/sdk/profile";
 import {
   createPublicClient,
-  createWalletClient,
   formatUnits,
   http,
   isAddress,
@@ -16,6 +15,27 @@ import {
 } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import { base, baseSepolia } from "viem/chains";
+import {
+  createThirdwebClient,
+  prepareTransaction as twPrepareTransaction,
+  sendTransaction as twSendTransaction,
+  waitForReceipt as twWaitForReceipt,
+} from "thirdweb";
+import { privateKeyToAccount as twPrivateKeyToAccount } from "thirdweb/wallets";
+import { smartWallet } from "thirdweb/wallets/smart";
+import {
+  base as twBaseChain,
+  baseSepolia as twBaseSepoliaChain,
+} from "thirdweb/chains";
+
+// Thirdweb client ID for routing 4337 userOps. Public — not a secret.
+const THIRDWEB_CLIENT_ID = "f2f21a26b756b3c3b759f794f3c3fe18";
+// p2p.me canonical Account Abstraction factory on Base mainnet — same one
+// user-app-client uses. Smart accounts derived from this factory are the
+// only buyers merchants actually fulfill PAY-ARS orders for (verified by
+// inspecting 20 recent completed orders, 100% smart-account-placed).
+const AA_FACTORY =
+  "0xde320c2e2b4953883f61774c006f9057a55b97d1" as `0x${string}`;
 
 const SIX_DECIMALS = 6;
 const SCALE_6 = 1_000_000n;
@@ -340,7 +360,25 @@ function formatAmount6(value: bigint): string {
   return formatUnits(value, SIX_DECIMALS);
 }
 
-function getP2PClients() {
+// Cache the smart account across Vercel function invocations within the
+// same warm container. The 4337 handshake (factory CREATE2 + signer derive)
+// is ~1-2 seconds — caching skips that on hot paths.
+let cachedSmartAccount: Awaited<ReturnType<typeof connectSmartAccount>> | null = null;
+
+async function connectSmartAccount(privateKey: `0x${string}`, chainId: number) {
+  const tw = createThirdwebClient({ clientId: THIRDWEB_CLIENT_ID });
+  const twEoa = twPrivateKeyToAccount({ client: tw, privateKey });
+  const twChain = chainId === base.id ? twBaseChain : twBaseSepoliaChain;
+  const wallet = smartWallet({
+    chain: twChain,
+    factoryAddress: AA_FACTORY,
+    sponsorGas: true,
+  });
+  const account = await wallet.connect({ client: tw, personalAccount: twEoa });
+  return { tw, twChain, smartAccount: account };
+}
+
+async function getP2PClients() {
   const issues: EnvIssue[] = [];
   const rpcUrl = requireEnv(P2P_EVM_RPC_ENV_NAMES, issues);
   const diamondAddress = requireAddress(P2P_DIAMOND_ADDRESS_ENV_NAMES, issues);
@@ -366,7 +404,18 @@ function getP2PClients() {
   // Vercel may install a nested viem copy under @p2pdotme/sdk, which makes
   // structurally compatible clients fail TypeScript checks across package boundaries.
   const publicClient = createPublicClient({ chain, transport }) as any;
-  const walletClient = createWalletClient({ chain, transport, account }) as any;
+
+  // Connect (or re-use cached) thirdweb smart account. Placing orders from
+  // the smart account is REQUIRED — merchants reject orders placed by raw
+  // EOAs (verified by querying 20 recent completed PAY-ARS orders, all
+  // smart-account-placed with the same factory). Previously this backend
+  // signed txs with the EOA directly via viem walletClient, which produced
+  // orders that accept then auto-cancel with encMerchantUpi="" because the
+  // merchant doesn't trust the placer.
+  if (!cachedSmartAccount) {
+    cachedSmartAccount = await connectSmartAccount(relayerPrivateKey!, chain.id);
+  }
+  const { tw, twChain, smartAccount } = cachedSmartAccount;
 
   const orders = createOrders({
     publicClient,
@@ -386,13 +435,36 @@ function getP2PClients() {
     diamondAddress: diamondAddress!,
   });
 
+  // Helper: take an SDK .prepare() result and submit it via the smart
+  // account (sponsored gas). Returns the on-chain tx hash after receipt.
+  async function submitFromSmartAccount(prepared: {
+    to: `0x${string}`;
+    data: `0x${string}` | string;
+  }): Promise<Hex> {
+    const tx = twPrepareTransaction({
+      client: tw,
+      chain: twChain,
+      to: prepared.to,
+      data: prepared.data as `0x${string}`,
+      value: 0n,
+    });
+    const sent = await twSendTransaction({ account: smartAccount, transaction: tx });
+    await twWaitForReceipt({
+      client: tw,
+      chain: twChain,
+      transactionHash: sent.transactionHash,
+    });
+    return sent.transactionHash as Hex;
+  }
+
   return {
     chain,
     account,
+    smartAccount,
     orders,
     profile,
     prices,
-    walletClient,
+    submitFromSmartAccount,
   };
 }
 
@@ -541,7 +613,8 @@ export async function handleCreateP2PArsOrder(body: unknown) {
     }
   }
 
-  const { chain, account, orders, profile, prices, walletClient } = getP2PClients();
+  const { chain, account, smartAccount, orders, profile, prices, submitFromSmartAccount } =
+    await getP2PClients();
 
   const priceConfig = ensureSdkOk<{ sellPrice: bigint }>(
     "prices.getPriceConfig",
@@ -584,35 +657,30 @@ export async function handleCreateP2PArsOrder(body: unknown) {
         reason: "No solanaTxSignature was provided in this request.",
       };
 
+  // Check allowance from the SMART ACCOUNT (which is what places orders),
+  // not the EOA. Previously this checked the EOA's allowance — and even
+  // when the EOA had MAX allowance, the smart account didn't, so every
+  // placeOrder tried to pull USDC from an unapproved smart account.
   const allowance = ensureSdkOk<bigint>(
     "profile.getUsdcAllowance",
-    await profile.getUsdcAllowance({ owner: account.address })
+    await profile.getUsdcAllowance({ owner: smartAccount.address as Address })
   );
 
   let approvalTxHash: string | null = null;
   if (allowance < usdcAmount) {
-    const approvalResult = ensureSdkOk<{ hash: Hex }>(
-      "orders.approveUsdc.execute",
-      await orders.approveUsdc.execute({
-        walletClient,
-        waitForReceipt: true,
-        amount: usdcAmount,
-      })
+    // Approve MAX_UINT256 once — matches user-app-client pattern, avoids
+    // re-approving on every order.
+    const MAX = 2n ** 256n - 1n;
+    const approvalPrep = ensureSdkOk<{ to: Address; data: Hex | string }>(
+      "orders.approveUsdc.prepare",
+      await orders.approveUsdc.prepare({ amount: MAX })
     );
-    approvalTxHash = approvalResult.hash;
+    approvalTxHash = await submitFromSmartAccount(approvalPrep);
   }
 
-  const placeOrderResult = ensureSdkOk<{
-    hash: Hex;
-    meta?: {
-      orderId?: bigint;
-      circleId?: bigint;
-    };
-  }>(
-    "orders.placeOrder.execute",
-    await orders.placeOrder.execute({
-      walletClient,
-      waitForReceipt: true,
+  const placePrep = ensureSdkOk<{ to: Address; data: Hex | string }>(
+    "orders.placeOrder.prepare",
+    await orders.placeOrder.prepare({
       // orderType 2 = PAY (user pays a third-party vendor in fiat, merchant
       // fronts the payment to the vendor's mercadopago address and claims USDC
       // from escrow afterward). orderType 1 = SELL is wrong for this use case:
@@ -622,7 +690,10 @@ export async function handleCreateP2PArsOrder(body: unknown) {
       // match the user — confirmed by p2p.me official order #389017 using PAY.
       orderType: 2,
       currency: "ARS",
-      user: account.address,
+      // user MUST be the SMART ACCOUNT address. Merchants verify the buyer's
+      // smart account on-chain (filtering raw EOAs) — 100% of recent
+      // completed PAY-ARS orders had a smart-account buyer.
+      user: smartAccount.address as `0x${string}`,
       // recipientAddr MUST be the zero address for PAY. user-app-client's
       // working order 539380 passes 0x000…0; passing account.address (which
       // we used to do) causes the merchant to pay ARS but then cancel the
@@ -636,8 +707,35 @@ export async function handleCreateP2PArsOrder(body: unknown) {
       fiatAmountLimit,
     })
   );
+  const placeOrderTxHash = await submitFromSmartAccount(placePrep);
 
-  const orderId = placeOrderResult.meta?.orderId ?? null;
+  // Look up the new orderId via the subgraph (the SDK's `.prepare()` path
+  // doesn't return orderId metadata — that came from `.execute()`).
+  let orderId: bigint | null = null;
+  for (let i = 0; i < 12; i++) {
+    await new Promise((r) => setTimeout(r, 5000));
+    const recent = await orders.getOrders({
+      user: smartAccount.address as `0x${string}`,
+      limit: 5,
+    });
+    if (recent && typeof recent.isOk === "function" && recent.isOk()) {
+      const list = recent.value as Order[];
+      const newestFirst = [...list].sort((a, b) => Number(b.orderId - a.orderId));
+      const latest = newestFirst[0];
+      if (
+        latest &&
+        Number(latest.placedAt) >= Math.floor(Date.now() / 1000) - 180
+      ) {
+        orderId = latest.orderId;
+        break;
+      }
+    }
+  }
+  // Place a `Hex`-typed alias so downstream code keeps compiling.
+  const placeOrderResult = {
+    hash: placeOrderTxHash as Hex,
+    meta: { orderId: orderId ?? undefined },
+  };
 
   let orderStatus: string = "placed";
   let setPaymentAddressTxHash: string | null = null;
@@ -659,19 +757,18 @@ export async function handleCreateP2PArsOrder(body: unknown) {
         isMerchantPublicKeyReady(order.pubkey)
       ) {
         // Legacy single-shot path: caller provided paymentAddress upfront AND
-        // merchant has already accepted by the time we get here.
-        const setResult = ensureSdkOk<{ hash: Hex }>(
-          "orders.setSellOrderUpi.execute",
-          await orders.setSellOrderUpi.execute({
-            walletClient,
-            waitForReceipt: true,
+        // merchant has already accepted by the time we get here. Submit via
+        // the smart account (4337) — same identity that placed the order.
+        const setPrep = ensureSdkOk<{ to: Address; data: Hex | string }>(
+          "orders.setSellOrderUpi.prepare",
+          await orders.setSellOrderUpi.prepare({
             orderId,
             paymentAddress,
             merchantPublicKey: order.pubkey,
             updatedAmount: 0n,
           })
         );
-        setPaymentAddressTxHash = setResult.hash;
+        setPaymentAddressTxHash = await submitFromSmartAccount(setPrep);
         nextAction = "NONE";
       } else if (!paymentAddress) {
         // Split flow — user will scan the vendor QR AFTER merchant accepts and
@@ -736,7 +833,7 @@ export async function handleGetP2POrderStatus(body: unknown) {
   const payload = asRecord(body);
   const orderId = parseOrderId(payload.orderId);
 
-  const { orders } = getP2PClients();
+  const { orders } = await getP2PClients();
   const order = ensureSdkOk<Order>("orders.getOrder", await orders.getOrder({ orderId }));
 
   return {
@@ -761,7 +858,7 @@ export async function handleSetP2POrderPaymentAddress(body: unknown) {
     );
   }
 
-  const { orders, walletClient } = getP2PClients();
+  const { orders, submitFromSmartAccount } = await getP2PClients();
   const order = ensureSdkOk<Order>("orders.getOrder", await orders.getOrder({ orderId }));
 
   if (order.status !== "accepted") {
@@ -781,23 +878,22 @@ export async function handleSetP2POrderPaymentAddress(body: unknown) {
     );
   }
 
-  const tx = ensureSdkOk<{ hash: Hex }>(
-    "orders.setSellOrderUpi.execute",
-    await orders.setSellOrderUpi.execute({
-      walletClient,
-      waitForReceipt: true,
+  const setPrep = ensureSdkOk<{ to: Address; data: Hex | string }>(
+    "orders.setSellOrderUpi.prepare",
+    await orders.setSellOrderUpi.prepare({
       orderId,
       paymentAddress,
       merchantPublicKey: order.pubkey,
       updatedAmount: 0n,
     })
   );
+  const txHash = await submitFromSmartAccount(setPrep);
 
   return {
     ok: true,
     orderId: orderId.toString(),
     status: order.status,
-    txHash: tx.hash,
+    txHash,
   };
 }
 
