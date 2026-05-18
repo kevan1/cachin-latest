@@ -20,7 +20,13 @@ const normalizeExtraValue = (value: unknown) =>
 const googleMapsApiKey = normalizeEnvValue(
   process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY ?? process.env.GOOGLE_MAPS_API_KEY
 );
-const apiUrl = normalizeEnvValue(process.env.EXPO_PUBLIC_API_URL);
+// Fallback to prod URL when env var is missing at bundle time. Without this
+// fallback, an `eas update` invoked in a shell that doesn't export
+// EXPO_PUBLIC_API_URL ships a bundle with no API base, breaking every
+// fetch (`Missing EXPO_PUBLIC_API_URL` thrown at runtime). Env still wins
+// when present, so dev/staging overrides keep working.
+const apiUrl =
+  normalizeEnvValue(process.env.EXPO_PUBLIC_API_URL) ?? "https://api.cachin.app";
 const LOCATION_USAGE_DESCRIPTION =
   "Allow Cachin to use your location to show nearby shops on the map.";
 
