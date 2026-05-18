@@ -523,12 +523,22 @@ export async function handleCreateP2PArsOrder(body: unknown) {
   const sourceAmountUsdcRaw = ensureString(payload, "sourceAmountUsdc", { required: false });
   const fiatAmountLimitRaw = ensureString(payload, "fiatAmountLimit", { required: false });
 
-  if (paymentAddress && !validateArgentinePaymentId(paymentAddress)) {
-    throw new P2PApiError(
-      400,
-      "INVALID_PAYMENT_ADDRESS",
-      "paymentAddress must be a valid Alias or CBU/CVU for Argentina."
-    );
+  if (paymentAddress) {
+    // The SDK's validateArgentinePaymentId only accepts alias/CBU/CVU plaintext.
+    // But the p2p.me protocol REQUIRES the full EMV QR string here — verified
+    // by comparing on-chain order 539487 (worked end-to-end, completed in 50s
+    // with full EMV QR) vs our older orders 539401/539417/539449 (cancelled,
+    // used CVU/alias plaintext, merchant could never decrypt the encUpi and
+    // never delivered fiat). user-app-client/src/pages/order/pay/accepted.tsx
+    // also passes the raw qrString, not the parsed alias.
+    const looksLikeEmvQr = /^0002\d{2}/.test(paymentAddress);
+    if (!looksLikeEmvQr && !validateArgentinePaymentId(paymentAddress)) {
+      throw new P2PApiError(
+        400,
+        "INVALID_PAYMENT_ADDRESS",
+        "paymentAddress must be a valid EMV QR string (preferred) or Alias/CBU/CVU."
+      );
+    }
   }
 
   const { chain, account, orders, profile, prices, walletClient } = getP2PClients();
@@ -613,7 +623,14 @@ export async function handleCreateP2PArsOrder(body: unknown) {
       orderType: 2,
       currency: "ARS",
       user: account.address,
-      recipientAddr: account.address,
+      // recipientAddr MUST be the zero address for PAY. user-app-client's
+      // working order 539380 passes 0x000…0; passing account.address (which
+      // we used to do) causes the merchant to pay ARS but then cancel the
+      // order at settlement because the on-chain liquidation routes USDC to
+      // the wrong target. Verified by `scripts/compare-orders.ts` —
+      // 539380.recipient == 0x0 (completed), 535977.recipient == account
+      // (cancelled, actualUsdcAmount == 0).
+      recipientAddr: "0x0000000000000000000000000000000000000000",
       amount: usdcAmount,
       fiatAmount,
       fiatAmountLimit,
@@ -733,11 +750,14 @@ export async function handleSetP2POrderPaymentAddress(body: unknown) {
   const orderId = parseOrderId(payload.orderId);
   const paymentAddress = ensureString(payload, "paymentAddress");
 
-  if (!validateArgentinePaymentId(paymentAddress)) {
+  // Accept EMV QR strings (the protocol requires this for merchant decryption
+  // to work; see comment above on /order-create endpoint).
+  const looksLikeEmvQr = /^0002\d{2}/.test(paymentAddress);
+  if (!looksLikeEmvQr && !validateArgentinePaymentId(paymentAddress)) {
     throw new P2PApiError(
       400,
       "INVALID_PAYMENT_ADDRESS",
-      "paymentAddress must be a valid Alias or CBU/CVU for Argentina."
+      "paymentAddress must be a valid EMV QR string (preferred) or Alias/CBU/CVU."
     );
   }
 

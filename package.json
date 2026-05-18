@@ -21,7 +21,7 @@
     "@gorhom/bottom-sheet": "^5.2.6",
     "@lodev09/react-native-true-sheet": "^3.6.7",
     "@lottiefiles/dotlottie-react": "^0.18.10",
-    "@p2pdotme/sdk": "^1.1.0",
+    "@p2pdotme/sdk": "1.1.6",
     "@privy-io/expo": "^0.58.6",
     "@privy-io/expo-native-extensions": "^0.0.5",
     "@react-native-async-storage/async-storage": "2.2.0",
@@ -108,9 +108,11 @@
   "devDependencies": {
     "@hpke/chacha20poly1305": "^1.7.1",
     "@hpke/core": "^1.7.5",
+    "@reclaimprotocol/js-sdk": "^5.4.0",
     "@types/react": "~19.2.10",
     "eslint": "^9.25.0",
     "eslint-config-expo": "~55.0.0",
+    "thirdweb": "^5.120.0",
     "typescript": "~5.9.2"
   },
   "expo": {

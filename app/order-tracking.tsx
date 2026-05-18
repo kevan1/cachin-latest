@@ -209,7 +209,13 @@ export default function OrderTrackingScreen() {
           throw new Error("Could not extract payment address from QR.");
         }
 
-        await setP2POrderPaymentAddress(orderId, parsed.paymentAddress);
+        // CRITICAL: pass the FULL EMV QR string (qrRaw), NOT the parsed alias.
+        // The p2p.me merchant decrypts the encUpi expecting full EMV format;
+        // passing just an alias/CVU makes the merchant fail to deliver fiat
+        // and the order auto-cancels. Verified by comparing on-chain order
+        // 539487 (worked, raw EMV) vs 539449 (cancelled, parsed alias).
+        // user-app-client/src/pages/order/pay/accepted.tsx does the same.
+        await setP2POrderPaymentAddress(orderId, qrRaw);
         setPaymentAddressSubmitted(true);
       } catch (error) {
         const message =
