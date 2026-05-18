@@ -263,19 +263,27 @@ export default function QrPaymentConfirmScreen() {
         method: methodParam || "mercadopago",
       });
 
-      const orderIdLabel = response.orderId ? `#${response.orderId}` : "pending id";
-      const nextStepMessage =
-        response.nextAction === "SET_PAYMENT_ADDRESS_WHEN_ACCEPTED"
-          ? "Payment details will be submitted once a merchant accepts the order."
-          : response.nextAction === "POLL_ORDER_STATUS"
-            ? "Order is created. Poll order status to continue settlement."
-            : "Order flow moved to next stage.";
-
-      Alert.alert(
-        "P2P order created",
-        `Order ${orderIdLabel} (${response.orderStatus}). ${nextStepMessage}`,
-        [{ text: "OK", onPress: () => router.push("/activity") }]
-      );
+      // Navigate to the live tracking screen. `router.replace` so the user
+      // can't swipe back into the confirm sheet — the order is already on
+      // chain. If somehow we got no orderId, fall back to the activity list.
+      if (response.orderId) {
+        router.replace({
+          pathname: "/order-tracking" as never,
+          params: {
+            orderId: response.orderId,
+            currency: requestCurrency,
+            initialStatus: response.orderStatus || "placed",
+            displayUsdc: response.resolvedAmounts?.usdc ?? "",
+            displayFiat: response.resolvedAmounts?.ars ?? "",
+          },
+        });
+      } else {
+        Alert.alert(
+          "P2P order created",
+          `Order created (${response.orderStatus}). Check Activity for status.`,
+          [{ text: "OK", onPress: () => router.push("/activity") }]
+        );
+      }
     } catch (error) {
       const message =
         error instanceof Error ? error.message : "Unknown error submitting QR payment.";
